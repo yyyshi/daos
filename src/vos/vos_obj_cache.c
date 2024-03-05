@@ -17,6 +17,8 @@
  *
  * Author: Vishwanath Venkatesan <vishwanath.venkatesan@intel.com>
  */
+// lru 缓存实现：
+// 基于lru 思想的 object index table 缓存
 #define D_LOGFAC	DD_FAC(vos)
 
 #include <stdint.h>
@@ -175,6 +177,7 @@ vos_obj_cache_destroy(struct daos_lru_cache *occ)
 	daos_lru_cache_destroy(occ);
 }
 
+// evict 条件
 static bool
 obj_cache_evict_cond(struct daos_llink *llink, void *args)
 {
@@ -296,6 +299,8 @@ cache_object(struct daos_lru_cache *occ, struct vos_object **objp)
 	return 0;
 }
 
+// 内部调用的是 vos_oi_find 和 vos_oi_find_alloc
+// 在 vos_fetch_begin 和 vos_update_end 里面会调用
 int
 vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	     daos_unit_oid_t oid, daos_epoch_range_t *epr, daos_epoch_t bound,

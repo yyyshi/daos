@@ -534,6 +534,7 @@ bypass_bulk_cache(struct bio_desc *biod, struct bio_iov *biov,
 		  unsigned int pg_cnt)
 {
 	/* Hole, no RDMA */
+	// todo: 打洞的那种场景吗？
 	if (bio_addr_is_hole(&biov->bi_addr))
 		return true;
 	/* Huge IOV, allocate DMA buffer & create bulk handle on-the-fly */
@@ -633,9 +634,12 @@ bulk_map_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 		goto done;
 	}
 
+	// biov 转化为page cnt 和page off。就是size 单元不同了
 	dma_biov2pg(biov, &off, &end, &pg_cnt, &pg_off);
 
+	// todo: 当前iov 占用的数据不是很大（或者是hole，或者是scm 设备）
 	if (bypass_bulk_cache(biod, biov, pg_cnt)) {
+		// dma_map_one 这里还会执行biov （biov 是从biod 中取出的）到pg 转化： dma_biov2pg
 		rc = dma_map_one(biod, biov, NULL);
 		goto done;
 	}

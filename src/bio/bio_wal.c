@@ -190,6 +190,7 @@ wal_used_blks(struct wal_super_info *si)
 	uint32_t	next_ckp_off, unused_off, next_ckp_seq, unused_seq;
 	uint32_t	tot_blks = si->si_header.wh_tot_blks;
 
+	// 根据当前si 信息（当前的checkpoint id & 当前id 用到的blks），获取下一个checkpoint 的id
 	next_ckp_id = wal_next_id(si, si->si_ckp_id, si->si_ckp_blks);
 
 	D_ASSERTF(wal_id_cmp(si, next_ckp_id, si->si_unused_id) <= 0,
@@ -197,6 +198,7 @@ wal_used_blks(struct wal_super_info *si)
 		  next_ckp_id, si->si_unused_id);
 
 	/* Everything is check-pointed & no pending transactions */
+	// 如果下一个检查点的id 在内存中还没被启用，认为没有东西需要保存
 	if (next_ckp_id == si->si_unused_id) {
 		D_ASSERT(si->si_ckp_id == si->si_commit_id);
 		return 0;
@@ -311,6 +313,7 @@ done:
 }
 
 struct wal_blks_desc {
+	// 当前事务的total blocks
 	unsigned int	bd_blks;	/* Total blocks for this transaction */
 	unsigned int	bd_payload_idx;	/* Start block index for payload */
 	unsigned int	bd_payload_off;	/* Offset within block for payload start */
@@ -1109,6 +1112,7 @@ write_header(struct bio_meta_context *mc, struct bio_io_context *ioc, void *hdr,
 	int		rc, csum_len;
 
 	csum_len = meta_csum_len(mc);
+	// 计算checksum
 	rc = meta_csum_calc(mc, hdr, hdr_sz - csum_len, csum, csum_len);
 	if (rc) {
 		D_ERROR("Calculate headr csum failed. "DF_RC"\n", DP_RC(rc));
@@ -1116,8 +1120,10 @@ write_header(struct bio_meta_context *mc, struct bio_io_context *ioc, void *hdr,
 	}
 
 	bio_addr_set(&addr, DAOS_MEDIA_NVME, 0);
+	// 格式转换 -- 将meta header写入到iov 结构
 	d_iov_set(&iov, hdr, hdr_sz);
 
+	// 将 iov 写入blob。底层封装的是 spdk_blob_io_write 接口
 	rc = bio_write(ioc, addr, &iov);
 	if (rc) {
 		D_ERROR("Failed to write header. "DF_RC"\n", DP_RC(rc));
@@ -1130,25 +1136,31 @@ write_header(struct bio_meta_context *mc, struct bio_io_context *ioc, void *hdr,
 int
 bio_wal_flush_header(struct bio_meta_context *mc)
 {
+	// super 信息是内存中的
 	struct wal_super_info	*si = &mc->mc_wal_info;
+	// 从super 中获取wal header
 	struct wal_header	*hdr = &si->si_header;
 
 	/* WAL header is up-to-date */
+	// 内存中的信息和wal blob 中信息比较，如果没diff，说明已经是最新的不需要更新
 	if (si->si_ckp_id == hdr->wh_ckp_id && si->si_ckp_blks == hdr->wh_ckp_blks &&
 	    si->si_commit_id == hdr->wh_commit_id && si->si_commit_blks == hdr->wh_commit_blks)
 		return 0;
 
+	// 如果需要更新，将最新数据写到wal header中
 	hdr->wh_ckp_id = si->si_ckp_id;
 	hdr->wh_ckp_blks = si->si_ckp_blks;
 	hdr->wh_commit_id = si->si_commit_id;
 	hdr->wh_commit_blks = si->si_commit_blks;
 
+	// todo: 就写一个header吗
 	return write_header(mc, mc->mc_wal, hdr, sizeof(*hdr), &hdr->wh_csum);
 }
 
 static int
 load_wal(struct bio_meta_context *mc, char *buf, unsigned int max_blks, uint64_t tx_id)
 {
+	// 这是内存中的信息
 	struct wal_super_info	*si = &mc->mc_wal_info;
 	unsigned int		 tot_blks = si->si_header.wh_tot_blks;
 	unsigned int		 blk_bytes = si->si_header.wh_blk_bytes;
@@ -1160,6 +1172,7 @@ load_wal(struct bio_meta_context *mc, char *buf, unsigned int max_blks, uint64_t
 	bio_addr_t		 addr = { 0 };
 	int			 iov_nr, rc;
 
+	// 设置iov（通过buf 和 size）
 	d_iov_set(&iov, buf, max_blks * blk_bytes);
 	sgl.sg_iovs = &iov;
 	sgl.sg_nr = 1;
@@ -1168,19 +1181,26 @@ load_wal(struct bio_meta_context *mc, char *buf, unsigned int max_blks, uint64_t
 	/* Read in 1MB sized IOVs */
 	nr_blks = (1UL << 20) / blk_bytes;
 	D_ASSERT(nr_blks > 0);
+	// == 0
 	iov_nr = (max_blks + nr_blks - 1) / nr_blks + 1;
 	rc = bio_sgl_init(&bsgl, iov_nr);
 	if (rc)
 		return rc;
 
+	// 根据txid 获取block offset
 	off = id2off(tx_id);
+	// max_blks == 1
 	while (max_blks > 0) {
+		// bs_nr_out == 0
 		biov = &bsgl.bs_iovs[bsgl.bs_nr_out];
 
+		// 设置地址
 		bio_addr_set(&addr, DAOS_MEDIA_NVME, off2lba(si, off));
+		// blks == 1
 		blks = min(max_blks, nr_blks);
 		if (off + blks > tot_blks)
 			blks = tot_blks - off;
+		// 设置 biov
 		bio_iov_set(biov, addr, (uint64_t)blks * blk_bytes);
 
 		bsgl.bs_nr_out++;
@@ -1193,6 +1213,7 @@ load_wal(struct bio_meta_context *mc, char *buf, unsigned int max_blks, uint64_t
 	/* Adjust the bs_nr for following bio_readv() */
 	bsgl.bs_nr = bsgl.bs_nr_out;
 
+	// bio_buff api，bsgl & sgl 都是出参。获取到了sgl，相当于获取到了iov，相当于获取到了buf
 	rc = bio_readv(mc->mc_wal, &bsgl, &sgl);
 	bio_sgl_fini(&bsgl);
 
@@ -1654,6 +1675,7 @@ unmap_wal(struct bio_meta_context *mc, uint64_t unmap_start, uint64_t unmap_end,
 	return 0;
 }
 
+// wal replay
 int
 bio_wal_replay(struct bio_meta_context *mc, struct bio_wal_rp_stats *wrs,
 	       int (*replay_cb)(uint64_t tx_id, struct umem_action *act, void *arg),
@@ -1808,6 +1830,13 @@ out:
 	return rc;
 }
 
+// 每次checkpoint flush wal 
+/*
+以btree为例，在存储引擎写入数据时，为了性能通常只将日志和数据节点写到磁盘，而treenode一直存储在内存中（内存不足时候也会写到磁盘）
+如果不使用checkpoint，那么treenode将不会被写入到磁盘，恢复时候需要读取所有的日志才能重新在内存中构建整棵树。通过周期性checkpoint
+将treenode接入到磁盘，这样在恢复数据时候，在某个checkpoint可以恢复一部分treeenode，再结合日志就可以很快恢复整棵树。
+这实际上是对数据恢复的一种存档的方法
+*/
 int
 bio_wal_checkpoint(struct bio_meta_context *mc, uint64_t tx_id, uint64_t *purged_blks)
 {
@@ -1827,12 +1856,14 @@ bio_wal_checkpoint(struct bio_meta_context *mc, uint64_t tx_id, uint64_t *purged
 		return -DER_NOMEM;
 
 	/* Load single WAL block to get the block nr used by the transaction */
+	// （flush 之前先）加载当前的wal 信息，通过txid 可以映射到wal 块
 	rc = load_wal(mc, buf, 1, tx_id);
 	if (rc) {
 		D_ERROR("Failed to load WAL. "DF_RC"\n", DP_RC(rc));
 		goto out;
 	}
 
+	// buff 转换成 wal_trans_head
 	hdr = (struct wal_trans_head *)buf;
 	rc = verify_tx_hdr(si, hdr, tx_id);
 	if (rc) {
@@ -1840,21 +1871,26 @@ bio_wal_checkpoint(struct bio_meta_context *mc, uint64_t tx_id, uint64_t *purged
 		goto out;
 	}
 
+	// 计算事务关联的块（hdr 是根据txid 获取的）
+	// todo: 具体
 	calc_trans_blks(hdr->th_tot_ents, hdr->th_tot_payload, blk_sz, &blk_desc);
 
 	unmap_start = id2off(wal_next_id(si, si->si_ckp_id, si->si_ckp_blks));
 	unmap_end = id2off(wal_next_id(si, tx_id, blk_desc.bd_blks));
 
 	/* Unmap the checkpointed regions */
+	// 取消wal 映射
 	rc = unmap_wal(mc, unmap_start, unmap_end, purged_blks);
 	if (rc)	/* Flush the WAL header anyway */
 		D_ERROR("Unmap checkpointed region failed. "DF_RC"\n", DP_RC(rc));
 
+	// 先更新内存中的信息
 	si->si_ckp_id = tx_id;
 	si->si_ckp_blks = blk_desc.bd_blks;
 	wakeup_reserve_waiters(si, false);
 
 	/* Flush the WAL header */
+	// flush wal header
 	rc = bio_wal_flush_header(mc);
 	if (rc)
 		D_ERROR("Flush WAL header failed. "DF_RC"\n", DP_RC(rc));
@@ -1875,6 +1911,7 @@ bio_meta_get_attr(struct bio_meta_context *mc, uint64_t *capacity, uint32_t *blk
 	}
 }
 
+// close 之前flush wal
 void
 wal_close(struct bio_meta_context *mc)
 {
@@ -1901,6 +1938,7 @@ wal_close(struct bio_meta_context *mc)
 	ABT_cond_free(&si->si_rsrv_wq);
 }
 
+// MD-on-SSD
 int
 wal_open(struct bio_meta_context *mc)
 {
@@ -2058,6 +2096,7 @@ meta_format(struct bio_meta_context *mc, struct meta_fmt_info *fi, bool force)
 		}
 	}
 
+	// 使用fi 填充meta header 结构
 	memset(meta_hdr, 0, sizeof(*meta_hdr));
 	meta_hdr->mh_magic = BIO_META_MAGIC;
 	meta_hdr->mh_version = BIO_META_VERSION;
@@ -2073,12 +2112,14 @@ meta_format(struct bio_meta_context *mc, struct meta_fmt_info *fi, bool force)
 	meta_hdr->mh_vos_id = fi->fi_vos_id;
 	meta_hdr->mh_flags = META_HDR_FL_EMPTY;
 
+	// 写meta header 到meta 的blob 中
 	rc = write_header(mc, mc->mc_meta, meta_hdr, sizeof(*meta_hdr), &meta_hdr->mh_csum);
 	if (rc) {
 		D_ERROR("Write meta header failed. "DF_RC"\n", DP_RC(rc));
 		goto out;
 	}
 
+	// wal 也有自己的header
 	memset(wal_hdr, 0, sizeof(*wal_hdr));
 	wal_hdr->wh_magic = BIO_WAL_MAGIC;
 	wal_hdr->wh_version = BIO_WAL_VERSION;
@@ -2087,6 +2128,7 @@ meta_format(struct bio_meta_context *mc, struct meta_fmt_info *fi, bool force)
 	wal_hdr->wh_flags = 0;	/* Don't skip csum tail by default */
 	wal_hdr->wh_tot_blks = (fi->fi_wal_size / WAL_BLK_SZ) - WAL_HDR_BLKS;
 
+	// 写wal 的header 到blob
 	rc = write_header(mc, mc->mc_wal, wal_hdr, sizeof(*wal_hdr), &wal_hdr->wh_csum);
 	if (rc) {
 		D_ERROR("Write WAL header failed. "DF_RC"\n", DP_RC(rc));

@@ -65,6 +65,7 @@ func nvmeBdevsFromCfg(cfg *config.Server) *storage.BdevDeviceList {
 	}
 
 	// Combine engine bdev_lists to create total device list.
+	// todo: MD-on-SSD 这里是按照各种角色合并nvme 吗？
 	var bdevCfgs storage.TierConfigs
 	for _, ec := range cfg.Engines {
 		bdevCfgs = append(bdevCfgs, ec.Storage.Tiers.BdevConfigs()...)

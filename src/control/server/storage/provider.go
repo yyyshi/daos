@@ -66,6 +66,8 @@ func (p *Provider) FormatControlMetadata(engineIdxs []uint) error {
 		return nil
 	}
 
+	// 配制文件中的control metadata参数
+	// 格式化最终就是把device 挂载到这个path
 	req := MetadataFormatRequest{
 		RootPath:   p.engineStorage.ControlMetadata.Path,
 		Device:     p.engineStorage.ControlMetadata.DevicePath,
@@ -74,6 +76,7 @@ func (p *Provider) FormatControlMetadata(engineIdxs []uint) error {
 		OwnerGID:   os.Getegid(),
 		EngineIdxs: engineIdxs,
 	}
+	// 调用metadata 存储provider 的格式化
 	p.log.Debugf("calling metadata storage provider format: %+v", req)
 	return p.metadata.Format(req)
 }
@@ -130,6 +133,7 @@ func (p *Provider) GetControlMetadata() *ControlMetadata {
 	return &p.engineStorage.ControlMetadata
 }
 
+// MD-on-SSD
 func (p *Provider) scmMetadataPath() string {
 	cfg, err := p.GetScmConfig()
 	if err != nil {
@@ -227,6 +231,7 @@ func (p *Provider) GetScmConfig() (*TierConfig, error) {
 }
 
 // GetScmUsage returns space utilization info for a mount point.
+// MD-on-SSD
 func (p *Provider) GetScmUsage() (*ScmMountPoint, error) {
 	cfg, err := p.GetScmConfig()
 	if err != nil {
@@ -248,6 +253,7 @@ func (p *Provider) GetScmUsage() (*ScmMountPoint, error) {
 }
 
 // ScmIsMounted returns true if SCM is mounted.
+// MD-on-SSD
 func (p *Provider) ScmIsMounted() (bool, error) {
 	cfg, err := p.GetScmConfig()
 	if err != nil {
@@ -257,6 +263,7 @@ func (p *Provider) ScmIsMounted() (bool, error) {
 }
 
 // MountScm mounts SCM based on provider config.
+// MD-on-SSD
 func (p *Provider) MountScm() error {
 	cfg, err := p.GetScmConfig()
 	if err != nil {
@@ -322,7 +329,9 @@ func (p *Provider) UnmountTmpfs() error {
 	return nil
 }
 
+// MD-on-SSD
 func createScmFormatRequest(class Class, scmCfg ScmConfig, force bool) (*ScmFormatRequest, error) {
+	// 挂载点是共同的，ram 和dcpm 都需要配置scm_mount 参数
 	req := ScmFormatRequest{
 		Mountpoint: scmCfg.MountPoint,
 		Force:      force,
@@ -332,15 +341,18 @@ func createScmFormatRequest(class Class, scmCfg ScmConfig, force bool) (*ScmForm
 
 	switch class {
 	case ClassRam:
+		// todo: 如果class 是ram 设置 size，numa idx ？ 禁用hugepage ？
 		req.Ramdisk = &RamdiskParams{
 			Size:             scmCfg.RamdiskSize,
 			NUMANode:         scmCfg.NumaNodeIndex,
 			DisableHugepages: scmCfg.DisableHugepages,
 		}
+		// 如果是 dcpm
 	case ClassDcpm:
 		if len(scmCfg.DeviceList) != 1 {
 			return nil, ErrInvalidDcpmCount
 		}
+		// 设置scm list
 		req.Dcpm = &DeviceParams{
 			Device: scmCfg.DeviceList[0],
 		}
@@ -352,6 +364,7 @@ func createScmFormatRequest(class Class, scmCfg ScmConfig, force bool) (*ScmForm
 }
 
 // ScmNeedsFormat returns true if SCM is found to require formatting.
+// MD-on-SSD
 func (p *Provider) ScmNeedsFormat() (bool, error) {
 	cfg, err := p.GetScmConfig()
 	if err != nil {
@@ -376,6 +389,7 @@ func (p *Provider) ScmNeedsFormat() (bool, error) {
 }
 
 // FormatScm formats SCM based on provider config and force flag.
+// MD-on-SSD
 func (p *Provider) FormatScm(force bool) error {
 	cfg, err := p.GetScmConfig()
 	if err != nil {
@@ -389,6 +403,7 @@ func (p *Provider) FormatScm(force bool) error {
 
 	scmStr := fmt.Sprintf("SCM (%s:%s)", cfg.Class, cfg.Scm.MountPoint)
 	p.log.Infof("Instance %d: starting format of %s", p.engineIndex, scmStr)
+	// scm format
 	res, err := p.scm.Format(*req)
 	if err == nil && !res.Formatted {
 		err = errors.Errorf("%s is still unformatted", cfg.Scm.MountPoint)

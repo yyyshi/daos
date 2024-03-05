@@ -123,6 +123,7 @@ pl_obj_place(struct pl_map *map, uint16_t layout_gl_version, struct daos_obj_md 
 	D_ASSERT(map->pl_ops != NULL);
 	D_ASSERT(map->pl_ops->o_obj_place != NULL);
 	D_ASSERT(layout_gl_version < MAX_OBJ_LAYOUT_VERSION);
+	// == jump_map_obj_place
 	return map->pl_ops->o_obj_place(map, layout_gl_version, md, mode, shard_md, layout_pp);
 }
 
@@ -254,12 +255,18 @@ pl_obj_layout_alloc(unsigned int grp_size, unsigned int grp_nr,
 		struct pl_obj_layout **layout_pp)
 {
 	struct pl_obj_layout *layout;
+	// shard 个数和grp 个数，以及grp size 的关系
+	// sx 场景grp size == 1。函数：daos_oclass_grp_size
+	// grp nr 与容错域target 个数和 grp size 有关。详情搜代码：root->do_target_nr / jmop->jmop_grp_size
 	unsigned int shard_nr = grp_size * grp_nr;
 
 	D_ALLOC_PTR(layout);
 	if (layout == NULL)
 		return -DER_NOMEM;
 
+	// 如果是sx 场景，那么shard nr == 容错域的targets 个数
+	// grp size == 1
+	// grp nr == targets 个数（容错域下的targets / grp size(1)）
 	layout->ol_nr = shard_nr;
 	layout->ol_grp_nr = grp_nr;
 	layout->ol_grp_size = grp_size;

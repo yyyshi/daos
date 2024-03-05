@@ -439,6 +439,7 @@ struct bio_desc {
 	struct umem_instance	*bd_umem;
 	struct bio_io_context	*bd_ctxt;
 	/* DMA buffers reserved by this io descriptor */
+	// 当前biod 拥有的dma buffers，又会按照region 来拆分
 	struct bio_rsrvd_dma	 bd_rsrvd;
 	/* Report blob i/o completion */
 	ABT_eventual		 bd_dma_done;
@@ -595,14 +596,17 @@ static inline void
 dma_biov2pg(struct bio_iov *biov, uint64_t *off, uint64_t *end,
 	    unsigned int *pg_cnt, unsigned int *pg_off)
 {
+	// biov 的头尾。中间包含的是当前biov 这些数据
 	*off = bio_iov2raw_off(biov);
 	*end = bio_iov2raw_off(biov) + bio_iov2raw_len(biov);
 
+	// 不同设备的转换方式不同
 	if (bio_iov2media(biov) == DAOS_MEDIA_SCM) {
 		*pg_cnt = (*end - *off + BIO_DMA_PAGE_SZ - 1) >>
 				BIO_DMA_PAGE_SHIFT;
 		*pg_off = 0;
 	} else {
+		// 转换成page cnt 和page off
 		*pg_cnt = ((*end + BIO_DMA_PAGE_SZ - 1) >> BIO_DMA_PAGE_SHIFT) -
 				(*off >> BIO_DMA_PAGE_SHIFT);
 		*pg_off = *off & ((uint64_t)BIO_DMA_PAGE_SZ - 1);

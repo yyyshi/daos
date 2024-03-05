@@ -161,7 +161,9 @@ struct umem_slab_desc {
 };
 
 struct umem_pool {
+	// umem pool 本 pool，pmdk api 返回的
 	void			*up_priv;
+	// umem pool 的 umem store
 	struct umem_store	 up_store;
 	/** Slabs of the umem pool */
 	struct umem_slab_desc	 up_slabs[0];

@@ -761,6 +761,7 @@ func (c *ControlService) StorageFormat(ctx context.Context, req *ctlpb.StorageFo
 		return resp, nil
 	}
 
+	// 格式化control metadata
 	mdFormatted, err := c.formatMetadata(instances, req.Reformat)
 	if err != nil {
 		return nil, err
@@ -772,6 +773,8 @@ func (c *ControlService) StorageFormat(ctx context.Context, req *ctlpb.StorageFo
 		instances:  instances,
 		getMemInfo: c.getMemInfo,
 	}
+
+	// 格式化scm
 	instanceErrors, instanceSkips, err := formatScm(ctx, fsr, resp)
 	if err != nil {
 		return nil, err
@@ -784,6 +787,7 @@ func (c *ControlService) StorageFormat(ctx context.Context, req *ctlpb.StorageFo
 		skipped:     instanceSkips,
 		mdFormatted: mdFormatted,
 	}
+	// 格式化nvme
 	formatNvme(ctx, fnr, resp)
 
 	// Notify storage ready for instances formatted without error.

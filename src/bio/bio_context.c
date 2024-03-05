@@ -608,6 +608,7 @@ __bio_ioctxt_open(struct bio_io_context **pctxt, struct bio_xs_context *xs_ctxt,
 	}
 
 	ctxt->bic_xs_blobstore = bxb;
+	// 打开创建好的blob，后面的resize 读写blob 等操作都需要先open
 	rc = bio_blob_open(ctxt, false, flags, st, open_blobid);
 	if (rc) {
 		D_FREE(ctxt);
@@ -627,6 +628,7 @@ __bio_ioctxt_open(struct bio_io_context **pctxt, struct bio_xs_context *xs_ctxt,
  * - Checkpointing interval is 5 seconds, and the WAL should have at least
  *   half free space before next checkpoint;
  */
+// todo: wal_size 设置原则
 uint64_t
 default_wal_sz(uint64_t meta_sz)
 {
@@ -646,13 +648,16 @@ int bio_mc_create(struct bio_xs_context *xs_ctxt, uuid_t pool_id, uint64_t meta_
 	spdk_blob_id		 data_blobid = SPDK_BLOBID_INVALID;
 	spdk_blob_id		 wal_blobid = SPDK_BLOBID_INVALID;
 	spdk_blob_id		 meta_blobid = SPDK_BLOBID_INVALID;
+	// mc 里面存储三种（data/meta/wal）设备的bio ctx 信息
 	struct bio_meta_context *mc = NULL;
 	struct meta_fmt_info	*fi = NULL;
+	// 三种设备对应的bs 数组
 	struct bio_xs_blobstore *bxb;
 
 	D_ASSERT(xs_ctxt != NULL);
 	if (data_sz > 0 && bio_nvme_configured(SMD_DEV_TYPE_DATA)) {
 		D_ASSERT(!(flags & BIO_MC_FL_RDB));
+		// 创建data 的blob。一个池只创建最多三个blob 吗？data/meta/wal
 		rc = bio_blob_create(pool_id, xs_ctxt, data_sz, SMD_DEV_TYPE_DATA, flags,
 				     &data_blobid);
 		if (rc)
@@ -670,6 +675,8 @@ int bio_mc_create(struct bio_xs_context *xs_ctxt, uuid_t pool_id, uint64_t meta_
 		goto delete_data;
 	}
 
+	// todo: meta 也是保存在 blob 中吗？不是应该是从两种介质中选择吗？scm | nvme
+	// 创建meta 的blob
 	rc = bio_blob_create(pool_id, xs_ctxt, meta_sz, SMD_DEV_TYPE_META, flags, &meta_blobid);
 	if (rc)
 		goto delete_data;
@@ -680,9 +687,11 @@ int bio_mc_create(struct bio_xs_context *xs_ctxt, uuid_t pool_id, uint64_t meta_
 	 * wal_sz in the function bio_get_dev_state_internal() (located in file bio/bio_monitor.c)
 	 * should be updated accordingly.
 	 */
+	// 这里重置wal_size 为 default 值，meta_size 与scm_size 有关
 	if (wal_sz == 0 || wal_sz < default_cluster_sz())
 		wal_sz = default_wal_sz(meta_sz);
 
+	// 创建wal 的blob
 	rc = bio_blob_create(pool_id, xs_ctxt, wal_sz, SMD_DEV_TYPE_WAL, flags, &wal_blobid);
 	if (rc)
 		goto delete_meta;
@@ -711,7 +720,9 @@ int bio_mc_create(struct bio_xs_context *xs_ctxt, uuid_t pool_id, uint64_t meta_
 		goto close_meta;
 
 	/* fill meta_fmt_info */
+	// 元数据格式化需要的信息
 	uuid_copy(fi->fi_pool_id, pool_id);
+	// 设置三种设备对应的bs id
 	bxb = bio_xs_context2xs_blobstore(xs_ctxt, SMD_DEV_TYPE_META);
 	uuid_copy(fi->fi_meta_devid, bxb->bxb_blobstore->bb_dev->bb_uuid);
 	bxb = bio_xs_context2xs_blobstore(xs_ctxt, SMD_DEV_TYPE_WAL);
@@ -722,14 +733,18 @@ int bio_mc_create(struct bio_xs_context *xs_ctxt, uuid_t pool_id, uint64_t meta_
 		uuid_copy(fi->fi_data_devid, bxb->bxb_blobstore->bb_dev->bb_uuid);
 	else
 		uuid_clear(fi->fi_data_devid);
+	// 设置三种设备对应的三个blob id
 	fi->fi_meta_blobid = meta_blobid;
 	fi->fi_wal_blobid = wal_blobid;
 	fi->fi_data_blobid = data_blobid;
+	// 设置三种设备类型的资源占用
 	fi->fi_meta_size = meta_sz;
 	fi->fi_wal_size = wal_sz;
 	fi->fi_data_size = data_sz;
 	fi->fi_vos_id = xs_ctxt->bxc_tgt_id;
 
+	// 格式化元数据：分别写meta/wal 的header 信息到对应的spdk blob
+	// todo: 元数据格式化是什么含义
 	rc = meta_format(mc, fi, true);
 	if (rc)
 		D_ERROR("Unable to format newly created blob for xs:%p pool:"DF_UUID"\n",
@@ -884,6 +899,7 @@ bio_ioctxt_open(struct bio_io_context **pctxt, struct bio_xs_context *xs_ctxt,
 	return __bio_ioctxt_open(pctxt, xs_ctxt, uuid, 0, SMD_DEV_TYPE_DATA, SPDK_BLOBID_INVALID);
 }
 
+// open meta context
 int bio_mc_open(struct bio_xs_context *xs_ctxt, uuid_t pool_id,
 		enum bio_mc_flags flags, struct bio_meta_context **mc)
 {

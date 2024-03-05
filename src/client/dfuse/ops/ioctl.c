@@ -298,8 +298,7 @@ err:
 }
 
 static void
-handle_cont_qe_ioctl_helper(struct dfuse_obj_hdl *oh, fuse_req_t req,
-			    const struct dfuse_mem_query *in_query)
+handle_cont_qe_ioctl_helper(fuse_req_t req, const struct dfuse_mem_query *in_query)
 {
 	struct dfuse_info     *dfuse_info = fuse_req_userdata(req);
 	struct dfuse_mem_query query      = {};
@@ -323,12 +322,11 @@ handle_cont_qe_ioctl_helper(struct dfuse_obj_hdl *oh, fuse_req_t req,
 	query.container_count = atomic_load_relaxed(&dfuse_info->di_container_count);
 	query.stat_count      = DS_LIMIT;
 
-	DFUSE_REPLY_IOCTL(oh, req, query);
+	DFUSE_REPLY_IOCTL(dfuse_info, req, query);
 }
 
 static void
-handle_cont_query_ioctl(struct dfuse_obj_hdl *oh, fuse_req_t req, const void *in_buf,
-			size_t in_bufsz)
+handle_cont_query_ioctl(fuse_req_t req, const void *in_buf, size_t in_bufsz)
 {
 	struct dfuse_info            *dfuse_info = fuse_req_userdata(req);
 	const struct dfuse_mem_query *in_query   = in_buf;
@@ -337,7 +335,7 @@ handle_cont_query_ioctl(struct dfuse_obj_hdl *oh, fuse_req_t req, const void *in
 	if (in_bufsz != sizeof(struct dfuse_mem_query))
 		D_GOTO(err, rc = EIO);
 
-	handle_cont_qe_ioctl_helper(oh, req, in_query);
+	handle_cont_qe_ioctl_helper(req, in_query);
 	return;
 
 err:
@@ -349,7 +347,7 @@ handle_cont_evict_ioctl(fuse_req_t req, struct dfuse_obj_hdl *oh)
 {
 	oh->doh_evict_on_close = true;
 
-	handle_cont_qe_ioctl_helper(oh, req, NULL);
+	handle_cont_qe_ioctl_helper(req, NULL);
 }
 
 #define COPY_STAT(sname, ...)                                                                      \
@@ -411,7 +409,7 @@ void dfuse_cb_ioctl(fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
 	DFUSE_TRA_DEBUG(oh, "ioctl cmd=%#x out_size=%zi", cmd, out_bufsz);
 
 	if (cmd == DFUSE_IOCTL_COUNT_QUERY)
-		return handle_cont_query_ioctl(oh, req, in_buf, in_bufsz);
+		return handle_cont_query_ioctl(req, in_buf, in_bufsz);
 
 	if (cmd == DFUSE_IOCTL_DFUSE_EVICT)
 		return handle_cont_evict_ioctl(req, oh);

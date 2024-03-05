@@ -100,6 +100,7 @@ func (ei *EngineInstance) bdevFormat() (results proto.NvmeControllerResults) {
 
 // StorageFormatSCM performs format on SCM and identifies if superblock needs
 // writing.
+// scm 格式化
 func (ei *EngineInstance) StorageFormatSCM(ctx context.Context, force bool) (mResult *ctlpb.ScmMountResult) {
 	engineIdx := ei.Index()
 
@@ -150,6 +151,7 @@ func (ei *EngineInstance) StorageFormatNVMe() (cResults proto.NvmeControllerResu
 		}
 	}
 
+	// nvme 的bdev 格式化
 	if needsSuperblock {
 		cResults = ei.bdevFormat()
 	}

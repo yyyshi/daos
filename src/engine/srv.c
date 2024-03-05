@@ -30,6 +30,29 @@
 #include "drpc_internal.h"
 #include "srv_internal.h"
 
+// ============= 不同 xstream介绍 ==============
+/*
+	1. 每个engine 有一组target xs们。每个vos target 都对应一个target xs，目的是避免访问vos 文件时候锁竞争。
+	2. 同一个engine 下的所有target xs 中，有一个target xs 是main xs
+	3. main xs 作用：1.rpc io 请求处理 2.（ult 们 for）rebuild scanner/puller，rebalance，scrub，pool connect，container open
+	（除了main xs 外其余的叫offload xs，含义为分担压力的xs）
+	（每一个xs 都会绑定到一个cpu 核）
+	4. offload xs 作用：（ult 们 for）1.io 请求分发（tx 协商由第一个offload xs负责）2.ec/checksum/compress（如果有两个offload则由第二个xs负责，否则由第一个xs负责）
+	5. 每个engine 有一个sys xs 集合（目前只有一个）。作用：drpc 监听，rbd 请求和元数据服务，管理侧请求，池请求，容器请求，rebuild 请求，rebalance 请求，rebuild 检查，iv，bcast，swim请求
+
+	// 		     	               		 			  engine
+	//                              		/                                   \
+	//  		   				vos-target-xs                   		 		sys xs（drpc 监听，元数据操作）
+	//                     /                       \
+	//  main-xs（rpc io，rebuild scanner puller）   offload-xs（io 请求分发，ec，checksum）  
+
+	// todo: 分别跟一下不同xs 对应的操作代码流程  
+	// 比如这里main-xs 涉及的rebuild 在sys-xs里也有涉及，是怎么任务划分的
+	// 比如元数据访问是哪个流程
+	// rbd 请求指的什么功能，是和raft 相关的，或者tx 相关的都属于这里吗
+	// 那假如一个流程涉及多个功能，比如读写io 时候要访问元数据，这时候的跨xs 操作是如何实现的?
+	// 与spdk 等架构对照，opencas等，主io线程和其余的线程的关系
+*/
 /**
  * DAOS server threading model:
  * 1) a set of "target XS (xstream) set" per engine (dss_tgt_nr)
@@ -277,11 +300,6 @@ dss_rpc_hdlr(crt_context_t *ctx, void *hdlr_arg,
 
 	if (DAOS_FAIL_CHECK(DAOS_FAIL_LOST_REQ))
 		return 0;
-
-	rc = crt_req_get_timeout(rpc, &attr.sra_timeout);
-	D_ASSERT(rc == 0);
-	/* convert it to msec */
-	attr.sra_timeout *= 1000;
 	/*
 	 * The mod_id for the RPC originated from CART is 0xfe, and 'module'
 	 * will be NULL for this case.
@@ -295,20 +313,7 @@ dss_rpc_hdlr(crt_context_t *ctx, void *hdlr_arg,
 		attr.sra_type = SCHED_REQ_ANONYM;
 	}
 
-	rc = sched_req_enqueue(dx, &attr, real_rpc_hdlr, rpc);
-	if (rc != -DER_OVERLOAD_RETRY)
-		return rc;
-
-	if (module != NULL && module->sm_mod_ops != NULL &&
-	    module->sm_mod_ops->dms_set_req != NULL) {
-		rc = module->sm_mod_ops->dms_set_req(rpc, &attr);
-		if (rc == -DER_OVERLOAD_RETRY)
-			return crt_reply_send(rpc);
-	}
-	/*
-	 * No RPC protocol to return hint, just return timeout.
-	 */
-	return -DER_TIMEDOUT;
+	return sched_req_enqueue(dx, &attr, real_rpc_hdlr, rpc);
 }
 
 static void
@@ -389,6 +394,7 @@ dss_srv_handler(void *arg)
 	bool				 track_mem = false;
 	bool				 signal_caller = true;
 
+	// xs 的server handler 线程先设置cpu 亲和性
 	rc = dss_xstream_set_affinity(dx);
 	if (rc)
 		goto signal;
@@ -399,6 +405,7 @@ dss_srv_handler(void *arg)
 				     &dx->dx_mem_stats);
 
 	/* initialize xstream-local storage */
+	// 初始化tls（thread local storage） 相关
 	dtc = dss_tls_init(dx->dx_tag, dx->dx_xs_id, dx->dx_tgt_id);
 	if (dtc == NULL) {
 		D_ERROR("failed to initialize TLS\n");
@@ -418,6 +425,7 @@ dss_srv_handler(void *arg)
 
 	if (dx->dx_comm) {
 		/* create private transport context */
+		// 创建crt ctx
 		rc = crt_context_create(&dmi->dmi_ctx);
 		if (rc != 0) {
 			D_ERROR("failed to create crt ctxt: "DF_RC"\n",
@@ -425,6 +433,7 @@ dss_srv_handler(void *arg)
 			goto tls_fini;
 		}
 
+		// 注册rpc服务端处理函数
 		rc = crt_context_register_rpc_task(dmi->dmi_ctx, dss_rpc_hdlr,
 						   dss_iv_resp_hdlr, dx);
 		if (rc != 0) {
@@ -475,16 +484,21 @@ dss_srv_handler(void *arg)
 	}
 
 	/* Prepare the scheduler for DSC (Server call client API) */
+	// tse 的调度服务初始化
 	rc = tse_sched_init(&dx->dx_sched_dsc, NULL, dmi->dmi_ctx);
 	if (rc != 0) {
 		D_ERROR("failed to init the scheduler\n");
 		goto crt_destroy;
 	}
 
+	// 不是所有的xs 都会去访问nvme
 	if (dss_xstream_has_nvme(dx)) {
 		ABT_thread_attr attr;
 
 		/* Initialize NVMe context for main XS which accesses NVME */
+		// 初始化main xs 的nvme ctx
+		// todo: 只有main xs 才访问nvme 吗
+		// bio_xsctxt_alloc 函数内部会创建blobstore
 		rc = bio_xsctxt_alloc(&dmi->dmi_nvme_ctxt,
 				      dmi->dmi_tgt_id < 0 ? BIO_SYS_TGT_ID : dmi->dmi_tgt_id,
 				      false);
@@ -507,6 +521,7 @@ dss_srv_handler(void *arg)
 			D_GOTO(nvme_fini, rc = dss_abterr2der(rc));
 		}
 
+		// 单独线程用于nvme 的故障检测
 		rc = daos_abt_thread_create(dx->dx_sp, dss_free_stack_cb, dx->dx_pools[DSS_POOL_NVME_POLL],
 					    dss_nvme_poll_ult, NULL, attr, NULL);
 		ABT_thread_attr_free(&attr);
@@ -767,6 +782,7 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 	dx->dx_xs_id	= xs_id;
 	dx->dx_ctx_id	= -1;
 	dx->dx_comm	= comm;
+	// 设置是否为main xs 的唯一的地方
 	if (dss_helper_pool) {
 		dx->dx_main_xs	= (xs_id >= dss_sys_xs_nr) &&
 				  (xs_id < (dss_sys_xs_nr + dss_tgt_nr));
@@ -795,6 +811,7 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 	}
 
 	/** create ABT scheduler in charge of this xstream */
+	// 调度服务初始化
 	rc = dss_sched_init(dx);
 	if (rc != 0) {
 		D_ERROR("create scheduler fails: "DF_RC"\n", DP_RC(rc));
@@ -824,6 +841,8 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 	}
 
 	/** start progress ULT */
+	// 每一个xs 都会起一个ult 跑 dss_srv_handler。但是只有main xs 才会去访问nvme
+	// https://github.com/daos-stack/daos/blob/master/src/engine/README.md
 	rc = daos_abt_thread_create(dx->dx_sp, dss_free_stack_cb, dx->dx_pools[DSS_POOL_NET_POLL],
 				    dss_srv_handler, dx, attr,
 				    &dx->dx_progress);
@@ -1076,6 +1095,7 @@ dss_xstreams_init(void)
 	xstream_data.xd_xs_nr = DSS_XS_NR_TOTAL;
 	tags                  = DAOS_SERVER_TAG - DAOS_TGT_TAG;
 	/* start system service XS */
+	// 启动sys xs 服务们
 	for (i = 0; i < dss_sys_xs_nr; i++) {
 		xs_id = i;
 		rc    = dss_start_xs_id(tags, xs_id);
@@ -1085,6 +1105,7 @@ dss_xstreams_init(void)
 	}
 
 	/* start main IO service XS */
+	// 启动main xs
 	for (i = 0; i < dss_tgt_nr; i++) {
 		xs_id = DSS_MAIN_XS_ID(i);
 		rc    = dss_start_xs_id(DAOS_SERVER_TAG, xs_id);
@@ -1415,6 +1436,7 @@ dss_srv_init(void)
 	bio_register_bulk_ops(crt_bulk_create, crt_bulk_free);
 
 	/* start xstreams */
+	// 初始化启动所有的xs，包括vos target xs 和 sys xs。vos target xs 又分为main xs 和offload xs
 	rc = dss_xstreams_init();
 	if (!dss_xstreams_empty()) /* cleanup if we started something */
 		xstream_data.xd_init_step = XD_INIT_XSTREAMS;

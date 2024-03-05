@@ -975,6 +975,7 @@ func getSCMTier(log logging.Logger, numaID, nrNumaNodes int, sd *storageDetails)
 	return scmTier, nil
 }
 
+// MD-on-SSD
 func getBdevTiers(log logging.Logger, mdOnSSD bool, ssds *hardware.PCIAddressSet) (storage.TierConfigs, error) {
 	nrSSDs := ssds.Len()
 	if nrSSDs == 0 {
@@ -1027,6 +1028,7 @@ func getBdevTiers(log logging.Logger, mdOnSSD bool, ssds *hardware.PCIAddressSet
 
 type newEngineCfgFn func(int) *engine.Config
 
+// MD-on-SSD
 func genEngineConfigs(req ConfGenerateReq, newEngineCfg newEngineCfgFn, nodeSet []int, nd *networkDetails, sd *storageDetails) ([]*engine.Config, error) {
 	nrFabPorts := len(req.FabricPorts)
 	if nrFabPorts > 0 && nrFabPorts < len(nodeSet) {

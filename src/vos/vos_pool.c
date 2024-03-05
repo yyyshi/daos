@@ -431,6 +431,7 @@ vos_pool_checkpoint_init(daos_handle_t poh, vos_chkpt_update_cb_t update_cb,
 	umm   = vos_pool2umm(pool);
 	store = &umm->umm_pool->up_store;
 
+	// flush wal 后调用
 	pool->vp_update_cb = update_cb;
 	pool->vp_wait_cb   = wait_cb;
 	pool->vp_chkpt_arg = arg;
@@ -441,6 +442,7 @@ vos_pool_checkpoint_init(daos_handle_t poh, vos_chkpt_update_cb_t update_cb,
 	bio_wal_query(store->stor_priv, &wal_info);
 
 	/** Set the initial values */
+	// 这里也会直接调用
 	update_cb(arg, wal_info.wi_commit_id, wal_info.wi_used_blks, wal_info.wi_tot_blks);
 }
 
@@ -500,6 +502,7 @@ vos_pool_checkpoint(daos_handle_t poh)
 	if (chkpt_metrics != NULL)
 		d_tm_mark_duration_start(chkpt_metrics->vcm_duration, D_TM_CLOCK_REALTIME);
 
+	// 查询total blks 和 used blks
 	bio_wal_query(store->stor_priv, &wal_info);
 	tx_id = wal_info.wi_commit_id;
 	if (tx_id == wal_info.wi_ckp_id) {
@@ -516,12 +519,15 @@ vos_pool_checkpoint(daos_handle_t poh)
 
 	rc = umem_cache_checkpoint(store, pool->vp_wait_cb, pool->vp_chkpt_arg, &tx_id, &stats);
 
+	// checkpoint flush wal，todo: 怎么控制锁
 	if (rc == 0)
 		rc = bio_wal_checkpoint(store->stor_priv, tx_id, &purge_size);
 
+	// flush wal 后再次查询 total blks 和used blks
 	bio_wal_query(store->stor_priv, &wal_info);
 
 	/* Update the used block info post checkpoint */
+	// vp_update_cb = update_cb
 	pool->vp_update_cb(pool->vp_chkpt_arg, wal_info.wi_commit_id, wal_info.wi_used_blks,
 			   wal_info.wi_tot_blks);
 
@@ -558,22 +564,26 @@ vos2mc_flags(unsigned int vos_flags)
 	return mc_flags;
 }
 
+// MD-on-SSD
 static int
 vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 		   size_t scm_sz, size_t nvme_sz, size_t wal_sz, unsigned int flags,
 		   struct umem_pool **ph)
 {
 	struct bio_xs_context	*xs_ctxt = vos_xsctxt_get();
+	// 和spdk 的blob store 一样，创建umem obj 之前也是先创建 umem store
 	struct umem_store	 store = { 0 };
 	struct bio_meta_context	*mc;
 	struct umem_pool	*pop = NULL;
 	enum bio_mc_flags	 mc_flags = vos2mc_flags(flags);
+	// meta_sz = 0
 	size_t			 meta_sz = scm_sz;
 	int			 rc, ret;
 
 	*ph = NULL;
 	/* always use PMEM mode for SMD */
 	store.store_type = umempobj_get_backend_type();
+	// 是否是 sysdb 的vos
 	if (flags & VOS_POF_SYSDB) {
 		store.store_type = DAOS_MD_PMEM;
 		store.store_standalone = true;
@@ -586,9 +596,11 @@ vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 	if (!scm_sz) {
 		struct stat lstat;
 
+		// 获取 path 对应路径的大小，赋值给 meta_sz
 		rc = stat(path, &lstat);
 		if (rc != 0)
 			return daos_errno2der(errno);
+		// todo: 这里获取到的sz 不是 0 么？看一下 newborn 文件的生成流程和作用
 		meta_sz = lstat.st_size;
 	}
 
@@ -596,6 +608,9 @@ vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 		"meta_sz: %zu, nvme_sz: %zu wal_sz:%zu\n",
 		xs_ctxt, DP_UUID(pool_id), meta_sz, nvme_sz, wal_sz);
 
+	// todo: 创建meta context，带wal_size，这里meta 不是应该优先从 scm 申请资源吗？
+	// todo: meta 信息不是都存储在 scm 中吗？还是说有一部分存储在 nvme 中？
+	// 这里面会创建data/meta/wal 的各自的spdk_blob
 	rc = bio_mc_create(xs_ctxt, pool_id, meta_sz, wal_sz, nvme_sz, mc_flags);
 	if (rc != 0) {
 		D_ERROR("Failed to create BIO meta context for xs:%p pool:"DF_UUID". "DF_RC"\n",
@@ -603,6 +618,7 @@ vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 		return rc;
 	}
 
+	// wal open  --> load wal header
 	rc = bio_mc_open(xs_ctxt, pool_id, mc_flags, &mc);
 	if (rc != 0) {
 		D_ERROR("Failed to open BIO meta context for xs:%p pool:"DF_UUID". "DF_RC"\n",
@@ -616,10 +632,15 @@ vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 	}
 
 	bio_meta_get_attr(mc, &store.stor_size, &store.stor_blk_size, &store.stor_hdr_blks);
+	// meta context，上边都是为了构造这个
 	store.stor_priv = mc;
+	// umem store 的注册函数
 	store.stor_ops = &vos_store_ops;
 
+	// scm 相关操作
 umem_create:
+	// 返回的umem_pool：pmem obj pool。
+	// pmdk 返回的pmem pool 放在 pop->up_priv  中
 	pop = umempobj_create(path, layout, UMEMPOBJ_ENABLE_STATS, scm_sz, 0600, &store);
 	if (pop != NULL) {
 		*ph = pop;
@@ -943,6 +964,8 @@ vos_pool_create_ex(const char *path, uuid_t uuid, daos_size_t scm_sz,
 		return daos_errno2der(errno);
 	}
 
+	// MD-on-SSD，wal_sz = 0, scm_sz = 0，返回一个 umem_pool ph
+	// 里面会分别创建data/meta/wal 的bio ctx。对应的每个ctx 会创建自己的blob
 	rc = vos_pmemobj_create(path, uuid, VOS_POOL_LAYOUT, scm_sz, nvme_sz, wal_sz, flags, &ph);
 	if (rc) {
 		D_ERROR("Failed to create pool %s, scm_sz="DF_U64", nvme_sz="DF_U64". "DF_RC"\n",
@@ -1055,6 +1078,8 @@ vos_pool_create(const char *path, uuid_t uuid, daos_size_t scm_sz,
 		daos_size_t nvme_sz, unsigned int flags, daos_handle_t *poh)
 {
 	/* create vos pool with default WAL size */
+	// 使用默认的WAL size创建 vos pool，这里出现了 wal_size
+	// 会为data/meta/wal 分别创建自己的spdk blob，并写入元数据信息，比如bsid，blobid，设备 sz 等
 	return vos_pool_create_ex(path, uuid, scm_sz, nvme_sz, 0, flags, poh);
 }
 

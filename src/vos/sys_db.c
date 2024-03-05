@@ -129,6 +129,7 @@ db_open_create(struct sys_db *db, bool try_create)
 	}
 	D_DEBUG(DB_IO, "Opening %s, try_create=%d\n", vdb->db_file, try_create);
 	if (try_create) {
+		// sys db 用的vos pool（todo: 保存的什么信息）
 		rc = vos_pool_create(vdb->db_file, vdb->db_pool, SYS_DB_SIZE, 0,
 				     VOS_POF_SYSDB, &vdb->db_poh);
 		if (rc) {

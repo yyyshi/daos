@@ -391,6 +391,7 @@ enum daos_obj_schema {
 	DAOS_OS_DYN_CHUNKED,	/**< Dynamically chunked object */
 };
 
+// 副本或者ec
 enum daos_obj_resil {
 	DAOS_RES_EC,            /**< Erasure code */
 	DAOS_RES_REPL,          /**< Replication */

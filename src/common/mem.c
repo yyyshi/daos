@@ -50,6 +50,7 @@ umempobj_settings_init(bool md_on_ssd)
 	enum pobj_arenas_assignment_type	atype;
 	unsigned int				md_mode = DAOS_MD_BMEM;
 
+	// 如果不是 MD-on-SSD，type 是pmem
 	if (!md_on_ssd) {
 		daos_md_backend = DAOS_MD_PMEM;
 		atype = POBJ_ARENAS_ASSIGNMENT_GLOBAL;
@@ -61,6 +62,7 @@ umempobj_settings_init(bool md_on_ssd)
 		return rc;
 	}
 
+	// todo: 这个env 有几种类型？
 	d_getenv_int("DAOS_MD_ON_SSD_MODE", &md_mode);
 
 	switch (md_mode) {
@@ -297,6 +299,10 @@ umempobj_create(const char *path, const char *layout_name, int flags,
 		store != NULL ? store->stor_size : 0);
 	switch (umm_pool->up_store.store_type) {
 	case DAOS_MD_PMEM:
+		// 默认
+		// layout_name = "vos_pool_layout"，poolsize = scm_sz
+		// pmdk api
+		// 返回 pmem obj pool
 		pop = pmemobj_create(path, layout_name, poolsize, mode);
 		if (!pop) {
 			D_ERROR("Failed to create pool %s, size="DF_U64": %s\n",

@@ -238,21 +238,26 @@ dc_obj_update_task_create(daos_handle_t oh, daos_handle_t th, uint64_t flags,
 			  daos_event_t *ev, tse_sched_t *tse,
 			  tse_task_t **task)
 {
+	// update task需要的参数信息
 	daos_obj_update_t	*args;
 	int			 rc;
 
 	DAOS_API_ARG_ASSERT(*args, OBJ_UPDATE);
+	// 创建obj update 任务
 	rc = dc_task_create(dc_obj_update_task, tse, ev, task);
 	if (rc)
 		return rc;
 
+	// 把客户端的参数传到args 里，触发 task
 	args = dc_task_get_args(*task);
 	args->oh	= oh;
 	args->th	= th;
 	args->flags	= flags;
 	args->dkey	= dkey;
 	args->nr	= nr;
+	// 数据描述
 	args->iods	= iods;
+	// 这里存储的是要update 的数据，即要写入的数据
 	args->sgls	= sgls;
 
 	return 0;

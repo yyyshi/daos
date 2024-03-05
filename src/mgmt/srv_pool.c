@@ -96,6 +96,7 @@ ds_mgmt_tgt_pool_create_ranks(uuid_t pool_uuid, char *tgt_dev, d_rank_list_t *ra
 
 	/* Collective RPC to all of targets of the pool */
 	topo = crt_tree_topo(CRT_TREE_KNOMIAL, 4);
+	// 构造创建rank 的corpc 请求
 	opc = DAOS_RPC_OPCODE(MGMT_TGT_CREATE, DAOS_MGMT_MODULE,
 			      DAOS_MGMT_VERSION);
 	rc = crt_corpc_req_create(dss_get_module_info()->dmi_ctx, NULL,
@@ -182,6 +183,7 @@ ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_l
 	/* Sanity check targets versus cart's current primary group members.
 	 * If any targets not in PG, flag error before MGMT_TGT_ corpcs fail.
 	 */
+	// 对比targets 和primary group，对于targets 中不在 primary group 中的rank，标记为error
 	rc = crt_group_ranks_get(NULL, &pg_ranks);
 	D_ASSERTF(rc == 0, ""DF_RC"\n", DP_RC(rc));
 
@@ -192,6 +194,7 @@ ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_l
 	/* The pg_ranks and targets lists should overlap perfectly.
 	 * If not, fail early to avoid expensive corpc failures.
 	 */
+	// 只存在于 pg_targets 但不存在于 pg_ranks 中的元素会被移除
 	d_rank_list_filter(pg_ranks, pg_targets, false /* exclude */);
 	if (!d_rank_list_identical(pg_targets, targets)) {
 		char *pg_str, *tgt_str;
@@ -209,6 +212,7 @@ ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_l
 			D_GOTO(out, rc);
 		}
 
+		// 不允许targets 中的元素不在 primary group 中，直接返回错误
 		D_ERROR(DF_UUID": targets (%s) contains ranks not in pg (%s)\n",
 			DP_UUID(pool_uuid), tgt_str, pg_str);
 
@@ -217,6 +221,7 @@ ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_l
 		D_GOTO(out, rc = -DER_OOG);
 	}
 
+	// pg_targets == targets（请求中传递下来的ranks 都在 primary group 中）
 	rc = ds_mgmt_tgt_pool_create_ranks(pool_uuid, tgt_dev, targets,
 					   scm_size, nvme_size);
 	if (rc != 0) {

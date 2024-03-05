@@ -41,6 +41,7 @@ type Provider struct {
 // Format formats the storage used for control metadata, if it is a separate device.
 // If the storage location is on an existing partition, the format of the existing filesystem is
 // checked.
+// control metadata 格式化
 func (p *Provider) Format(req storage.MetadataFormatRequest) error {
 	if p == nil {
 		return errors.New("nil metadata provider")
@@ -70,6 +71,7 @@ func (p *Provider) Format(req storage.MetadataFormatRequest) error {
 		return err
 	}
 
+	// 就是卸载到 rootpath，control_metadata 中的path
 	if hasDevice(req) {
 		if _, err := p.Unmount(storage.MetadataMountRequest{
 			RootPath: req.RootPath,

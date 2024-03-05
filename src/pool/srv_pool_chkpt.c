@@ -119,6 +119,7 @@ update_cb(void *arg, uint64_t id, uint32_t used_blocks, uint32_t total_blocks)
 static bool
 need_checkpoint(struct ds_pool_child *child, struct chkpt_ctx *ctx, uint64_t *start)
 {
+	// todo: checkpoint 一分钟保存一次吗
 	uint32_t        sleep_time = 60000; /* Set default to 60 seconds */
 	uint64_t        elapsed;
 	struct ds_pool *pool = child->spc_pool;
@@ -172,6 +173,7 @@ do_sleep:
 }
 
 /** Setup checkpointing context and start checkpointing the pool */
+// 周期性的checkpoint 的线程
 static void
 chkpt_ult(void *arg)
 {
@@ -200,12 +202,14 @@ chkpt_ult(void *arg)
 	ctx.cc_pool         = child->spc_pool;
 	ctx.cc_sched_arg    = child->spc_chkpt_req;
 
+	// update_cb 每次flush wal 后会被调用
 	vos_pool_checkpoint_init(poh, update_cb, wait_cb, &ctx, &ctx.cc_store);
 
 	while (!dss_ult_exiting(child->spc_chkpt_req)) {
 		if (!need_checkpoint(child, &ctx, &start))
 			continue;
 
+		// flush wal
 		rc = vos_pool_checkpoint(poh);
 		if (rc == -DER_SHUTDOWN) {
 			D_ERROR("tgt_id %d shutting down. Checkpointer should quit\n",

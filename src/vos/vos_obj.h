@@ -30,6 +30,7 @@ struct vos_container;
 /**
  * A cached object (DRAM data structure).
  */
+// cache 中存储的数据结构
 struct vos_object {
 	/** llink for daos lru cache */
 	struct daos_llink		obj_llink;
@@ -44,6 +45,7 @@ struct vos_object {
 	/** The latest sync epoch */
 	daos_epoch_t			obj_sync_epoch;
 	/** Persistent memory address of the object */
+	// object 的pmem 地址
 	struct vos_obj_df		*obj_df;
 	/** backref to container */
 	struct vos_container		*obj_cont;
@@ -89,6 +91,9 @@ enum {
  *					definitive state of the object.
  *		other			Another error occurred
  */
+// 在lru（dram） 中按照oid 查找object。如果没找到就去pmem 中加载，如果pmem也没有就创建一个，并添加到cache 中
+// 保存的内容的数据结构是：vos_object，里面有object 在pmem中的地址
+// 内部调用的是 vos_oi_find 和 vos_oi_find_alloc
 int
 vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	     daos_unit_oid_t oid, daos_epoch_range_t *epr, daos_epoch_t bound,
@@ -196,6 +201,7 @@ vos_oi_find_alloc(struct vos_container *cont, daos_unit_oid_t oid,
  * \return		0 on success and negative on
  *			failure
  */
+// 按oid 查询LRU entry
 int
 vos_oi_find(struct vos_container *cont, daos_unit_oid_t oid,
 	    struct vos_obj_df **obj, struct vos_ts_set *ts_set);

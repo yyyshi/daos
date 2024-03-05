@@ -642,6 +642,7 @@ add_child(struct d_tm_node_t **newnode, struct d_tm_node_t *parent,
 		return 0;
 	}
 
+	// add metrics
 	rc = alloc_node(shmem, newnode, name);
 	if (rc != 0) {
 		D_ERROR("can't alloc child node, " DF_RC "\n", DP_RC(rc));
@@ -2126,6 +2127,7 @@ add_metric(struct d_tm_context *ctx, struct d_tm_node_t **node, int metric_type,
 	while (token != NULL) {
 		temp = find_child(ctx, parent_node, token);
 		if (temp == NULL) {
+			// add metrics
 			rc = add_child(&temp, parent_node, token);
 			if (rc != DER_SUCCESS)
 				goto out;
@@ -2305,6 +2307,8 @@ int d_tm_add_metric(struct d_tm_node_t **node, int metric_type, char *desc,
 		return -DER_INVAL;
 
 	va_start(args, fmt);
+	// fmt = "%s/%s/duration/tgt_%u", path, VOS_GC_DIR, tgt_id
+	// path = path/vos_gc/duration/tgt_tgt_id
 	rc = parse_path_fmt(path, sizeof(path), fmt, args);
 	va_end(args);
 	if (rc != 0)
@@ -2330,6 +2334,7 @@ int d_tm_add_metric(struct d_tm_node_t **node, int metric_type, char *desc,
 		return DER_SUCCESS;
 	}
 
+	// add metrics
 	rc = add_metric(tm_shmem.ctx, node, metric_type, desc, units, path);
 	if (rc != 0)
 		D_GOTO(failure, rc);

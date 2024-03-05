@@ -766,20 +766,13 @@ func TestIpmctl_prepReset(t *testing.T) {
 				cmdShowIpmctlVersion, mockCmdShowRegionsWithSock(1),
 			},
 		},
-		"get pmem state fails; continue to remove regions": {
+		"get pmem state fails": {
 			runOut: []string{
-				verStr, mockXMLRegions(t, "same-sock"), "", "",
+				verStr, mockXMLRegions(t, "same-sock"),
 			},
-			expPrepResp: &storage.ScmPrepareResponse{
-				Namespaces: storage.ScmNamespaces{},
-				Socket: &storage.ScmSocketState{
-					State: storage.ScmUnknownMode,
-				},
-				RebootRequired: true,
-			},
+			expErr: errors.New("multiple regions assigned to the same socket"),
 			expCalls: []pmemCmd{
-				cmdShowIpmctlVersion, cmdShowRegions, cmdDeleteGoals,
-				cmdCreateRegions,
+				cmdShowIpmctlVersion, cmdShowRegions,
 			},
 		},
 		"delete goals fails": {
@@ -840,7 +833,7 @@ func TestIpmctl_prepReset(t *testing.T) {
 			},
 			expCalls: []pmemCmd{
 				cmdShowIpmctlVersion, cmdShowRegions, cmdDeleteGoals,
-				cmdCreateRegions,
+				cmdRemoveRegions,
 			},
 		},
 		"remove regions; with namespaces": {
@@ -864,7 +857,7 @@ func TestIpmctl_prepReset(t *testing.T) {
 				mockCmdDestroyNamespace("namespace0.0"),
 				mockCmdDisableNamespace("namespace1.0"),
 				mockCmdDestroyNamespace("namespace1.0"),
-				cmdCreateRegions,
+				cmdRemoveRegions,
 			},
 		},
 	} {

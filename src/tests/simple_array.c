@@ -194,6 +194,7 @@ array(void)
 	ioreqs_init(reqs);
 
 	/** open DAOS object */
+	// 里面会有访问元数据的逻辑
 	rc = daos_obj_open(coh, oid, DAOS_OO_RW, &oh, NULL);
 	ASSERT(rc == 0, "object open failed with %d", rc);
 

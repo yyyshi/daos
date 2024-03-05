@@ -302,6 +302,7 @@ func (svc *mgmtSvc) processSerialRequest(ctx context.Context, req *batchRequest)
 }
 
 // serialReqLoop is the main loop for processing serial requests.
+// 所有的请求都在这里处理
 func (svc *mgmtSvc) serialReqLoop(parent context.Context) {
 
 	svc.log.Debug("starting serialReqLoop")

@@ -59,6 +59,7 @@ rdb_create(const char *path, const uuid_t uuid, uint64_t caller_term, size_t siz
 	 * basic system memory reservation and VOS_POF_EXCL for concurrent
 	 * access protection.
 	 */
+	// rdb 使用的vos pool（todo: 先看rdb 和 sysdb 是存了什么东西进去？）
 	rc = vos_pool_create(path, (unsigned char *)uuid, size, 0 /* nvme_sz */,
 			     VOS_POF_SMALL | VOS_POF_EXCL | VOS_POF_RDB, &pool);
 	if (rc != 0)
@@ -902,6 +903,7 @@ rdb_chkpt_fini(struct rdb *db)
 }
 
 /* Daemon ULT for checkpointing to metadata blob (MD on SSD only) */
+// 专门用来checkpoint 的ult（仅在MD-on-SSD 场景）
 static void
 rdb_chkptd(void *arg)
 {
@@ -924,6 +926,7 @@ rdb_chkptd(void *arg)
 			if (db->d_chkpt_record.dcr_needed)
 				break;
 			clock_gettime(CLOCK_REALTIME_COARSE, &deadline);
+			// 10s 一次checkpoint
 			if (deadline.tv_sec >= last.tv_sec + 10)
 				break;
 			if (dcr->dcr_stop)
@@ -1023,21 +1026,4 @@ rdb_chkptd_start(struct rdb *db)
 error:
 	rdb_chkptd_stop(db);
 	return rc;
-}
-
-/**
- * Upgrade the durable format of the VOS pool underlying \a db to
- * \a df_version.
- *
- * Exposing "VOS pool" makes this API function hacky, and probably indicates
- * that the upgrade model is not quite right.
- *
- * \param[in]	db		database
- * \param[in]	df_version	VOS durable format version (e.g.,
- *				VOS_POOL_DF_2_6)
- */
-int
-rdb_upgrade_vos_pool(struct rdb *db, uint32_t df_version)
-{
-	return vos_pool_upgrade(db->d_pool, df_version);
 }

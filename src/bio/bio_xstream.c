@@ -75,6 +75,7 @@ struct bio_nvme_data {
 	d_list_t		 bd_bdevs;
 	uint64_t		 bd_scan_age;
 	/* Path to input SPDK JSON NVMe config file */
+	// 输入的spdk json nvme 文件
 	char			*bd_nvme_conf;
 	/* When using SPDK primary mode, specifies memory allocation in MB */
 	int			 bd_mem_size;
@@ -238,8 +239,11 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 		goto free_mutex;
 	}
 
+	// todo: bio chunk 的全局配置
 	bio_chk_cnt_init = DAOS_DMA_CHUNK_CNT_INIT;
+	// 1G
 	bio_chk_cnt_max = DAOS_DMA_CHUNK_CNT_MAX;
+	// 80G 吗
 	bio_chk_sz = ((uint64_t)size_mb << 20) >> BIO_DMA_PAGE_SHIFT;
 
 	d_getenv_bool("DAOS_SCM_RDMA_ENABLED", &bio_scm_rdma);
@@ -815,7 +819,7 @@ bdev_name2roles(const char *name)
  * xstream for this device hasn't been established yet.
  */
 static int
-create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name, unsigned int roles,
+create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 		struct bio_bdev **dev_out)
 {
 	struct bio_bdev			*d_bdev, *old_dev;
@@ -843,8 +847,13 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name, unsigned int
 	}
 
 	D_INIT_LIST_HEAD(&d_bdev->bb_link);
+	rc = bdev_name2roles(bdev_name);
+	if (rc < 0) {
+		D_ERROR("Failed to get role from bdev name, "DF_RC"\n", DP_RC(rc));
+		goto error;
+	}
 
-	d_bdev->bb_roles = roles;
+	d_bdev->bb_roles = rc;
 	D_STRNDUP(d_bdev->bb_name, bdev_name, strlen(bdev_name));
 	if (d_bdev->bb_name == NULL) {
 		D_GOTO(error, rc = -DER_NOMEM);
@@ -953,7 +962,6 @@ init_bio_bdevs(struct bio_xs_context *ctxt)
 {
 	struct bio_bdev  *d_bdev;
 	struct spdk_bdev *bdev;
-	const char       *bdev_name;
 	int rc = 0;
 
 	D_ASSERT(!is_server_started());
@@ -962,20 +970,12 @@ init_bio_bdevs(struct bio_xs_context *ctxt)
 		rc = -DER_NONEXIST;
 	}
 
-	for (bdev = spdk_bdev_first(); bdev != NULL; bdev = spdk_bdev_next(bdev)) {
+	for (bdev = spdk_bdev_first(); bdev != NULL;
+	     bdev = spdk_bdev_next(bdev)) {
 		if (nvme_glb.bd_bdev_class != get_bdev_type(bdev))
 			continue;
 
-		bdev_name = spdk_bdev_get_name(bdev);
-
-		rc = bdev_name2roles(bdev_name);
-		if (rc < 0) {
-			D_ERROR("Failed to get role from bdev name '%s', "DF_RC"\n", bdev_name,
-				DP_RC(rc));
-			return rc;
-		}
-
-		rc = create_bio_bdev(ctxt, bdev_name, rc, NULL);
+		rc = create_bio_bdev(ctxt, spdk_bdev_get_name(bdev), NULL);
 		if (rc)
 			return rc;
 	}
@@ -1639,6 +1639,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		D_DEBUG(DB_MGMT, "SPDK bdev initialized, tgt_id:%d", tgt_id);
 
 		nvme_glb.bd_init_thread = ctxt->bxc_thread;
+		// 这里会创建bs
 		rc = init_bio_bdevs(ctxt);
 		if (rc != 0) {
 			D_ERROR("failed to init bio_bdevs, "DF_RC"\n",
@@ -1678,6 +1679,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		if (st != SMD_DEV_TYPE_DATA && !bio_nvme_configured(SMD_DEV_TYPE_META))
 			break;
 
+		// 这里也会创建bs
 		rc = init_xs_blobstore_ctxt(ctxt, tgt_id, st);
 		if (rc)
 			goto out;
@@ -1775,8 +1777,6 @@ scan_bio_bdevs(struct bio_xs_context *ctxt, uint64_t now)
 	struct bio_blobstore	*bbs;
 	struct bio_bdev		*d_bdev, *tmp;
 	struct spdk_bdev	*bdev;
-	const char		*bdev_name;
-	unsigned int             roles       = 0;
 	static uint64_t		 scan_period = NVME_MONITOR_PERIOD;
 	int			 rc;
 
@@ -1784,33 +1784,28 @@ scan_bio_bdevs(struct bio_xs_context *ctxt, uint64_t now)
 		return;
 
 	/* Iterate SPDK bdevs to detect hot plugged device */
-	for (bdev = spdk_bdev_first(); bdev != NULL; bdev = spdk_bdev_next(bdev)) {
+	for (bdev = spdk_bdev_first(); bdev != NULL;
+	     bdev = spdk_bdev_next(bdev)) {
 		if (nvme_glb.bd_bdev_class != get_bdev_type(bdev))
 			continue;
 
-		bdev_name = spdk_bdev_get_name(bdev);
-
-		d_bdev = lookup_dev_by_name(bdev_name);
+		d_bdev = lookup_dev_by_name(spdk_bdev_get_name(bdev));
 		if (d_bdev != NULL)
 			continue;
 
-		D_INFO("Detected hot plugged device %s\n", bdev_name);
+		D_INFO("Detected hot plugged device %s\n",
+		       spdk_bdev_get_name(bdev));
 		/* Print a console message */
-		D_PRINT("Detected hot plugged device %s\n", bdev_name);
+		D_PRINT("Detected hot plugged device %s\n",
+			spdk_bdev_get_name(bdev));
 
 		scan_period = 0;
 
-		/*
-		 * Assign default roles based on operating mode (MD-on-SSD or PMem), roles will
-		 * subsequently be updated based on "old" device on "replace".
-		 */
-
-		if (bio_nvme_configured(SMD_DEV_TYPE_META))
-			roles = NVME_ROLE_DATA;
-
-		rc = create_bio_bdev(ctxt, bdev_name, roles, &d_bdev);
+		/* don't support hot plug for sys device yet */
+		rc = create_bio_bdev(ctxt, spdk_bdev_get_name(bdev), &d_bdev);
 		if (rc) {
-			D_ERROR("Failed to init hot plugged device %s\n", bdev_name);
+			D_ERROR("Failed to init hot plugged device %s\n",
+				spdk_bdev_get_name(bdev));
 			break;
 		}
 

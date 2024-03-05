@@ -246,6 +246,7 @@ jm_obj_placement_init(struct pl_jump_map *jmap, struct daos_obj_md *md,
 	jmop->jmop_pd_ptrs = NULL;
 	/* Get the Object ID and the Object class */
 	oid = md->omd_id;
+	// 根据oid 获取oc 信息
 	oc_attr = daos_oclass_attr_find(oid, &nr_grps);
 
 	if (oc_attr == NULL) {
@@ -276,13 +277,17 @@ jm_obj_placement_init(struct pl_jump_map *jmap, struct daos_obj_md *md,
 		return rc;
 
 	if (shard_md == NULL) {
+		// do_targets_nr 是当前domain 下的所有targets
+		// sx 场景 grp size 为 1。那么一个target 就算一个grp
 		unsigned int grp_max = root->do_target_nr / jmop->jmop_grp_size;
 
+		// 如果恰好为0，强制设置为 1
 		if (grp_max == 0)
 			grp_max = 1;
 
 		jmop->jmop_grp_nr = nr_grps;
 		if (jmop->jmop_grp_nr == DAOS_OBJ_GRP_MAX)
+			// sx 场景时，初始是设置为了 DAOS_OBJ_GRP_MAX
 			jmop->jmop_grp_nr = grp_max;
 		else if (jmop->jmop_grp_nr > grp_max) {
 			D_ERROR("jmop->jmop_grp_nr %d, grp_max %d, grp_size %d\n",
@@ -290,12 +295,14 @@ jm_obj_placement_init(struct pl_jump_map *jmap, struct daos_obj_md *md,
 			return -DER_INVAL;
 		}
 	} else {
+		// shard md 不为空，set grp nr == 1
 		jmop->jmop_grp_nr = 1;
 	}
 
 	D_ASSERT(jmop->jmop_grp_nr > 0);
 	D_ASSERT(jmop->jmop_grp_size > 0);
 
+	// 初始化pool domain信息
 	rc = jm_obj_pd_init(jmap, md, root, jmop);
 	if (rc == 0)
 		D_DEBUG(DB_PL, "obj="DF_OID"/ grp_size=%u grp_nr=%d, pd_nr=%u pd_grp_size=%u\n",
@@ -805,6 +812,7 @@ obj_layout_alloc_and_get(struct pl_jump_map *jmap, uint32_t layout_ver,
 		return rc;
 	}
 
+	// 生成layout
 	rc = get_object_layout(jmap, layout_ver, *layout_p, jmop, remap_list, allow_status,
 			       allow_version, md, is_extending);
 	if (rc) {
@@ -1028,6 +1036,7 @@ jump_map_obj_place(struct pl_map *map, uint32_t layout_version, struct daos_obj_
 	else
 		allow_status = PO_COMP_ST_UPIN | PO_COMP_ST_DRAIN;
 
+	// 生成layout
 	rc = obj_layout_alloc_and_get(jmap, layout_version, &jmop, md, allow_status,
 				      md->omd_ver, &layout, NULL, &is_extending);
 	if (rc != 0) {

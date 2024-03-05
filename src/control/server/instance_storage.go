@@ -104,6 +104,7 @@ func (ei *EngineInstance) awaitStorageReady(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		// 如果class 是ram，并且nvme 配置正确，直接scm format
 		if (cfg.Class == "ram") && ei.storage.BdevRoleMetaConfigured() {
 			ei.log.Debugf("scm class is ram and bdev role meta configured")
 			err := ei.storage.FormatScm(true)

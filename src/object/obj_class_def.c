@@ -25,12 +25,16 @@
 #define OC_SS_DEF_GX()					\
 {							\
 	.oc_name	= "SX",				\
+	// 摊开到所有的shards
 	.oc_id		= OC_SX,			\
+	// 无数据保护
 	.oc_redun	= OR_RP_1,			\
 	{						\
 		.ca_schema	= DAOS_OS_STRIPED,	\
 		.ca_resil	= DAOS_RES_REPL,	\
+		// 最大grp 数
 		.ca_grp_nr	= DAOS_OBJ_GRP_MAX,	\
+		// 一个 replica
 		.ca_rp_nr	= 1,			\
 	}						\
 }

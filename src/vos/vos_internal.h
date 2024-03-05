@@ -1728,12 +1728,15 @@ vos_pool2mc(struct vos_pool *vp)
 static inline struct bio_io_context *
 vos_data_ioctxt(struct vos_pool *vp)
 {
+	// 获取vos pool 的元数据信息
 	struct bio_meta_context	*mc = vos_pool2mc(vp);
 
+	// 返回data 类型的bio ctx（有data/meta/wal 三种类型的ctx，对应的是三种类型的存储设备）
 	if (mc != NULL && bio_mc2ioc(mc, SMD_DEV_TYPE_DATA) != NULL)
 		return bio_mc2ioc(mc, SMD_DEV_TYPE_DATA);
 
 	/* Use dummy I/O context when data blob doesn't exist */
+	// todo: blob 可能不存在，这时候使用dummy ctx
 	D_ASSERT(vp->vp_dummy_ioctxt != NULL);
 	return vp->vp_dummy_ioctxt;
 }
@@ -1749,6 +1752,13 @@ vos_data_ioctxt(struct vos_pool *vp)
  * replay will be able to tell that the transactions (can be potentially interfered)
  * are already committed, and skip data integriy check over them.
  */
+/*
+当一个本地的写数据事务发生时，我们并行的提交一个data write 和一个wal write来减少Nvme io延时。
+wal 在recovery 发生时依赖csum 重放来验证数据完整性
+todo: 如果不完整，怎么恢复呢？
+（vos_flush_wal_header 这个函数是专门封装给agg & pool destroy 时候显式调用的）
+另外调用flush 的地方是：bio_wal_checkpoint 和 wal_close
+*/
 static inline int
 vos_flush_wal_header(struct vos_pool *vp)
 {

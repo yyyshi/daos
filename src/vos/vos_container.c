@@ -594,6 +594,7 @@ vos_cont_destroy(daos_handle_t poh, uuid_t co_uuid)
 		D_GOTO(exit, rc);
 	}
 
+	// pool destroy 时显式flush wal
 	rc = vos_flush_wal_header(pool);
 	if (rc) {
 		D_ERROR("Failed to flush WAL header. "DF_RC"\n", DP_RC(rc));

@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <daos/drpc.h>
+#include <daos/drpc.pb-c.h>
 
 void
 print_help(char *bin_name)

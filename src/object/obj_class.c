@@ -188,9 +188,11 @@ daos_oclass_grp_size(struct daos_oclass_attr *oc_attr)
 	default:
 		return -DER_INVAL;
 
+	// 比如sx，那就是grp size 为 1，因为冗余为1
 	case DAOS_RES_REPL:
 		return oc_attr->ca_rp_nr;
 
+	// todo: ec是什么规则
 	case DAOS_RES_EC:
 		return oc_attr->ca_ec_k + oc_attr->ca_ec_p;
 	}
@@ -686,6 +688,7 @@ oclass_ident2cl(daos_oclass_id_t oc_id, uint32_t *nr_grps)
 	if (oc_id == OC_UNKNOWN)
 		return NULL;
 
+	// 二分查找
 	idx = daos_array_find(oc_ident_array, oc_ident_array_sz, oc_id,
 			      &oc_ident_sort_ops);
 	if (idx >= 0) {
@@ -929,6 +932,8 @@ obj_class_init(void)
 	}
 
 	for (i = 0; i < OC_NR; i++) {
+		// 事先把所有的oc 都写到array 里供后续查找
+		// todo: 为啥不直接用map
 		struct daos_obj_class *oc = &daos_obj_classes[i];
 
 		if (oc->oc_resil == DAOS_RES_REPL) {

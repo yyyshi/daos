@@ -45,6 +45,7 @@ const (
 
 	bdevRoleDataName = "data"
 	bdevRoleMetaName = "meta"
+	// wal begin
 	bdevRoleWALName  = "wal"
 
 	maxNrBdevTiersWithoutRoles = 1
@@ -106,6 +107,7 @@ func (c Class) String() string {
 const (
 	ClassNone Class = ""
 	ClassDcpm Class = "dcpm"
+	// MD-on-SSD
 	ClassRam  Class = "ram"
 	ClassNvme Class = "nvme"
 	ClassKdev Class = "kdev"
@@ -125,6 +127,7 @@ func NewTierConfig() *TierConfig {
 
 func (tc *TierConfig) IsSCM() bool {
 	switch tc.Class {
+	// todo: dcpm 和ram 都认为是scm 吗？
 	case ClassDcpm, ClassRam:
 		return true
 	default:
@@ -176,6 +179,7 @@ func (tc *TierConfig) WithScmDisableHugepages() *TierConfig {
 }
 
 // WithScmMountPoint sets the path to the device used for SCM storage.
+// MD-on-SSD
 func (tc *TierConfig) WithScmMountPoint(scmPath string) *TierConfig {
 	tc.Scm.MountPoint = scmPath
 	return tc
@@ -379,6 +383,7 @@ func (tcs TierConfigs) validateBdevRoles() error {
 		}
 
 		bits := roles.OptionBits
+		// wal 参数检查
 		hasWAL := (bits & BdevRoleWAL) != 0
 		hasMeta := (bits & BdevRoleMeta) != 0
 		hasData := (bits & BdevRoleData) != 0
@@ -406,18 +411,22 @@ func (tcs TierConfigs) validateBdevRoles() error {
 		return nil // MD-on-SSD is not to be enabled
 	}
 
+	// 这两种都算是scm class，其他的都是非法的
 	if sc.Class == ClassDcpm {
 		return FaultBdevConfigRolesWithDCPM
 	} else if sc.Class != ClassRam {
 		return errors.Errorf("unexpected scm class %s", sc.Class)
 	}
 
+	// 如果是ram ，那么继续下面的bdev tier 的逻辑
 	// MD-on-SSD configurations supports 1, 2 or 3 bdev tiers.
+	// MD-on-SSD 模式最大支持3个 tiers（wal，meta，data）
 	if len(bcs) > maxNrBdevTiersWithRoles {
 		return FaultBdevConfigBadNrTiersWithRoles
 	}
 
 	// When roles have been assigned, each role should be seen exactly once.
+	// 不能配置多个
 	if wal != 1 {
 		return FaultBdevConfigBadNrRoles("WAL", wal, 1)
 	}
@@ -481,6 +490,7 @@ func (tcs TierConfigs) AssignBdevTierRoles(extMetadataPath string) error {
 	}
 
 	// Apply role assignments.
+	// 分配blk role
 	switch len(bcs) {
 	case 1:
 		tcs[1].WithBdevDeviceRoles(BdevRoleAll)
@@ -541,6 +551,7 @@ func (tcs *TierConfigs) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 // ScmConfig represents a SCM (Storage Class Memory) configuration entry.
 type ScmConfig struct {
+	// MD-on-SSD
 	MountPoint       string   `yaml:"scm_mount,omitempty" cmdLongFlag:"--storage" cmdShortFlag:"-s"`
 	RamdiskSize      uint     `yaml:"scm_size,omitempty"`
 	DisableHugepages bool     `yaml:"scm_hugepages_disabled,omitempty"`

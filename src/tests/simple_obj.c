@@ -188,9 +188,12 @@ example_daos_key_array()
 	 * object (replication, Erasure coding, no protection). In this case, we
 	 * choose max striping with no data prorection - OC_SX.
 	 */
+	// oc 用于数据保护和sharding
 	daos_obj_generate_oid(coh, &oid, 0, OC_SX, 0, 0);
 
 	/** open DAOS object */
+	// simple test
+	// 打开一个obj，返回object hdl。这里会查询元数据信息
 	rc = daos_obj_open(coh, oid, DAOS_OO_RW, &oh, NULL);
 	ASSERT(rc == 0, "object open failed with %d", rc);
 
@@ -204,16 +207,24 @@ example_daos_key_array()
 	 * single akey, other than the space available on a single target.
 	 */
 
+	// 这个例子里，我们创建一个含有10个dkey 的object，每个dkey 有1个akey。
+	// 用户可以按照喜好创建他们喜欢的个数的dkey在一个object 中。
+	// 同一个dkey 下的所有akey 和value 会保证被存储到同一个target上。
+	// 在一个single dkey 上可以无限制的创建akey，一个akey 上可以无限制的创建records（除非存储空间不足）
 	/*
 	 * init buffer (for this example, we reuse the same buffer for all the
 	 * updates just for simplicity.
 	 */
+	// 构建模拟写入的buffer数据
 	dts_buf_render(buf, BUFLEN);
 
+	// 创建10 个dkey
+	// todo: 一个object 下的10 个dkey 是什么布局的
 	for (i = 0; i < KEYS; i++) {
 		d_sg_list_t	sgl;
 		d_iov_t		sg_iov;
 		daos_iod_t	iod;
+		// 存储records，是extent 的数组
 		daos_recx_t	recx;
 
 		/** init dkey */
@@ -225,12 +236,14 @@ example_daos_key_array()
 		 * this case it's a single contiguous buffer, but this gives the
 		 * ability to provide an iovec for segmented buffer in memory.
 		 */
+		// 构造sgl，存储的要写入的buffer 数据
 		d_iov_set(&sg_iov, buf, BUFLEN);
 		sgl.sg_nr		= 1;
 		sgl.sg_nr_out		= 0;
 		sgl.sg_iovs		= &sg_iov;
 
 		/** init I/O descriptor */
+		// 构造iod
 		d_iov_set(&iod.iod_name, "akey", strlen("akey")); /** akey */
 
 		/*
@@ -239,9 +252,15 @@ example_daos_key_array()
 		 * access similar to an iovec for file offsets. Each process
 		 * writes 1k extent contiguously: 0: 0, 1:1024, 2:2048, etc.
 		 */
+		// todo: 用户端是如何自定义存储相关的设置的
+		// 1 表示一个extent，即recx 里面只有一个extent
 		iod.iod_nr	= 1;
+		// record 的容量大小
 		iod.iod_size	= 1; /** record size (1 byte array here) */
+		// todo: extent
+		// 每个extent 容量都是1k 大小
 		recx.rx_nr	= BUFLEN; /** extent size */
+		// todo: extent 的偏移量，每次偏移量都是 0 吗？
 		recx.rx_idx	= rank * BUFLEN; /** extent offset */
 		iod.iod_recxs	= &recx;
 		iod.iod_type	= DAOS_IOD_ARRAY; /** value type of the akey */
@@ -253,11 +272,14 @@ example_daos_key_array()
 		 * number of akeys passed as the nr (5th argument to this
 		 * function.
 		 */
+		// 写入一个dkey，当前场景一个dkey 下有一个akey，因此对应1 个iod 和 1个sgl。
+		// 对于多个akey 的场景，这个函数传递iods 和sgls 数组以及个数（参数5）作为函数参数
 		rc = daos_obj_update(oh, DAOS_TX_NONE, 0, &dkey, 1, &iod, &sgl,
 				     NULL);
 		ASSERT(rc == 0, "object update failed with %d", rc);
 	}
 
+	// 上面是写入，这里是将写入的dkey 读出来
 	for (i = 0; i < KEYS; i++) {
 		d_sg_list_t	sgl;
 		d_iov_t		sg_iov;
@@ -459,6 +481,7 @@ example_daos_key_sv()
 		printf("SUCCESS\n");
 }
 
+// daos array test
 void
 example_daos_array()
 {
@@ -477,6 +500,7 @@ example_daos_array()
 	 * for the oid.lo to allocate 1 or more unique oids in the
 	 * container. Please see: daos_cont_alloc_oids();
 	 */
+	// todo: 用户自己指定oid 吗
 	oid.hi = 0;
 	oid.lo = 3;
 
@@ -484,6 +508,7 @@ example_daos_array()
 	 * Convenience function to generate a DAOS Array object ID by encoding
 	 * the private DAOS bits of the object address space.
 	 */
+	// 因为是array object，需要单独生成一个array object id
 	daos_array_generate_oid(coh, &oid, true, 0, 0, 0);
 
 	/*
@@ -491,6 +516,7 @@ example_daos_array()
 	 * size (similar to stripe size in Lustre). Both are configurable by the
 	 * user of course.
 	 */
+	// 传入cont 和oid，创建一个 array，返回 oh
 	if (rank == 0) {
 		rc = daos_array_create(coh, oid, DAOS_TX_NONE, 1, 1048576, &oh,
 				       NULL);
@@ -502,6 +528,7 @@ example_daos_array()
 	if (rank != 0) {
 		size_t cell_size, csize;
 
+		// 打开创建的array
 		rc = daos_array_open(coh, oid, DAOS_TX_NONE, DAOS_OO_RW,
 				     &cell_size, &csize, &oh, NULL);
 		ASSERT(rc == 0, "array open failed with %d", rc);
@@ -509,6 +536,7 @@ example_daos_array()
 		ASSERT(csize == 1048576, "array open failed");
 	}
 
+	// 构造sgl list
 	daos_array_iod_t iod;
 	d_sg_list_t	sgl;
 	daos_range_t	rg;
@@ -527,6 +555,7 @@ example_daos_array()
 	sgl.sg_iovs = &iov;
 
 	/** Write */
+	// array write 接口
 	rc = daos_array_write(oh, DAOS_TX_NONE, &iod, &sgl, NULL);
 	ASSERT(rc == 0, "array write failed with %d", rc);
 
@@ -541,6 +570,7 @@ example_daos_array()
 	sgl.sg_iovs = &iov;
 
 	/** read & verify */
+	// array read 接口
 	rc = daos_array_read(oh, DAOS_TX_NONE, &iod, &sgl, NULL);
 	ASSERT(rc == 0, "array read failed with %d", rc);
 

@@ -62,7 +62,11 @@ struct wal_header {
  * When the transaction spans multiple WAL blocks, the header will be duplicated to the
  * head of each block.
  */
-
+/*
+wal 事务从一个 wal_trans_head 开始，这之后会立即放置一个或者多个 wal_trans_entry，
+entrys 中的 payload data 紧邻最后一个entry。wal_trans_tail 将会被放置到payload 后。
+当一个事务跨越多个wal 块时候，header 将会被复制到每个块的头部
+*/
 /* WAL transaction header */
 struct wal_trans_head {
 	uint32_t	th_magic;

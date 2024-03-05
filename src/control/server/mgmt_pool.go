@@ -273,6 +273,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 		return nil, errors.Wrapf(err, "failed to parse pool UUID %q", req.GetUuid())
 	}
 
+	// 创池先给sysdb 加锁
 	lock, err := svc.sysdb.TakePoolLock(parent, poolUUID)
 	if err != nil {
 		return nil, err
@@ -281,6 +282,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 	ctx := lock.InContext(parent)
 
 	resp = new(mgmtpb.PoolCreateResp)
+	// 去sysdb 里查询pool 是不是已经存在
 	ps, err := svc.sysdb.FindPoolServiceByUUID(poolUUID)
 	if ps != nil {
 		svc.log.Debugf("found pool %s state=%s", ps.PoolUUID, ps.State)
@@ -294,13 +296,16 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 		// shuffle that results in the pool being successfully created by the previous
 		// gRPC handler which returned an error to the client after being unable to
 		// persist the state update.
+		// todo: 这里为啥又去查询一次pool？
 		qr, err := svc.PoolQuery(ctx, &mgmtpb.PoolQueryReq{Id: req.Uuid, Sys: req.Sys})
 		if err != nil {
 			return nil, errors.Wrap(err, "query on already-created pool failed")
 		}
 
 		resp.Leader = qr.Leader
+		// todo: srv ranks，跟daos_agent 有关，咋确定的
 		resp.SvcReps = ranklist.RanksToUint32(ps.Replicas)
+		// storage ranks
 		resp.TgtRanks = ranklist.RanksToUint32(ps.Storage.CreationRanks())
 		resp.TierBytes = ps.Storage.PerRankTierStorage
 		// TODO DAOS-14223: Store Meta-Blob-Size in sysdb.
@@ -333,6 +338,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 		return nil, FaultPoolNoLabel
 	}
 
+	// todo: sysdb 里面都存什么，这个玩意是在系统启动的时候就根据配置文件存入一些信息吗？
 	allRanks, err := svc.sysdb.MemberRanks(system.AvailableMemberFilter)
 	if err != nil {
 		return nil, err
@@ -355,6 +361,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 		// Otherwise, create the pool across the requested number of
 		// available ranks in the system (if the request does not
 		// specify a number of ranks, all are used).
+		// 不带参数的话，使用所有的rank 创建池
 		nAllRanks := len(allRanks)
 		nRanks := nAllRanks
 		if req.GetNumranks() > 0 {
@@ -411,6 +418,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 
 	ps = system.NewPoolService(poolUUID, req.Tierbytes, ranklist.RanksFromUint32(req.GetRanks()))
 	ps.PoolLabel = poolLabel
+	// 存的是啥
 	if err := svc.sysdb.AddPoolService(ctx, ps); err != nil {
 		return nil, err
 	}
@@ -452,6 +460,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 		}
 	}()
 
+	// 发送创建池 drpc 请求
 	dresp, err := svc.harness.CallDrpc(ctx, drpc.MethodPoolCreate, req)
 	if err != nil {
 		svc.log.Errorf("pool create dRPC call failed: %s", err)
@@ -474,6 +483,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 		return nil, errors.Wrap(err, "unmarshal PoolCreate response")
 	}
 
+	// 创建失败，删除pool 信息
 	if resp.GetStatus() != 0 {
 		if err := svc.sysdb.RemovePoolService(ctx, ps.PoolUUID); err != nil {
 			return nil, err
@@ -484,6 +494,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 
 	ps.Replicas = ranklist.RanksFromUint32(resp.GetSvcReps())
 	ps.State = system.PoolServiceStateReady
+	// 更新pool 信息
 	if err := svc.sysdb.UpdatePoolService(ctx, ps); err != nil {
 		return nil, err
 	}

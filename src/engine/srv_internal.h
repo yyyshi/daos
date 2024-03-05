@@ -9,7 +9,6 @@
 #include <daos_srv/daos_engine.h>
 #include <daos/stack_mmap.h>
 #include <gurt/telemetry_common.h>
-#include <gurt/heap.h>
 
 /**
  * Argobots ULT pools for different tasks, NET_POLL & NVME_POLL
@@ -33,7 +32,6 @@ struct sched_stats {
 	struct d_tm_node_t	*ss_sq_len;		/* Sleep queue length */
 	struct d_tm_node_t	*ss_cycle_duration;	/* Cycle duration (ms) */
 	struct d_tm_node_t	*ss_cycle_size;		/* Total ULTs in a cycle */
-	struct d_tm_node_t	*ss_total_reject;	/* Total Rejected requests */
 	uint64_t		 ss_busy_ts;		/* Last busy timestamp (ms) */
 	uint64_t		 ss_watchdog_ts;	/* Last watchdog print ts (ms) */
 	void			*ss_last_unit;		/* Last executed unit */
@@ -43,7 +41,6 @@ struct sched_info {
 	uint64_t		 si_cur_ts;	/* Current timestamp (ms) */
 	uint64_t		 si_cur_seq;	/* Current schedule sequence */
 	uint64_t		 si_ult_start;	/* Start time of last executed unit */
-	uint64_t		 si_cur_id;	/* Current sequence ID for incoming RPC */
 	void			*si_ult_func;	/* Function addr of last executed unit */
 	struct sched_stats	 si_stats;	/* Sched stats */
 	d_list_t		 si_idle_list;	/* All unused requests */
@@ -51,15 +48,9 @@ struct sched_info {
 	d_list_t		 si_fifo_list;	/* All IO requests in FIFO */
 	d_list_t		 si_purge_list;	/* Stale sched_pool_info */
 	struct d_hash_table	*si_pool_hash;	/* All sched_pool_info */
-	struct d_binheap	 si_heap;	/* All retried RPC */
-	/* Total inuse request count */
-	uint32_t		 si_total_req_cnt;
-	/* Request count for each type of inuse request */
-	uint32_t		 si_req_cnt[SCHED_REQ_MAX];
+	uint32_t		 si_req_cnt;	/* Total inuse request count */
 	int			 si_sleep_cnt;	/* Sleeping request count */
 	int			 si_wait_cnt;	/* Long wait request count */
-	/* Number of kicked requests for each type in current cycle */
-	uint32_t		 si_kicked_req_cnt[SCHED_REQ_MAX];
 	unsigned int		 si_stop:1;
 };
 
@@ -368,8 +359,13 @@ static inline bool
 dss_xstream_has_nvme(struct dss_xstream *dx)
 {
 
+	// main xs 直接返回true
+	// 调用位置搜：设置是否为main xs 的唯一的地方
 	if (dx->dx_main_xs != 0)
 		return true;
+	// todo: daos 配置文件中的nvme 设备是怎么传输给spdk 的
+	// 不是main xs，但满足 meta 类型role 在配置文件中配置 && 当前是第一个xs。也返回true
+	// 一共有三种类型的role（data/meta/wal）
 	if (bio_nvme_configured(SMD_DEV_TYPE_META) && dx->dx_xs_id == 0)
 		return true;
 

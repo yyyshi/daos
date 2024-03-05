@@ -7,6 +7,7 @@ import os
 
 from apricot import TestWithServers
 from ClusterShell.NodeSet import NodeSet
+from general_utils import check_for_pool
 
 RESULT_PASS = "PASS"  # nosec
 RESULT_FAIL = "FAIL"
@@ -31,7 +32,7 @@ class MultiServerCreateDeleteTest(TestWithServers):
         :avocado: tags=all,full_regression
         :avocado: tags=vm
         :avocado: tags=pool,multitarget
-        :avocado: tags=MultiServerCreateDeleteTest,test_create
+        :avocado: tags=multiserver_create_delete,test_create
         """
         # Accumulate a list of pass/fail indicators representing what is
         # expected for each parameter then "and" them to determine the
@@ -59,8 +60,6 @@ class MultiServerCreateDeleteTest(TestWithServers):
         host2 = NodeSet(self.hostlist_servers[1])
         test_destroy = True
 
-        scm_mount = self.server_managers[0].get_config_value("scm_mount")
-
         self.add_pool(create=False)
         self.pool.uid = user
         self.pool.gid = group
@@ -75,11 +74,11 @@ class MultiServerCreateDeleteTest(TestWithServers):
             if expected_result == RESULT_FAIL:
                 self.fail("Test was expected to fail but it passed at pool create.")
             if '0' in tgtlist:
-                # verify_uuid_directory checks if the uuid directory exists in host1
-                if not self.pool.verify_uuid_directory(host1, scm_mount):
+                # check_for_pool checks if the uuid directory exists in host1
+                if not check_for_pool(host1, self.pool.uuid):
                     self.fail("Pool {0} not found on host {1}.\n".format(self.pool.uuid, host1))
             if '1' in tgtlist:
-                if not self.pool.verify_uuid_directory(host2, scm_mount):
+                if not check_for_pool(host2, self.pool.uuid):
                     self.fail("Pool {0} not found on host {1}.\n".format(self.pool.uuid, host2))
         else:
             test_destroy = False
@@ -97,10 +96,10 @@ class MultiServerCreateDeleteTest(TestWithServers):
                 if expected_result == RESULT_FAIL:
                     self.fail("Test was expected to fail but it passed at pool create.")
                 if '0' in tgtlist:
-                    if self.pool.verify_uuid_directory(host1, scm_mount):
+                    if check_for_pool(host1, self.pool.uuid):
                         self.fail("Pool {0} found on host {1} after destroy.".format(uuid, host1))
                 if '1' in tgtlist:
-                    if self.pool.verify_uuid_directory(host2, scm_mount):
+                    if check_for_pool(host2, self.pool.uuid):
                         self.fail("Pool {0} found on host {1} after destroy.".format(uuid, host2))
             else:
                 if expected_result == RESULT_PASS:

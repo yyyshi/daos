@@ -26,7 +26,9 @@ def scons():
     test_env.AppendUnique(RPATH_FULL=LIBPATH)
 
     for test in TEST_SRC:
-        testprog = test_env.d_test_program(source=[test, cart_targets, swim_targets, gurt_targets])
+        flags = []
+        testprog = test_env.d_test_program(source=[test, cart_targets, swim_targets, gurt_targets],
+                                           LINKFLAGS=flags)
         Default(testprog)
 
 

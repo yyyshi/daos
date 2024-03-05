@@ -298,16 +298,21 @@ obj_layout_create(struct dc_object *obj, unsigned int mode, bool refresh)
 	pool = obj->cob_pool;
 	D_ASSERT(pool != NULL);
 
+	// 按pool 的uuid 查找元数据信息，未找到，就报错（pool 通用的元数据）
+	// todo: 这是pool 的元数据信息，obj 自己的元数据呢
 	map = pl_map_find(pool->dp_pool, obj->cob_md.omd_id);
 	if (map == NULL) {
 		D_DEBUG(DB_PL, "Cannot find valid placement map\n");
 		D_GOTO(out, rc = -DER_INVAL);
 	}
 
+	// 使用查找到的数据来初始化元数据信息
 	obj->cob_md.omd_ver = dc_pool_get_version(pool);
 	obj->cob_md.omd_pdom_lvl = dc_obj_get_pdom(obj);
 	obj->cob_md.omd_fdom_lvl = dc_obj_get_redun_lvl(obj);
 	obj->cob_md.omd_pda = dc_obj_get_pda(obj);
+	// 生成object 的layout
+	// todo: 怎么生成的
 	rc = obj_pl_place(map, obj->cob_layout_version, &obj->cob_md, mode,
 			  NULL, &layout);
 	pl_map_decref(map);
@@ -333,6 +338,7 @@ obj_layout_create(struct dc_object *obj, unsigned int mode, bool refresh)
 		D_GOTO(out, rc = -DER_NOMEM);
 
 	obj->cob_shards_nr = layout->ol_nr;
+	// grp size, sx 场景为 1
 	obj->cob_grp_size = layout->ol_grp_size;
 	old = obj->cob_grp_nr;
 	obj->cob_grp_nr = obj->cob_shards_nr / obj->cob_grp_size;
@@ -346,6 +352,7 @@ obj_layout_create(struct dc_object *obj, unsigned int mode, bool refresh)
 			D_GOTO(out, rc = -DER_NOMEM);
 	}
 
+	// 根据生成的layout 来初始化object shard 信息
 	for (i = 0; i < layout->ol_nr; i++) {
 		struct dc_obj_shard *obj_shard;
 
@@ -441,6 +448,7 @@ obj_init_oca(struct dc_object *obj)
 	struct daos_oclass_attr *oca;
 	uint32_t		nr_grps;
 
+	// 根据oid 查找oca，创建pool cont的时候存起来的
 	oca = daos_oclass_attr_find(obj->cob_md.omd_id, &nr_grps);
 	if (!oca)
 		return -DER_INVAL;
@@ -785,6 +793,7 @@ unlock:
 	return rc;
 }
 
+// 获取leader
 int
 obj_grp_leader_get(struct dc_object *obj, int grp_idx, uint64_t dkey_hash,
 		   bool cond_modify, unsigned int map_ver, uint8_t *bit_map)
@@ -841,6 +850,7 @@ obj_dkey2grpidx(struct dc_object *obj, uint64_t hash, unsigned int map_ver)
 
 	D_ASSERT(obj->cob_shards_nr >= grp_size);
 
+	// sx 场景时，cob_shards_nr == 所有的targets 个数。grp size == 1
 	grp_idx = obj_pl_grp_idx(obj->cob_layout_version, hash,
 				 obj->cob_shards_nr / grp_size);
 	D_RWLOCK_UNLOCK(&obj->cob_lock);
@@ -854,11 +864,15 @@ obj_dkey2grpmemb(struct dc_object *obj, uint64_t hash, uint32_t map_ver,
 {
 	int	 grp_idx;
 
+	// 根据dkey 的hash 值获取grp idx
+	// dkey 的目的就是分布式的分散数据，分散方式就是根据hash，所以返回指定的grp idx，表示的就是被划分到的bucket
 	grp_idx = obj_dkey2grpidx(obj, hash, map_ver);
 	if (grp_idx < 0)
 		return grp_idx;
 
+	// sx 场景时候grp size是 1，grp_idx 相当于就是某个target的index
 	*grp_size = obj_get_grp_size(obj);
+	// todo: 这个grp 的布局是啥样的，为啥这么计算
 	*start_shard = grp_idx * *grp_size;
 	return 0;
 }
@@ -1157,8 +1171,10 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 	 * in OSA case, possibly obj_get_grp_size > daos_oclass_grp_size so the start_shard
 	 * is different with ort_start_shard.
 	 */
+	// start_shard 是shard idx。ort_start_shard 是shard id
 	req_tgts->ort_start_shard = (start_shard / obj_get_grp_size(obj)) *
 				    daos_oclass_grp_size(oca);
+	// 如果ort_srv_disp == 1，那么每个group 里的第一个target 是leader
 	req_tgts->ort_srv_disp = !cli_disp && grp_size > 1;
 
 	if (shard_cnt > OBJ_TGT_INLINE_NR) {
@@ -1219,6 +1235,7 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 			    DAOS_FAIL_CHECK(DAOS_DTX_SPEC_LEADER)) {
 				leader_shard = 0;
 			} else {
+				// 获取leader shard
 				leader_shard = obj_grp_leader_get(obj, grp_idx, obj_auxi->dkey_hash,
 								  obj_auxi->cond_modify,
 								  map_ver, bit_map);
@@ -1232,6 +1249,7 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 					obj_get_replicas(obj), DP_RC(leader_shard));
 				D_GOTO(out, rc = leader_shard);
 			}
+			// 根据leader shard 返回target id
 			rc = obj_shard_tgts_query(obj, map_ver, leader_shard,
 						  tgt, obj_auxi, NIL_BITMAP);
 			if (rc < 0)
@@ -1468,6 +1486,7 @@ dc_obj_open(tse_task_t *task)
 	args = dc_task_get_args(task);
 	D_ASSERTF(args != NULL, "Task Argument OPC does not match DC OPC\n");
 
+	// open 并不是打开一个现有的object，而是直接创建一个
 	obj = obj_alloc();
 	if (obj == NULL)
 		D_GOTO(out, rc = -DER_NOMEM);
@@ -1491,16 +1510,19 @@ dc_obj_open(tse_task_t *task)
 		D_GOTO(fail_spin_created, rc);
 
 	/* it is a local operation for now, does not require event */
+	// todo: 啥也没做啊
 	rc = dc_obj_fetch_md(args->oid, &obj->cob_md);
 	if (rc != 0)
 		D_GOTO(fail_rwlock_created, rc);
 
 	D_ASSERT(obj->cob_co->dc_props.dcp_obj_version < MAX_OBJ_LAYOUT_VERSION);
 	obj->cob_layout_version = obj->cob_co->dc_props.dcp_obj_version;
+	// 根据创建cont 时候传入的oca 信息初始化object 的oca
 	rc = obj_init_oca(obj);
 	if (rc != 0)
 		D_GOTO(fail_rwlock_created, rc);
 
+	// 创建layout，内部会构建obj 的元数据信息
 	rc = obj_layout_create(obj, obj->cob_mode, false);
 	if (rc != 0)
 		D_GOTO(fail_rwlock_created, rc);
@@ -1568,6 +1590,9 @@ dc_obj_fetch_md(daos_obj_id_t oid, struct daos_obj_md *md)
 	/* For predefined object classes, do nothing at here. But for those
 	 * customized classes, we need to fetch for the remote OI table.
 	 */
+	// todo:
+	// 对于预定义的object class，不做任何事
+	// 对于定制的class，我们需要获取远程oi table
 	md->omd_id	= oid;
 	md->omd_ver	= 0;
 	md->omd_pda	= 0;
@@ -1713,8 +1738,7 @@ dc_obj_layout_refresh(daos_handle_t oh)
 }
 
 uint32_t
-dc_obj_retry_delay(tse_task_t *task, int err, uint16_t *retry_cnt, uint16_t *inprogress_cnt,
-		   uint32_t timeout_sec)
+dc_obj_retry_delay(tse_task_t *task, int err, uint16_t *retry_cnt, uint16_t *inprogress_cnt)
 {
 	uint32_t	delay = 0;
 
@@ -1730,12 +1754,6 @@ dc_obj_retry_delay(tse_task_t *task, int err, uint16_t *retry_cnt, uint16_t *inp
 				task, (int)*inprogress_cnt, (int)*retry_cnt, delay);
 		}
 	}
-
-	/*
-	 * Randomly delay [1,  max_delay - 5] for DER_OVERLOAD_RETRY case.
-	 */
-	if (err == -DER_OVERLOAD_RETRY)
-		delay = daos_rpc_rand_delay(timeout_sec) << 20;
 
 	return delay;
 }
@@ -1768,7 +1786,7 @@ obj_retry_cb(tse_task_t *task, struct dc_object *obj,
 		}
 
 		delay = dc_obj_retry_delay(task, result, &obj_auxi->retry_cnt,
-					   &obj_auxi->inprogress_cnt, obj_auxi->max_delay);
+					   &obj_auxi->inprogress_cnt);
 		rc = tse_task_reinit_with_delay(task, delay);
 		if (rc != 0)
 			D_GOTO(err, rc);
@@ -2024,15 +2042,18 @@ obj_bulk_prep(d_sg_list_t *sgls, unsigned int nr, bool bulk_bind,
 		D_GOTO(out, rc = -DER_NOMEM);
 
 	/* create bulk handles for sgls */
+	// 为sgls 创建bulk 句柄
 	for (; sgls != NULL && i < nr; i++) {
 		if (sgls[i].sg_iovs != NULL &&
 		    sgls[i].sg_iovs[0].iov_buf != NULL) {
+			// 每一个sgls 对应一个bulk
 			rc = crt_bulk_create(daos_task2ctx(task), &sgls[i],
 					     bulk_perm, &bulks[i]);
 			if (rc < 0)
 				D_GOTO(out, rc);
 			if (!bulk_bind)
 				continue;
+			// 将bulk 和task 绑定
 			rc = crt_bulk_bind(bulks[i], daos_task2ctx(task));
 			if (rc != 0)
 				D_GOTO(out, rc);
@@ -2092,9 +2113,11 @@ obj_rw_bulk_prep(struct dc_object *obj, daos_iod_t *iods, d_sg_list_t *sgls,
 	 * if need bulk transferring.
 	 */
 	sgls_size = daos_sgls_packed_size(sgls, nr, NULL);
+	// 用来决定用那种方式完成传输。inline 方式或者 rdma 方式
 	if (sgls_size >= DAOS_BULK_LIMIT ||
 	    (obj_is_ec(obj) && !obj_auxi->reasb_req.orr_single_tgt)) {
 		bulk_perm = update ? CRT_BULK_RO : CRT_BULK_RW;
+		// 根据sgl 填充bulks 成员
 		rc = obj_bulk_prep(sgls, nr, bulk_bind, bulk_perm, task,
 				   &obj_auxi->bulks);
 	}
@@ -2719,9 +2742,6 @@ shard_auxi_set_param(struct shard_auxi_args *shard_arg, uint32_t map_ver,
 		     uint32_t shard, uint32_t tgt_id, struct dtx_epoch *epoch,
 		     uint16_t ec_tgt_idx)
 {
-	/* Reset @enqueue_id if target changed */
-	if (shard_arg->target != tgt_id)
-		shard_arg->enqueue_id = 0;
 	shard_arg->epoch = *epoch;
 	shard_arg->shard = shard;
 	shard_arg->target = tgt_id;
@@ -2899,6 +2919,7 @@ shard_io(tse_task_t *task, struct shard_auxi_args *shard_auxi)
 		fw_cnt = 0;
 	}
 
+	// obj_req_fanout 里面传入的shard 读写的cb 函数。当前函数也是在 obj_req_fanout 里面调用的
 	rc = shard_auxi->shard_io_cb(obj_shard, obj_auxi->opc, shard_auxi,
 				     fw_shard_tgts, fw_cnt, task);
 	return rc;
@@ -5466,6 +5487,7 @@ out:
 	return rc;
 }
 
+// 对应的写接口是 dc_obj_update_task
 int
 dc_obj_fetch_task(tse_task_t *task)
 {
@@ -5605,6 +5627,7 @@ obj_update_shards_get(struct dc_object *obj, daos_obj_fetch_t *args, unsigned in
 	int		i;
 	int		rc = 0;
 
+	// 多副本模式直接返回
 	if (!obj_is_ec(obj))
 		return obj_dkey2grpmemb(obj, obj_auxi->dkey_hash, map_ver, shard, shard_cnt);
 
@@ -5683,6 +5706,8 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 	uint32_t		shard_cnt;
 	int			rc;
 
+	// todo: obj 能提供哪些信息？
+	// 根据obj 构建obj auxi
 	rc = obj_task_init(task, DAOS_OBJ_RPC_UPDATE, map_ver, args->th,
 			   &obj_auxi, obj);
 	if (rc != 0) {
@@ -5690,6 +5715,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 		D_GOTO(out_task, rc);
 	}
 
+	// sgls 去重
 	rc = obj_update_sgls_dup(obj_auxi, args);
 	if (rc) {
 		D_ERROR(DF_OID" obj_update_sgls_dup failed %d.\n", DP_OID(obj->cob_md.omd_id), rc);
@@ -5723,11 +5749,15 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 	 * which needs to be binded or unbinded.
 	 * So let's free the existent bulk, and recreate the bulk later.
 	 */
+	// 如果pool map 刷新，这里的数据可能会被转发到其他的target节点，所以这里先释放bulks，之后再重新构建
+	// todo: 之后是根据sgl 构建的，那上面所说的pool map 更新不会影响sgl 的数据吗，为什么要释放bulk
 	if (obj_auxi->io_retry && obj_auxi->bulks != NULL) {
+		// todo: 这里会free 掉bulks
 		obj_bulk_fini(obj_auxi);
 		obj_io_set_new_shard_task(obj_auxi);
 	}
 
+	// 根据obj 获取shards。目前只看了replica 模式，ec 模式还没研究
 	rc = obj_update_shards_get(obj, args, map_ver, obj_auxi, &shard, &shard_cnt);
 	if (rc != 0) {
 		D_ERROR(DF_OID" get update shards failure %d\n", DP_OID(obj->cob_md.omd_id), rc);
@@ -5737,6 +5767,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 	if (args->flags & DAOS_COND_MASK)
 		obj_auxi->cond_modify = 1;
 
+	// 根据shard 获取target（这个target 是leader target id）
 	rc = obj_shards_2_fwtgts(obj, map_ver, tgt_bitmap, shard, shard_cnt, 1,
 				 OBJ_TGT_FLAG_FW_LEADER_INFO, obj_auxi);
 	if (rc != 0)
@@ -5756,6 +5787,8 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 		D_ERROR("obj_csum_update error: "DF_RC"\n", DP_RC(rc));
 		goto out_task;
 	}
+
+	// todo: 这里的usgl 和上面的sgl有什么区别
 	if (obj_auxi->is_ec_obj && obj_auxi->req_reasbed && obj_auxi->reasb_req.orr_single_tgt)
 		args->sgls = obj_auxi->reasb_req.orr_usgls;
 
@@ -5765,11 +5798,13 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 	D_DEBUG(DB_IO, "update "DF_OID" dkey_hash "DF_U64"\n",
 		DP_OID(obj->cob_md.omd_id), obj_auxi->dkey_hash);
 
+	// 判断sgls 数据的大小是否超过bulk 限制，超过的话使用sgls 组装bulks 结构，bulks将采用rdma 传输（另外一种传输方式是inline传输，传统的直接拷贝rpc 中数据）
 	rc = obj_rw_bulk_prep(obj, args->iods, args->sgls, args->nr, true,
 			      obj_auxi->req_tgts.ort_srv_disp, task, obj_auxi);
 	if (rc != 0)
 		goto out_task;
 
+	// 扇出，内部会调用shard_io，进而调用 dc_obj_shard_rw，里面会发送rpc 的写请求到服务端
 	rc = obj_req_fanout(obj, obj_auxi, map_ver, epoch,
 			    shard_rw_prep, dc_obj_shard_rw, task);
 	return rc;
@@ -5779,25 +5814,31 @@ out_task:
 	return rc;
 }
 
+
+// 对应的读接口是 dc_obj_fetch_task
 int
 dc_obj_update_task(tse_task_t *task)
 {
 	daos_obj_update_t	*args = dc_task_get_args(task);
+	// todo: obj 是啥用
 	struct dc_object	*obj = NULL;
 	struct dtx_epoch	 epoch = {0};
 	unsigned int		 map_ver = 0;
 	int			 rc;
 
+	// 检查合法性
 	rc = obj_req_valid(task, args, DAOS_OBJ_RPC_UPDATE, &epoch, &map_ver,
 			   &obj);
 	if (rc != 0)
 		goto comp;
 
+	// 事务相关
 	if (daos_handle_is_valid(args->th))
 		/* add the operation to DTX and complete immediately */
 		return dc_tx_attach(args->th, obj, DAOS_OBJ_RPC_UPDATE, task, 0, true);
 
 	/* submit the update */
+	// 客户端的biod 和sgls 都在args 里
 	return dc_obj_update(task, &epoch, map_ver, args, obj);
 
 comp:
@@ -6845,9 +6886,7 @@ shard_query_key_task(tse_task_t *task)
 				    api_args->dkey, api_args->akey,
 				    api_args->recx, api_args->max_epoch, args->kqa_coh_uuid,
 				    args->kqa_cont_uuid, &args->kqa_dti,
-				    &args->kqa_auxi.obj_auxi->map_ver_reply, th, task,
-				    &args->kqa_auxi.obj_auxi->max_delay,
-				    &args->kqa_auxi.enqueue_id);
+				    &args->kqa_auxi.obj_auxi->map_ver_reply, th, task);
 
 	return rc;
 }
@@ -6862,8 +6901,7 @@ queue_shard_query_key_task(tse_task_t *api_task, struct obj_auxi_args *obj_auxi,
 	tse_task_t			*task;
 	struct shard_query_key_args	*args;
 	d_list_t			*head = NULL;
-	int				 rc;
-	uint32_t			 target;
+	int				rc;
 
 	rc = tse_task_create(shard_query_key_task, sched, NULL, &task);
 	if (rc != 0)
@@ -6878,15 +6916,10 @@ queue_shard_query_key_task(tse_task_t *api_task, struct obj_auxi_args *obj_auxi,
 	uuid_copy(args->kqa_coh_uuid, coh_uuid);
 	uuid_copy(args->kqa_cont_uuid, cont_uuid);
 
-	rc = obj_shard2tgtid(obj, shard, map_ver, &target);
+	rc = obj_shard2tgtid(obj, shard, map_ver,
+			     &args->kqa_auxi.target);
 	if (rc != 0)
 		D_GOTO(out_task, rc);
-
-	/* Reset @enqueue_id if target changed */
-	if (target != args->kqa_auxi.target)
-		args->kqa_auxi.enqueue_id = 0;
-
-	args->kqa_auxi.target = target;
 
 	rc = tse_task_register_deps(api_task, 1, &task);
 	if (rc != 0)

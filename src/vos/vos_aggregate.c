@@ -2561,6 +2561,7 @@ aggregate_enter(struct vos_container *cont, int agg_mode, daos_epoch_range_t *ep
 		break;
 	}
 
+	// agg 时显式的flush wal
 	rc = vos_flush_wal_header(cont->vc_pool);
 	if (rc)
 		D_ERROR(DF_CONT": Failed to flush WAL header. "DF_RC"\n",

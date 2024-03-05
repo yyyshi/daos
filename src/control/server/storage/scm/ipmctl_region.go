@@ -162,6 +162,10 @@ var (
 		BinaryName: ipmctlName,
 		Args:       []string{"create", "-f", "-goal", "PersistentMemoryType=AppDirect"},
 	}
+	cmdRemoveRegions = pmemCmd{
+		BinaryName: ipmctlName,
+		Args:       []string{"create", "-f", "-goal", "MemoryMode=100"},
+	}
 	cmdDeleteGoals = pmemCmd{
 		BinaryName: ipmctlName,
 		Args:       []string{"delete", "-goal"},
@@ -260,6 +264,16 @@ func (cr *cmdRunner) createRegions(sockID int) error {
 	cr.log.Debug("set interleaved appdirect goal to create regions")
 
 	_, err := cr.runRegionCmd(sockID, cmdCreateRegions)
+	return err
+}
+
+func (cr *cmdRunner) removeRegions(sockID int) error {
+	if err := cr.checkIpmctl(badIpmctlVers); err != nil {
+		return errors.WithMessage(err, "checkIpmctl")
+	}
+	cr.log.Debug("set memory mode goal to remove regions")
+
+	_, err := cr.runRegionCmd(sockID, cmdRemoveRegions)
 	return err
 }
 

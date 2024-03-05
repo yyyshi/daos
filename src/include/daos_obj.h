@@ -335,12 +335,14 @@ enum {
  */
 typedef struct {
 	/** Indice of the first record in the extent */
+	// extent 中的第一个record 的idx
 	uint64_t	rx_idx;
 	/**
 	 * Number of contiguous records in the extent
 	 * If \a rx_nr is equal to 1, the extent is composed of a single record
 	 * at indice \a rx_idx
 	 */
+	// extent 中record 的个数
 	uint64_t	rx_nr;
 } daos_recx_t;
 
@@ -390,6 +392,7 @@ typedef struct {
 	 * record in the extent and the number of records to access. If the
 	 * type of the iod is single, this is ignored.
 	 */
+	// extent 的数组。每个数组元素包含当前这个extent 的第一个record 的idx 和所有record 的个数
 	daos_recx_t		*iod_recxs;
 } daos_iod_t;
 

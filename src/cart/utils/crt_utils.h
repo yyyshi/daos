@@ -11,6 +11,7 @@
 #include <semaphore.h>
 #include <cart/api.h>
 #include "../crt_internal.h"
+#include "svc.pb-c.h"
 
 #define DBG_PRINT(x...)							\
 	do {								\

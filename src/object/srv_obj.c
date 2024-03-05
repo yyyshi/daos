@@ -1154,6 +1154,7 @@ obj_prep_fetch_sgls(crt_rpc_t *rpc, struct obj_io_context *ioc)
 
 	for (i = 0; i < nr; i++) {
 		for (j = 0; j < sgls[i].sg_nr; j++) {
+			// 读取rpc 输出参数中的 sgls 数据
 			d_iov_t *iov = &sgls[i].sg_iovs[j];
 
 			if (iov->iov_len < iov->iov_buf_len) {
@@ -1164,17 +1165,21 @@ obj_prep_fetch_sgls(crt_rpc_t *rpc, struct obj_io_context *ioc)
 	}
 
 	/* reuse input sgls */
+	// 复用输入的sgls
 	orwo->orw_sgls.ca_count = orw->orw_sgls.ca_count;
 	orwo->orw_sgls.ca_arrays = orw->orw_sgls.ca_arrays;
+	// 如果不需要重新申请空间，直接返回
 	if (!need_alloc)
 		return 0;
 
 	/* Reset the iov first, easier for error cleanup */
+	// 清空原有的sgls
 	for (i = 0; i < nr; i++) {
 		for (j = 0; j < sgls[i].sg_nr; j++)
 			sgls[i].sg_iovs[j].iov_buf = NULL;
 	}
 
+	// 重新申请资源
 	sgls = orwo->orw_sgls.ca_arrays;
 	for (i = 0; i < nr; i++) {
 		for (j = 0; j < sgls[i].sg_nr; j++) {
@@ -1308,14 +1313,18 @@ obj_rw_recx_list_post(struct obj_rw_in *orw, struct obj_rw_out *orwo, uint8_t *s
 	return rc;
 }
 
+// read/write begin
+// todo: 当前读写是在哪个节点，是怎么决定的？shard 2 targets 那里吗
 static int
 obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *iods,
 		      struct dcs_iod_csums *iod_csums, uint64_t *offs, uint8_t *skips,
 		      uint32_t iods_nr, struct dtx_handle *dth)
 {
+	// rpc 入参，出参
 	struct obj_rw_in		*orw = crt_req_get(rpc);
 	struct obj_rw_out		*orwo = crt_reply_get(rpc);
 	uint32_t			tag = dss_get_module_info()->dmi_tgt_id;
+	// daos hdl，object 等都用这个结构
 	daos_handle_t			ioh = DAOS_HDL_INVAL;
 	struct bio_desc			*biod;
 	daos_key_t			*dkey;
@@ -1362,6 +1371,7 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		opc_get(rpc->cr_opc), DP_UOID(orw->orw_oid), DP_KEY(dkey),
 		tag, orw->orw_epoch, orw->orw_flags);
 
+	// 大块数据，rma 就为 true
 	rma = (orw->orw_bulks.ca_arrays != NULL ||
 	       orw->orw_bulks.ca_count != 0);
 	cond_flags = orw->orw_api_flags;
@@ -1486,6 +1496,7 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		}
 
 		time = daos_get_ntime();
+		// 里面会去查询oi table。oi table 是服务端用于索引object 地址的lru 的缓存
 		rc = vos_fetch_begin(ioc->ioc_vos_coh, orw->orw_oid,
 				     orw->orw_epoch, dkey, iods_nr, iods,
 				     cond_flags | fetch_flags, shadows, &ioh, dth);
@@ -1516,14 +1527,18 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		if (rc != 0)
 			goto out;
 
+		// fetch 场景（1，2两种情况）
+		// 1. 如果是bulk 传输的话
 		if (rma) {
+			// 先重置orw_sgls 结构
 			orwo->orw_sgls.ca_count = 0;
 			orwo->orw_sgls.ca_arrays = NULL;
-
+			// 再进一步填充reply 信息
 			rc = obj_set_reply_nrs(rpc, ioh, NULL, skips);
 			if (rc != 0)
 				goto out;
 		} else {
+			// 2. 如果是inline 传输的话，申请一些sgls 的空间，用于提供rpc 响应数据
 			rc = obj_prep_fetch_sgls(rpc, ioc);
 			if (rc)
 				goto out;
@@ -1572,7 +1587,11 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		goto out;
 
 	time = daos_get_ntime();
+	// 根据ioh 获取biod，biod 里面有biov，存储要读写的数据
+	// todo: 这个数据是从ioh 里面带过来的吗
 	biod = vos_ioh2desc(ioh);
+	// 这里会设置dma buffer 和regions
+	// 如果当前是fetch 请求，那么这里面会调用 dma_rw 从media 里面加载数据，完成读的功能
 	rc   = bio_iod_prep(biod, BIO_CHK_TYPE_IO, rma ? rpc->cr_ctx : NULL, CRT_BULK_RW);
 	if (rc) {
 		D_ERROR(DF_UOID " bio_iod_prep failed: " DF_RC "\n", DP_UOID(orw->orw_oid),
@@ -1624,6 +1643,7 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 	}
 
 	if (rma) {
+		// bulk 传输
 		bulk_bind = orw->orw_flags & ORF_BULK_BIND;
 		rc = obj_bulk_transfer(rpc, bulk_op, bulk_bind, orw->orw_bulks.ca_arrays, offs,
 				       skips, ioh, NULL, iods_nr, NULL, ioc->ioc_coh);
@@ -1642,9 +1662,11 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 				rc = dss_sleep(3100);
 		}
 	} else if (orw->orw_sgls.ca_arrays != NULL) {
+		// inline 传输（在biod 的sgls 和用户指定的sgls 之间拷贝数据）
 		rc = bio_iod_copy(biod, orw->orw_sgls.ca_arrays, iods_nr);
 	}
 
+	// 现在biod 里面才有数据
 	if (rc) {
 		if (rc == -DER_OVERFLOW)
 			rc = -DER_REC2BIG;
@@ -1690,6 +1712,7 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		obj_log_csum_err();
 post:
 	time = daos_get_ntime();
+	// 执行更新操作，只有update 操作才会进入这个函数，并最终调用dma_rw 函数
 	rc = bio_iod_post_async(biod, rc);
 	bio_post_latency = daos_get_ntime() - time;
 out:
@@ -1968,6 +1991,7 @@ obj_local_rw(crt_rpc_t *rpc, struct obj_io_context *ioc, struct dtx_handle *dth)
 	if (rc != 0)
 		D_GOTO(out, rc);
 again:
+	// 接收rpc 后本地读写操作
 	rc = obj_local_rw_internal(rpc, ioc, iods, csums, offs, skips, nr, dth);
 	if (dth != NULL && obj_dtx_need_refresh(dth, rc)) {
 		if (unlikely(++count % 10 == 3)) {
@@ -2769,6 +2793,7 @@ process_epoch(uint64_t *epoch, uint64_t *epoch_first, uint32_t *flags)
 	return PE_OK_LOCAL;
 }
 
+// rpc 服务端读写接口，对应的cli 接口为 dc_obj_shard_rw
 void
 ds_obj_rw_handler(crt_rpc_t *rpc)
 {

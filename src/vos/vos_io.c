@@ -34,6 +34,7 @@ struct vos_io_context {
 	/** reference on the object */
 	struct vos_object	*ic_obj;
 	/** BIO descriptor, has ic_iod_nr SGLs */
+	// biod 有那么多个 sgls
 	struct bio_desc		*ic_biod;
 	struct vos_ts_set	*ic_ts_set;
 	/** Checksums for bio_iovs in \ic_biod */
@@ -726,7 +727,15 @@ vos_ioc_create(daos_handle_t coh, daos_unit_oid_t oid, bool read_only,
 		return 0;
 	}
 
+	// 返回data 类型的bio ctx。bioc 根据vc_pool 转化过来（根据vc_pool 可以查询到data/meta/wal 三种类型的ctx，对应不同的存储设备）
 	bioc = vos_data_ioctxt(cont->vc_pool);
+	// 里面有blob id 的设置
+	// ioc: 类型 vos_io_contex
+	// bioc: 类型 bio_io_context
+	// bio_io_context 有spdk_blob
+	// bio_desc 有 bio_io_context
+	// todo: 这个spdk_blob 从那里来的
+	// todo: 所以这个blob 是在什么时候创建的
 	ioc->ic_biod = bio_iod_alloc(bioc, vos_ioc2umm(ioc), iod_nr,
 			read_only ? BIO_IOD_TYPE_FETCH : BIO_IOD_TYPE_UPDATE);
 	if (ioc->ic_biod == NULL) {
@@ -1537,6 +1546,7 @@ vos_fetch_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	D_DEBUG(DB_TRACE, "Fetch "DF_UOID", desc_nr %d, epoch "DF_X64"\n",
 		DP_UOID(oid), iod_nr, epoch);
 
+	// fetch 场景。read_only == true
 	rc = vos_ioc_create(coh, oid, true, epoch, iod_nr, iods,
 			    NULL, vos_flags, shadows, 0, dth, &ioc);
 	if (rc != 0)
@@ -1547,6 +1557,7 @@ vos_fetch_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	rc = vos_ts_set_add(ioc->ic_ts_set, ioc->ic_cont->vc_ts_idx, NULL, 0);
 	D_ASSERT(rc == 0);
 
+	// 会去查询oi table，是一个lru 缓存
 	rc = vos_obj_hold(vos_obj_cache_current(ioc->ic_cont->vc_pool->vp_sysdb),
 			  ioc->ic_cont, oid, &ioc->ic_epr, ioc->ic_bound, VOS_OBJ_VISIBLE,
 			  DAOS_INTENT_DEFAULT, &ioc->ic_obj, ioc->ic_ts_set);
@@ -2414,6 +2425,7 @@ vos_update_end(daos_handle_t ioh, uint32_t pm_ver, daos_key_t *dkey, int err,
 			D_FREE(daes);
 	}
 
+	// 会去查询oi table，是一个lru 缓存
 	err = vos_obj_hold(vos_obj_cache_current(ioc->ic_cont->vc_pool->vp_sysdb),
 			   ioc->ic_cont, ioc->ic_oid, &ioc->ic_epr, ioc->ic_bound,
 			   VOS_OBJ_CREATE | VOS_OBJ_VISIBLE, DAOS_INTENT_UPDATE,
@@ -2526,6 +2538,7 @@ vos_update_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	D_DEBUG(DB_TRACE, "Prepare IOC for "DF_UOID", iod_nr %d, epc "
 		DF_X64", flags="DF_X64"\n", DP_UOID(oid), iod_nr, epoch, flags);
 
+	// update 场景。read_only == false
 	rc = vos_ioc_create(coh, oid, false, epoch, iod_nr, iods, iods_csums,
 			    flags, NULL, dedup_th, dth, &ioc);
 	if (rc != 0)
@@ -2561,9 +2574,11 @@ vos_ioh2recx_list(daos_handle_t ioh)
 struct bio_desc *
 vos_ioh2desc(daos_handle_t ioh)
 {
+	// 根据ioh 返回vos io ctx
 	struct vos_io_context *ioc = vos_ioh2ioc(ioh);
 
 	D_ASSERT(ioc->ic_biod != NULL);
+	// 从io ctx 里拿到biod
 	return ioc->ic_biod;
 }
 

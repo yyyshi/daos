@@ -637,11 +637,16 @@ tgt_vos_create_one(void *varg)
 	char			*path = NULL;
 	int			 rc;
 
+	// scm 目录下 vos-idx 文件
+	// todo: 为啥这里是 newborn dir
 	rc = path_gen(vpa->vpa_uuid, newborns_path, VOS_FILE, &info->dmi_tgt_id,
 		      &path);
 	if (rc)
 		return rc;
 
+	// 普通的vos pool，这个应该和/mnt/daos/2/ 下的vos-idx 一一对应
+	// 内部会创建memobj，进而wal open，进而 flush wal
+	// scm_sz = 0
 	rc = vos_pool_create(path, (unsigned char *)vpa->vpa_uuid,
 			     vpa->vpa_scm_size, vpa->vpa_nvme_size, 0, NULL);
 	if (rc)
@@ -1078,8 +1083,19 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 		D_ASSERT(dss_tgt_nr > 0);
 		uuid_copy(vpa.vpa_uuid, tc_in->tc_pool_uuid);
 		/* A zero size accommodates the existing file */
+		// todo: 这里为啥设置为 0呢
 		vpa.vpa_scm_size = 0;
+		// nvme 空间按 tgt数量均分
 		vpa.vpa_nvme_size = tc_in->tc_nvme_size / dss_tgt_nr;
+		/*
+		每个target 都会创建一个vos pool（如下是20个target）
+		// 使用pemem 设备：
+		// 1. 让scm 设备在dev 下可以看到：ndctl create-namespace --continue
+		// 2. 设置到scm_list 中，之后将dev 下的mem-idx 会自动 mount 到daos的 scm_mount 路径上
+		// 擦除scm 上数据：wipefs -a /dev/pmem0
+		root@server01:/mnt/daos/2/3d3f1d6e-56d2-4eb5-87a2-a631afcae508# ls
+		rdb-pool  vos-0  vos-1  vos-10  vos-11  vos-12  vos-13  vos-14  vos-15  vos-16  vos-17  vos-18  vos-19  vos-2  vos-3  vos-4  vos-5  vos-6  vos-7  vos-8  vos-9
+		*/
 		rc = dss_thread_collective(tgt_vos_create_one, &vpa, 0);
 		if (rc) {
 			D_ERROR(DF_UUID": thread collective tgt_vos_create_one failed, "DF_RC"\n",

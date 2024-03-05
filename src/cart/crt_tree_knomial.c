@@ -51,6 +51,7 @@ int_2_knomial_number(uint32_t x, uint32_t ratio, struct knomial_number *n)
 	}
 }
 
+// null, tree_self, grp_size, branch_ratio
 static uint32_t
 knomial_get_children(uint32_t *children, uint32_t self, uint32_t size,
 		     uint32_t ratio)
@@ -62,10 +63,16 @@ knomial_get_children(uint32_t *children, uint32_t self, uint32_t size,
 
 	D_ASSERT(self < size);
 
+	// todo: 根据self 和ratio 就能确认一棵树了吗？
+	// self 是通过grp_self 获取到的
+	/* e.g: grp_size = 8, ratio = 22, self = 0
+	*/
 	int_2_knomial_number(self, ratio, &n);
 	for (digit = 0; (digit < CRT_TREE_MAX_RATIO) &&
 		(digit > n.ndigits || n.digits[digit] == 0); digit++) {
 		for (i = 1; i < ratio; i++) {
+			// child-0 = 0 + i x 1 = 1
+			
 			uint32_t child = self + i*inc;
 
 			if (child >= size)

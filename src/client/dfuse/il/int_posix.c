@@ -21,7 +21,6 @@
 #include <sys/ioctl.h>
 #include <string.h>
 
-#include <daos/event.h>
 #include "dfuse_log.h"
 #include <gurt/list.h>
 #include <gurt/atomic.h>
@@ -799,7 +798,6 @@ child_hdlr(void)
 {
 	int rc;
 
-	daos_eq_lib_reset_after_fork();
 	daos_dti_reset();
 	ioil_eqh = ioil_iog.iog_main_eqh = DAOS_HDL_INVAL;
 	rc = daos_eq_create(&ioil_eqh);

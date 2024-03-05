@@ -465,6 +465,7 @@ ds_mgmt_drpc_pool_create(Drpc__Call *drpc_req, Drpc__Response *drpc_resp)
 		}
 	}
 
+	// 根据请求带的ranks 参数，其实是ranks，不是target
 	if (req->n_ranks > 0) {
 		targets = uint32_array_to_rank_list(req->ranks, req->n_ranks);
 		if (targets == NULL)
@@ -478,6 +479,7 @@ ds_mgmt_drpc_pool_create(Drpc__Call *drpc_req, Drpc__Response *drpc_resp)
 	}
 	D_DEBUG(DB_MGMT, DF_UUID": creating pool\n", DP_UUID(pool_uuid));
 
+	// 构建池属性信息
 	rc = create_pool_props(&base_props, req->numsvcreps, req->user, req->usergroup,
 			       (const char **)req->acl, req->n_acl);
 	if (rc != 0)
@@ -494,6 +496,9 @@ ds_mgmt_drpc_pool_create(Drpc__Call *drpc_req, Drpc__Response *drpc_resp)
 	}
 
 	/* Ranks to allocate targets (in) & svc for pool replicas (out). */
+	// 接收到创池的 drpc请求 : dmg pool create --size 30G  test1 
+	// 池的uuid 是cli 端创建传递到服务端的。故障域，meta blob 信息从cli 来
+	// todo: 如果是MD-on-SSD 模式，没有scm，那 req->tierbytes[DAOS_MEDIA_SCM] 是多少
 	rc = ds_mgmt_create_pool(pool_uuid, req->sys, "pmem", targets,
 				 req->tierbytes[DAOS_MEDIA_SCM], req->tierbytes[DAOS_MEDIA_NVME],
 				 prop, &svc, req->n_faultdomains, req->faultdomains,
