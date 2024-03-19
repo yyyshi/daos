@@ -78,6 +78,7 @@ typedef struct {
 #define DAOS_HDL_INVAL	((daos_handle_t){0})
 #define DAOS_TX_NONE	DAOS_HDL_INVAL
 
+// todo: cookie 是什么作用
 static inline bool
 daos_handle_is_inval(daos_handle_t hdl)
 {
@@ -219,6 +220,8 @@ enum {
  * See daos_obj.h for more details
  * It is put here because it's almost used by everyone.
  */
+// object 的128 位id
+// 高32位是daos 的保留位，其余的提供给用户并且假定在container 中是唯一的
 typedef struct {
 	/** least significant (low) bits of object ID */
 	uint64_t	lo;

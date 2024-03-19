@@ -333,11 +333,14 @@ dtx_list_cos(struct ds_cont_child *cont, daos_unit_oid_t *oid,
 	int				 rc;
 	int				 i = 0;
 
+	// key 是oid 和dkey 的hash
 	key.oid = *oid;
 	key.dkey_hash = dkey_hash;
 	d_iov_set(&kiov, &key, sizeof(key));
 	d_iov_set(&riov, NULL, 0);
 
+	// todo: 这些东西是存储在哪里的
+	// 通过dtx cos hdl 和key 来查询cos 信息
 	rc = dbtree_lookup(cont->sc_dtx_cos_hdl, &kiov, &riov);
 	if (rc != 0)
 		return rc == -DER_NONEXIST ? 0 : rc;
@@ -360,6 +363,7 @@ dtx_list_cos(struct ds_cont_child *cont, daos_unit_oid_t *oid,
 	if (dti == NULL)
 		return -DER_NOMEM;
 
+	// 将查到的cos dtx 都返回
 	d_list_for_each_entry(dcrc, &dcr->dcr_prio_list, dcrc_lo_link) {
 		dti[i] = dcrc->dcrc_dte->dte_xid;
 		if (++i >= count)
@@ -389,6 +393,7 @@ dtx_add_cos(struct ds_cont_child *cont, struct dtx_entry *dte,
 	D_ASSERT(dte->dte_mbs != NULL);
 	D_ASSERT(epoch != DAOS_EPOCH_MAX);
 
+	// key 是oid 和dkey 的hash
 	key.oid = *oid;
 	key.dkey_hash = dkey_hash;
 	d_iov_set(&kiov, &key, sizeof(key));
@@ -398,6 +403,7 @@ dtx_add_cos(struct ds_cont_child *cont, struct dtx_entry *dte,
 	rbund.flags = flags;
 	d_iov_set(&riov, &rbund, sizeof(rbund));
 
+	// 插入cos dtx item
 	rc = dbtree_upsert(cont->sc_dtx_cos_hdl, BTR_PROBE_EQ,
 			   DAOS_INTENT_UPDATE, &kiov, &riov, NULL);
 

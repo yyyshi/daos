@@ -594,6 +594,7 @@ struct d_hlink *
 daos_hhash_link_lookup(uint64_t key)
 {
 	D_ASSERT(daos_ht.dht_hhash != NULL);
+	// todo: 啥时候插入的
 	return d_hhash_link_lookup(daos_ht.dht_hhash, key);
 }
 
@@ -721,6 +722,7 @@ daos_dti_gen(struct dtx_id *dti, bool zero)
 			uuid_generate(dti_uuid);
 
 		uuid_copy(dti->dti_uuid, dti_uuid);
+		// todo: 为啥这里不是epoch
 		dti->dti_hlc = d_hlc_get();
 	}
 }

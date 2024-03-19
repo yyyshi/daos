@@ -255,6 +255,7 @@ dc_tx_addref(struct dc_tx *tx)
 	daos_hhash_link_getref(&tx->tx_hlink);
 }
 
+// 查询epoch
 static struct dc_tx *
 dc_tx_hdl2ptr(daos_handle_t th)
 {
@@ -277,6 +278,7 @@ dc_tx_ptr2hdl(struct dc_tx *tx)
 	return th;
 }
 
+// 插入epoch
 static void
 dc_tx_hdl_link(struct dc_tx *tx)
 {
@@ -357,6 +359,7 @@ dc_tx_alloc(daos_handle_t coh, daos_epoch_t epoch, uint64_t flags,
 	tx->tx_flags = flags;
 	tx->tx_status = TX_OPEN;
 	daos_hhash_hlink_init(&tx->tx_hlink, &tx_h_ops);
+	// 后续查询到的epoch 都是在此时插入的
 	dc_tx_hdl_link(tx);
 
 	/*
@@ -658,6 +661,7 @@ dc_tx_get_dti(daos_handle_t th, struct dtx_id *dti)
 {
 	struct dc_tx	*tx;
 
+	// 查表查询epoch
 	tx = dc_tx_hdl2ptr(th);
 	if (tx == NULL)
 		return -DER_NO_HDL;
@@ -690,6 +694,7 @@ dc_tx_check_pmv_internal(daos_handle_t th, struct dc_tx **ptx)
 	if (daos_handle_is_inval(th))
 		return -DER_INVAL;
 
+	// 查表获取epoch
 	tx = dc_tx_hdl2ptr(th);
 	if (tx == NULL)
 		return -DER_NO_HDL;
@@ -735,6 +740,7 @@ dc_tx_check(daos_handle_t th, bool check_write, struct dc_tx **ptx)
 	struct dc_tx	*tx = NULL;
 	int		 rc;
 
+	// 查表
 	rc = dc_tx_check_pmv_internal(th, &tx);
 	if (rc != 0)
 		return rc;
@@ -779,6 +785,7 @@ dc_tx_hdl2epoch_and_pmv(daos_handle_t th, struct dtx_epoch *epoch,
 	struct dc_tx	*tx = NULL;
 	int		 rc;
 
+	// 查表获取epoch
 	rc = dc_tx_check(th, false, &tx);
 	if (rc == 0) {
 		if (tx->tx_pm_ver == 0)

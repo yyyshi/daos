@@ -284,6 +284,7 @@ struct vos_pool {
 	/** Dummy data I/O context */
 	struct bio_io_context	*vp_dummy_ioctxt;
 	/** In-memory free space tracking for NVMe device */
+	// 内存中记录nvme free 空间的变量
 	struct vea_space_info	*vp_vea_info;
 	/** Reserved sys space (for space reclaim, rebuild, etc.) in bytes */
 	daos_size_t		vp_space_sys[DAOS_MEDIA_MAX];

@@ -137,6 +137,7 @@ struct dtx_handle {
 };
 
 /* Each sub transaction handle to manage each sub thandle */
+// 每个sub hdl 有一个用来处理sub tx的hdl
 struct dtx_sub_status {
 	struct daos_shard_tgt		dss_tgt;
 	int				dss_result;

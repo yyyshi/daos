@@ -203,6 +203,7 @@ daos_lru_ref_hold(struct daos_lru_cache *lcache, void *key,
 	if (lcache->dlc_ops->lop_print_key)
 		lcache->dlc_ops->lop_print_key(key, key_size);
 
+	// 查询
 	link = d_hash_rec_find(&lcache->dlc_htable, key, key_size);
 	if (link != NULL) {
 		llink = link2llink(link);
@@ -210,6 +211,7 @@ daos_lru_ref_hold(struct daos_lru_cache *lcache, void *key,
 		/* remove busy item from LRU */
 		if (!d_list_empty(&llink->ll_qlink))
 			d_list_del_init(&llink->ll_qlink);
+		// 如果查到了，返回
 		D_GOTO(found, rc = 0);
 	}
 
@@ -217,6 +219,7 @@ daos_lru_ref_hold(struct daos_lru_cache *lcache, void *key,
 		D_GOTO(out, rc = -DER_NONEXIST);
 
 	/* llink does not exist create one */
+	// 如果没查到，那么创建一个并insert 进去
 	rc = lcache->dlc_ops->lop_alloc_ref(key, key_size, create_args, &llink);
 	if (rc)
 		D_GOTO(out, rc);
@@ -227,6 +230,7 @@ daos_lru_ref_hold(struct daos_lru_cache *lcache, void *key,
 	llink->ll_ops	  = lcache->dlc_ops;
 	D_INIT_LIST_HEAD(&llink->ll_qlink);
 
+	// insert 到oi table
 	rc = d_hash_rec_insert(&lcache->dlc_htable, key, key_size,
 			       &llink->ll_link, true);
 	if (rc) {

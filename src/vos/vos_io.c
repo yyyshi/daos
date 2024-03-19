@@ -22,6 +22,7 @@
 #include <daos/mem.h>
 
 /** I/O context */
+// 有预留的scm的extent 和nvme 的extent
 struct vos_io_context {
 	EVT_ENT_ARRAY_LG_PTR(ic_ent_array);
 	/** The epoch bound including uncertainty */
@@ -29,6 +30,7 @@ struct vos_io_context {
 	daos_epoch_range_t	 ic_epr;
 	daos_unit_oid_t		 ic_oid;
 	struct vos_container	*ic_cont;
+	// 所有的daos iod
 	daos_iod_t		*ic_iods;
 	struct dcs_iod_csums	*ic_iod_csums;
 	/** reference on the object */
@@ -44,18 +46,23 @@ struct vos_io_context {
 	/** current akey info */
 	struct vos_ilog_info	 ic_akey_info;
 	/** cursor of SGL & IOV in BIO descriptor */
+	// sgl 和iov 的游标
 	unsigned int		 ic_sgl_at;
 	unsigned int		 ic_iov_at;
 	/** reserved SCM extents */
+	// 预留的scm extents
 	struct umem_rsrvd_act	*ic_rsrvd_scm;
 	/** reserved offsets for SCM update */
+	// scm 更新预留的offset 们
 	umem_off_t		*ic_umoffs;
 	unsigned int		 ic_umoffs_cnt;
 	unsigned int		 ic_umoffs_at;
 	/** reserved NVMe extents */
+	// 预留的nvme extents
 	d_list_t		 ic_blk_exts;
 	daos_size_t		 ic_space_held[DAOS_MEDIA_MAX];
 	/** number DAOS IO descriptors */
+	// 所有iod 个数
 	unsigned int		 ic_iod_nr;
 	/** deduplication threshold size */
 	uint32_t		 ic_dedup_th;
@@ -218,6 +225,7 @@ vos_dedup_lookup(struct vos_pool *pool, struct dcs_csum_info *csum,
 	if (!ci_is_valid(csum))
 		return false;
 
+	// 按csum 在dedup hash 中查询。返回查到的rlink
 	rlink = d_hash_rec_find(pool->vp_dedup_hash, csum, csum_len);
 	if (rlink == NULL)
 		return false;
@@ -661,6 +669,7 @@ vos_ioc_create(daos_handle_t coh, daos_unit_oid_t oid, bool read_only,
 		return -DER_NOMEM;
 
 	ioc->ic_io_size = 0;
+	// 设置iods
 	ioc->ic_iod_nr = iod_nr;
 	ioc->ic_iods = iods;
 	ioc->ic_epr.epr_hi = dtx_is_valid_handle(dth) ? dth->dth_epoch : epoch;
@@ -686,6 +695,7 @@ vos_ioc_create(daos_handle_t coh, daos_unit_oid_t oid, bool read_only,
 	ioc->ic_remove = ((vos_flags & VOS_OF_REMOVE) != 0);
 	ioc->ic_ec = ((vos_flags & VOS_OF_EC) != 0);
 	ioc->ic_umoffs_cnt = ioc->ic_umoffs_at = 0;
+	// 直接使用客户端传递来的iod csums
 	ioc->ic_iod_csums = iod_csums;
 	vos_ilog_fetch_init(&ioc->ic_dkey_info);
 	vos_ilog_fetch_init(&ioc->ic_akey_info);
@@ -1403,6 +1413,7 @@ iod_set_cursor(struct vos_io_context *ioc, unsigned int sgl_at)
 	D_ASSERT(sgl_at < ioc->ic_iod_nr);
 	D_ASSERT(ioc->ic_iods != NULL);
 
+	// 设置了游标位置
 	ioc->ic_sgl_at = sgl_at;
 	ioc->ic_iov_at = 0;
 }
@@ -1546,7 +1557,7 @@ vos_fetch_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	D_DEBUG(DB_TRACE, "Fetch "DF_UOID", desc_nr %d, epoch "DF_X64"\n",
 		DP_UOID(oid), iod_nr, epoch);
 
-	// fetch 场景。read_only == true
+	// fetch 场景。read_only == true。checksum 传NULL
 	rc = vos_ioc_create(coh, oid, true, epoch, iod_nr, iods,
 			    NULL, vos_flags, shadows, 0, dth, &ioc);
 	if (rc != 0)
@@ -1557,7 +1568,7 @@ vos_fetch_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	rc = vos_ts_set_add(ioc->ic_ts_set, ioc->ic_cont->vc_ts_idx, NULL, 0);
 	D_ASSERT(rc == 0);
 
-	// 会去查询oi table，是一个lru 缓存
+	// 先会去内存 lru 缓存中查询，再会去查询pmem 中的oi table
 	rc = vos_obj_hold(vos_obj_cache_current(ioc->ic_cont->vc_pool->vp_sysdb),
 			  ioc->ic_cont, oid, &ioc->ic_epr, ioc->ic_bound, VOS_OBJ_VISIBLE,
 			  DAOS_INTENT_DEFAULT, &ioc->ic_obj, ioc->ic_ts_set);
@@ -2069,17 +2080,23 @@ vos_reserve_blocks(struct vos_container *cont, d_list_t *rsrvd_nvme,
 	hint_ctxt = cont->vc_hint_ctxt[ios];
 	D_ASSERT(hint_ctxt);
 
+	// 根据字节计算占用的block 数
 	blk_cnt = vos_byte2blkcnt(size);
 
+	// 1. 获取预留的nvme 列表
 	rc = vea_reserve(vsi, blk_cnt, hint_ctxt, rsrvd_nvme);
 	if (rc)
 		return rc;
 
+	// vea_resrvd_ext 预留的extent 结构
+	// 2. 获取列表中的首个extent
 	ext = d_list_entry(rsrvd_nvme->prev, struct vea_resrvd_ext, vre_link);
 	D_ASSERTF(ext->vre_blk_cnt == blk_cnt, "%u != %u\n",
 		  ext->vre_blk_cnt, blk_cnt);
 	D_ASSERT(ext->vre_blk_off != 0);
 
+	// 可以找到指定的extent 的第一个block
+	// 3. 返回首个extent 的第一个块的offset
 	*off = ext->vre_blk_off << VOS_BLK_SHIFT;
 	return 0;
 }
@@ -2094,6 +2111,8 @@ reserve_space(struct vos_io_context *ioc, uint16_t media, daos_size_t size,
 	if (media == DAOS_MEDIA_SCM) {
 		umem_off_t	umoff;
 
+		// vos scm 资源预留，内部通过pmdk 完成
+		// umoff 可以定位到pool 中某个obj 的地址
 		umoff = vos_reserve_scm(ioc->ic_cont, ioc->ic_rsrvd_scm, size);
 		if (!UMOFF_IS_NULL(umoff)) {
 			ioc->ic_umoffs[ioc->ic_umoffs_cnt] = umoff;
@@ -2102,6 +2121,7 @@ reserve_space(struct vos_io_context *ioc, uint16_t media, daos_size_t size,
 			return 0;
 		}
 
+		// 获取一个大概的时间
 		now = daos_gettime_coarse();
 		if (now - ioc->ic_cont->vc_io_nospc_ts > VOS_NOSPC_ERROR_INTVL) {
 			D_ERROR("Reserve "DF_U64" from SCM failed\n", size);
@@ -2112,6 +2132,7 @@ reserve_space(struct vos_io_context *ioc, uint16_t media, daos_size_t size,
 	}
 
 	D_ASSERT(media == DAOS_MEDIA_NVME);
+	// nvme 资源预留，内部通过vea 模块，再内部是调用的spdk 接口
 	rc = vos_reserve_blocks(ioc->ic_cont, &ioc->ic_blk_exts, size, VOS_IOS_GENERIC, off);
 	if (rc == -DER_NOSPACE) {
 		now = daos_gettime_coarse();
@@ -2130,11 +2151,13 @@ iod_reserve(struct vos_io_context *ioc, struct bio_iov *biov)
 {
 	struct bio_sglist *bsgl;
 
+	// 根据ioc 获取biod，根据biod 获取sgl
 	bsgl = bio_iod_sgl(ioc->ic_biod, ioc->ic_sgl_at);
 	D_ASSERT(bsgl->bs_nr != 0);
 	D_ASSERT(bsgl->bs_nr > bsgl->bs_nr_out);
 	D_ASSERT(bsgl->bs_nr > ioc->ic_iov_at);
 
+	// 将biov 写入sgl
 	bsgl->bs_iovs[ioc->ic_iov_at] = *biov;
 	ioc->ic_iov_at++;
 	bsgl->bs_nr_out++;
@@ -2146,6 +2169,7 @@ iod_reserve(struct vos_io_context *ioc, struct bio_iov *biov)
 }
 
 /* Reserve single value record on specified media */
+// 在指定的media（NVME） 上预留single 类型的记录
 static int
 vos_reserve_single(struct vos_io_context *ioc, uint16_t media,
 		   daos_size_t size)
@@ -2156,6 +2180,7 @@ vos_reserve_single(struct vos_io_context *ioc, uint16_t media,
 	struct bio_iov		 biov;
 	uint64_t		 off = 0;
 	int			 rc;
+	// 根据设置好的游标找到 csum
 	struct dcs_csum_info	*value_csum = vos_csum_at(ioc->ic_iod_csums, ioc->ic_sgl_at);
 
 	/*
@@ -2166,10 +2191,14 @@ vos_reserve_single(struct vos_io_context *ioc, uint16_t media,
 	 * vos_irec_df->ir_ex_addr, small unaligned part will be stored on SCM
 	 * along with vos_irec_df, being referenced by vos_irec_df->ir_body.
 	 */
+	// 硬编码：media == DAOS_MEDIA_NVME
+	// todo: 这个是怎么确定大小的
 	scm_size = (media == DAOS_MEDIA_SCM) ?
 		vos_recx2irec_size(size, value_csum) :
 		vos_recx2irec_size(0, value_csum);
 
+	// 预留scm 资源，还是传入的ioc，不是iod
+	// todo: 如果media 是nvme 为什么也会走到这里预留scm off 呢？
 	rc = reserve_space(ioc, DAOS_MEDIA_SCM, scm_size, &off);
 	if (rc) {
 		D_ERROR("Reserve SCM for SV failed. "DF_RC"\n", DP_RC(rc));
@@ -2195,6 +2224,7 @@ vos_reserve_single(struct vos_io_context *ioc, uint16_t media,
 		D_ASSERT(payload_addr >= (char *)irec);
 		off = umoff + (payload_addr - (char *)irec);
 	} else {
+		// 预留nvme 资源，传入ioc，不是iod
 		rc = reserve_space(ioc, DAOS_MEDIA_NVME, size, &off);
 		if (rc) {
 			D_ERROR("Reserve NVMe for SV failed. "DF_RC"\n",
@@ -2203,6 +2233,7 @@ vos_reserve_single(struct vos_io_context *ioc, uint16_t media,
 		}
 	}
 done:
+	// 这里是设置bio address，根据预留media 的off
 	bio_addr_set(&biov.bi_addr, media, off);
 	bio_iov_set_len(&biov, size);
 	rc = iod_reserve(ioc, &biov);
@@ -2220,6 +2251,7 @@ vos_reserve_recx(struct vos_io_context *ioc, uint16_t media, daos_size_t size,
 
 	memset(&biov, 0, sizeof(biov));
 	/* recx punch */
+	// 硬编码：media == DAOS_MEDIA_NVME
 	if (size == 0 || media != DAOS_MEDIA_SCM) {
 		ioc->ic_umoffs[ioc->ic_umoffs_cnt] = UMOFF_NULL;
 		ioc->ic_umoffs_cnt++;
@@ -2248,12 +2280,14 @@ vos_reserve_recx(struct vos_io_context *ioc, uint16_t media, daos_size_t size,
 	 * isn't aligned with 4K) on NVMe could be split into two evtree rects,
 	 * larger rect will be stored on NVMe and small reminder on SCM.
 	 */
+	// 硬编码：media == DAOS_MEDIA_NVME
 	rc = reserve_space(ioc, media, size, &off);
 	if (rc) {
 		D_ERROR("Reserve recx failed. "DF_RC"\n", DP_RC(rc));
 		return rc;
 	}
 done:
+	// 这里是设置bio address
 	bio_addr_set(&biov.bi_addr, media, off);
 	bio_iov_set_len(&biov, size);
 	rc = iod_reserve(ioc, &biov);
@@ -2261,11 +2295,14 @@ done:
 	return rc;
 }
 
+// 设置bio address
 static int
 akey_update_begin(struct vos_io_context *ioc)
 {
+	// 根据当前iod 设置的游标，获取对应的checksum 相关
 	struct dcs_csum_info	*iod_csums = vos_csum_at(ioc->ic_iod_csums, ioc->ic_sgl_at);
 	struct dcs_csum_info	*recx_csum;
+	// 根据设置的游标位置找到对应的iod
 	daos_iod_t *iod = &ioc->ic_iods[ioc->ic_sgl_at];
 	int i, rc;
 
@@ -2274,24 +2311,32 @@ akey_update_begin(struct vos_io_context *ioc)
 		return -DER_IO_INVAL;
 	}
 
+	// 处理当前iod
+	// 遍历该iod 保存的记录数。如果是 DAOS_IOD_SINGLE 类型，那么iod_nr == 1
 	for (i = 0; i < iod->iod_nr; i++) {
 		daos_size_t size;
 		uint16_t media;
 
+		// iod_type 决定的size
 		size = (iod->iod_type == DAOS_IOD_SINGLE) ? iod->iod_size :
 				iod->iod_recxs[i].rx_nr * iod->iod_size;
 
+		// todo: 这个是怎么决定的，写死的：policy_write_intensivity （DAOS_MEDIA_NVME）
 		media = vos_policy_media_select(vos_cont2pool(ioc->ic_cont),
 					 iod->iod_type, size, VOS_IOS_GENERIC);
 
+		// 这里根据biod类型（single 或者 array），两种情况内部都会设置bio address
 		if (iod->iod_type == DAOS_IOD_SINGLE) {
+			// 会设置bio address在，传入的是ioc，不是iod
 			rc = vos_reserve_single(ioc, media, size);
 		} else {
 			daos_size_t csum_len;
 
+			// 当前iod 下的多个记录分别获取checksum 中对应的值
 			recx_csum = recx_csum_at(iod_csums, i, iod);
 			csum_len = recx_csum_len(&iod->iod_recxs[i], recx_csum,
 						 iod->iod_size);
+			// 会设置bio address，传入的是ioc，不是iod
 			rc = vos_reserve_recx(ioc, media, size, recx_csum,
 					      csum_len);
 		}
@@ -2301,13 +2346,18 @@ akey_update_begin(struct vos_io_context *ioc)
 	return 0;
 }
 
+// 设置bio address
 static int
 dkey_update_begin(struct vos_io_context *ioc)
 {
 	int i, rc = 0;
 
+	// 遍历所有的iod，每个iod 对应一个akey
 	for (i = 0; i < ioc->ic_iod_nr; i++) {
 		iod_set_cursor(ioc, i);
+		// 这里会设置bio address，遍历ioc 下iod 的所有记录，并预留资源
+		// 这里会预留资源：vos_reserve_single / vos_reserve_recx
+		// 这里将预留scm 或者nvme，nvme 的话是从block 设备预留一个extent 块
 		rc = akey_update_begin(ioc);
 		if (rc != 0)
 			break;
@@ -2425,7 +2475,8 @@ vos_update_end(daos_handle_t ioh, uint32_t pm_ver, daos_key_t *dkey, int err,
 			D_FREE(daes);
 	}
 
-	// 会去查询oi table，是一个lru 缓存
+	// 先会去查询lru 缓存，再会去pmem 的oi table tree 中查询
+	// todo: lru 的evict 策略是什么
 	err = vos_obj_hold(vos_obj_cache_current(ioc->ic_cont->vc_pool->vp_sysdb),
 			   ioc->ic_cont, ioc->ic_oid, &ioc->ic_epr, ioc->ic_bound,
 			   VOS_OBJ_CREATE | VOS_OBJ_VISIBLE, DAOS_INTENT_UPDATE,
@@ -2520,12 +2571,14 @@ vos_update_renew_epoch(daos_handle_t ioh, struct dtx_handle *dth)
 	ioc->ic_bound = MAX(dth->dth_epoch_bound, ioc->ic_epr.epr_hi);
 }
 
+// 为给定obj 的数组准备io buffer
 int
 vos_update_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 		 uint64_t flags, daos_key_t *dkey, unsigned int iod_nr,
 		 daos_iod_t *iods, struct dcs_iod_csums *iods_csums,
 		 uint32_t dedup_th, daos_handle_t *ioh, struct dtx_handle *dth)
 {
+	// 构建一个新的vos io ctx
 	struct vos_io_context	*ioc;
 	int			 rc;
 
@@ -2538,13 +2591,16 @@ vos_update_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	D_DEBUG(DB_TRACE, "Prepare IOC for "DF_UOID", iod_nr %d, epc "
 		DF_X64", flags="DF_X64"\n", DP_UOID(oid), iod_nr, epoch, flags);
 
-	// update 场景。read_only == false
+	// update 场景。参数3 read_only == false
+	// 构建vos io ctx
 	rc = vos_ioc_create(coh, oid, false, epoch, iod_nr, iods, iods_csums,
 			    flags, NULL, dedup_th, dth, &ioc);
 	if (rc != 0)
 		return rc;
 
 	/* flags may have VOS_OF_CRIT to skip sys/held checks here */
+	// 根据当前update req 先评估占用空间（scm 和nvme 空间），然后将当前请求占用的空间追加到当前pool 占用的空间中去
+	// todo: 如果评估和实际的不一致怎么办
 	rc = vos_space_hold(vos_cont2pool(ioc->ic_cont), flags, dkey, iod_nr,
 			    iods, iods_csums, &ioc->ic_space_held[0]);
 	if (rc != 0) {
@@ -2553,6 +2609,8 @@ vos_update_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 		goto error;
 	}
 
+	// 这里会设置bio address
+	// 这里会预留资源：vos_reserve_single / vos_reserve_recx
 	rc = dkey_update_begin(ioc);
 	if (rc != 0) {
 		D_ERROR(DF_UOID ": dkey update begin failed. " DF_RC "\n", DP_UOID(oid), DP_RC(rc));
@@ -2740,6 +2798,7 @@ vos_dedup_verify(daos_handle_t ioh)
 				goto error;
 			}
 
+			// 设置biov 的 ba_off
 			biov->bi_addr.ba_off = off;
 			biov->bi_buf = umem_off2ptr(vos_ioc2umm(ioc),
 						bio_iov2off(biov));

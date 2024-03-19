@@ -128,6 +128,7 @@ vos_space_query(struct vos_pool *pool, struct vos_pool_space *vps, bool slow)
 	NVME_SYS(vps) = POOL_NVME_SYS(pool);
 
 	/* Query SCM used space */
+	// 先查询scm 已经使用的空间
 	rc = umempobj_get_heapusage(pool->vp_umm.umm_pool, &scm_used);
 	if (rc) {
 		rc = umem_tx_errno(rc);
@@ -145,6 +146,7 @@ vos_space_query(struct vos_pool *pool, struct vos_pool_space *vps, bool slow)
 		       SCM_TOTAL(vps), scm_used);
 		SCM_FREE(vps) = 0;
 	} else {
+		// 更新scm 的tree 空间
 		SCM_FREE(vps) = SCM_TOTAL(vps) - scm_used;
 	}
 
@@ -157,6 +159,7 @@ vos_space_query(struct vos_pool *pool, struct vos_pool_space *vps, bool slow)
 	}
 
 	/* Query NVMe free space */
+	// 查询nvme free 空间
 	rc = vea_query(pool->vp_vea_info, attr, stat);
 	if (rc) {
 		D_ERROR("Query pool:"DF_UUID" NVMe space failed. "DF_RC"\n",
@@ -165,6 +168,7 @@ vos_space_query(struct vos_pool *pool, struct vos_pool_space *vps, bool slow)
 	}
 
 	D_ASSERT(attr->va_blk_sz != 0);
+	// 更新nvme 的free 空间
 	NVME_FREE(vps) = attr->va_blk_sz * attr->va_free_blks;
 
 	D_ASSERTF(NVME_FREE(vps) <= NVME_TOTAL(vps),
@@ -275,11 +279,13 @@ vos_space_hold(struct vos_pool *pool, uint64_t flags, daos_key_t *dkey,
 	       unsigned int iod_nr, daos_iod_t *iods,
 	       struct dcs_iod_csums *iods_csums, daos_size_t *space_hld)
 {
+	// 当前scm 和nvme 的free 空间
 	struct vos_pool_space	vps = { 0 };
 	daos_size_t		space_est[DAOS_MEDIA_MAX] = { 0, 0 };
 	daos_size_t		scm_left, nvme_left, rb_reserve;
 	int			rc;
 
+	// scm 和nvme free 空间查询，结果保存到vps 里
 	rc = vos_space_query(pool, &vps, false);
 	if (rc) {
 		D_ERROR("Query pool:"DF_UUID" space failed. "DF_RC"\n",
@@ -287,9 +293,11 @@ vos_space_hold(struct vos_pool *pool, uint64_t flags, daos_key_t *dkey,
 		return rc;
 	}
 
+	// 评估当前update req 需要消耗多少空间，输出到 space_est 里
 	estimate_space(pool, dkey, iod_nr, iods, iods_csums, &space_est[0]);
 
 	/* if this is a critical update, skip SCM and NVMe sys/held checks */
+	// 如果比较紧急，跳过一系列检查
 	if (flags & VOS_OF_CRIT)
 		goto success;
 
@@ -345,6 +353,7 @@ vos_space_hold(struct vos_pool *pool, uint64_t flags, daos_key_t *dkey,
 success:
 	space_hld[DAOS_MEDIA_SCM]	= space_est[DAOS_MEDIA_SCM];
 	space_hld[DAOS_MEDIA_NVME]	= space_est[DAOS_MEDIA_NVME];
+	// 更新当前pool 占用的scm 和nvme 空间
 	POOL_SCM_HELD(pool)		+= space_hld[DAOS_MEDIA_SCM];
 	POOL_NVME_HELD(pool)		+= space_hld[DAOS_MEDIA_NVME];
 

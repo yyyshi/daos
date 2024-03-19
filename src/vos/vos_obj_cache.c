@@ -301,6 +301,7 @@ cache_object(struct daos_lru_cache *occ, struct vos_object **objp)
 
 // 内部调用的是 vos_oi_find 和 vos_oi_find_alloc
 // 在 vos_fetch_begin 和 vos_update_end 里面会调用
+// 有两级：内存的lru 和pmem 的oi table tree
 int
 vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	     daos_unit_oid_t oid, daos_epoch_range_t *epr, daos_epoch_t bound,
@@ -342,15 +343,19 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	lkey.olk_cont = cont;
 	lkey.olk_oid = oid;
 
+	// 从lru cache 里查询，如果没查到就insert 进去
 	rc = daos_lru_ref_hold(occ, &lkey, sizeof(lkey), create_flag, &lret);
 	if (rc == -DER_NONEXIST) {
 		D_ASSERT(obj_local.obj_cont == NULL);
+		// todo: 用法
+		// cache 里面没有，设置为 obj_local ??
 		obj = &obj_local;
 		init_object(obj, oid, cont);
 	} else if (rc != 0) {
 		D_GOTO(failed_2, rc);
 	} else {
 		/** Object is in cache */
+		// cache 里面有，返回
 		obj = container_of(lret, struct vos_object, obj_llink);
 	}
 
@@ -388,6 +393,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 
 	obj->obj_sync_epoch = 0;
 	if (!create) {
+		// 查询oi table，查询object 的pmem 中的地址
 		rc = vos_oi_find(cont, oid, &obj->obj_df, ts_set);
 		if (rc == -DER_NONEXIST) {
 			D_DEBUG(DB_TRACE, "non exist oid "DF_UOID"\n",

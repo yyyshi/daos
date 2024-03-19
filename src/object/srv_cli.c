@@ -100,6 +100,7 @@ dsc_obj_fetch(daos_handle_t oh, daos_epoch_t epoch, daos_key_t *dkey,
 	if (rc)
 		return rc;
 
+	// 根据iods 和sgls 构建fetch task
 	rc = dc_obj_fetch_task_create(oh, th, 0, dkey, nr, extra_flag,
 				      iods, sgls, maps, extra_arg, csum_iov,
 				      NULL, dsc_scheduler(), &task);
@@ -123,6 +124,7 @@ dsc_obj_update(daos_handle_t oh, uint64_t flags, daos_key_t *dkey,
 	tse_task_t	*task;
 	int		rc;
 
+	// 根据iods 和sgls 构建update task
 	rc = dc_obj_update_task_create(oh, DAOS_TX_NONE, flags, dkey, nr, iods,
 				       sgls, NULL, dsc_scheduler(), &task);
 	if (rc)

@@ -684,6 +684,7 @@ ds_csum_add2iod(daos_iod_t *iod, struct daos_csummer *csummer, struct bio_sglist
 		return 0;
 	}
 
+	// 处理checksum
 	return ds_csum_add2iod_array(iod, csummer, bsgl, biov_csums,
 				     biov_csums_used, iod_csums);
 }

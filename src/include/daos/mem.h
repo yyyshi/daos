@@ -129,6 +129,7 @@ struct umem_store_ops {
 };
 
 /** The offset of an object from the base address of the pool */
+// 一个obj 相对于pool 的base 地址的偏移量。即根据这个off + pool base 可以找到pool 中的obj 所在的地址
 typedef uint64_t umem_off_t;
 
 struct umem_store {

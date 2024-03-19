@@ -375,8 +375,10 @@ typedef struct {
 	 * \a iod_size would be the size of the single atomic value. The idx is
 	 * ignored and the rx_nr is also required to be 1.
 	 */
+	// 单值或者数组
 	daos_iod_type_t		iod_type;
 	/** Size of the single value or the record size of the array */
+	// 单值或者数组占用的size
 	daos_size_t		iod_size;
 	/** Per akey conditional. If DAOS_COND_PER_AKEY not set, this is
 	 *  ignored.
@@ -386,6 +388,7 @@ typedef struct {
 	 * Number of entries in the #iod_recxs for arrays,
 	 * should be 1 if single value.
 	 */
+	// iod_recxs 数组的个数
 	uint32_t		iod_nr;
 	/**
 	 * Array of extents, where each extent defines the index of the first
@@ -491,15 +494,20 @@ daos_obj_id2ord(daos_obj_id_t oid)
 	return (enum daos_obj_redun)((oid.hi & OID_FMT_CLASS_MASK) >> OID_FMT_CLASS_SHIFT);
 }
 
+// 实现oclass id 到oid 的转化
 static inline daos_oclass_id_t
 daos_obj_id2class(daos_obj_id_t oid)
 {
+	// 冗余类型，如：OC_SX，在创建oid 时候会传入
 	enum daos_obj_redun ord;
 	uint32_t nr_grps;
 
+	// 根据oid 查询到 OC_SX
 	ord = daos_obj_id2ord(oid);
+	// 获取grp_nr 信息
 	nr_grps = (oid.hi & OID_FMT_META_MASK) >> OID_FMT_META_SHIFT;
 
+	// 返回oclass id
 	return (ord << OC_REDUN_SHIFT) | nr_grps;
 }
 

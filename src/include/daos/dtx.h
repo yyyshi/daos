@@ -169,6 +169,7 @@ struct dtx_id {
 	/** The uuid of the transaction */
 	uuid_t			dti_uuid;
 	/** The HLC timestamp (not epoch) of the transaction */
+	// todo: 这个为什么不是epoch ？
 	uint64_t		dti_hlc;
 };
 

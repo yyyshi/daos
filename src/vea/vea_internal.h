@@ -119,10 +119,13 @@ struct vea_sized_class {
  * Large free extents (>VEA_LARGE_EXT_MB) are tracked in max a heap, small
  * free extents (<= VEA_LARGE_EXT_MB) are tracked in a size tree.
  */
+// 大块的free extent 存储在heap 中。小的free extent 存储在tree 中。大小以64MB 为区分
 struct vea_free_class {
 	/* Max heap for tracking the largest free extent */
+	// 保存大块free extent 的heap
 	struct d_binheap	vfc_heap;
 	/* Small free extent tree */
+	// 保存小块 free extnet 的tree
 	daos_handle_t		vfc_size_btr;
 	/* Size threshold for large extent */
 	uint32_t		vfc_large_thresh;

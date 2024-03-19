@@ -87,6 +87,7 @@ ds_obj_remote_update(struct dtx_leader_handle *dlh, void *data, int idx,
 
 	D_ASSERT(idx < dlh->dlh_normal_sub_cnt + dlh->dlh_delay_sub_cnt);
 	sub = &dlh->dlh_subs[idx];
+	// sub 事务的tgt 信息
 	shard_tgt = &sub->dss_tgt;
 	shard = shard_tgt->st_shard;
 	if (DAOS_FAIL_CHECK(DAOS_OBJ_TGT_IDX_CHANGE)) {
@@ -103,6 +104,7 @@ ds_obj_remote_update(struct dtx_leader_handle *dlh, void *data, int idx,
 		D_GOTO(out, rc = -DER_NOMEM);
 
 	tgt_ep.ep_grp = NULL;
+	// 要转发到的remote 节点地址
 	tgt_ep.ep_rank = shard_tgt->st_rank;
 	tgt_ep.ep_tag = shard_tgt->st_tgt_idx;
 

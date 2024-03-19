@@ -15,6 +15,7 @@ int
 obj_pl_grp_idx(uint32_t layout_gl_ver, uint64_t hash, uint32_t grp_nr)
 {
 	// sx 场景grp nr == targets 个数。那么实际就是根据jump hash 选一个target
+	// 根据key 返回一个桶的位置
 	return d_hash_jump(hash, grp_nr);
 }
 

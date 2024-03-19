@@ -76,6 +76,7 @@ struct bio_dma_chunk {
 	/* Link to edb_idle_list or edb_used_list or bbg_dma_chks */
 	d_list_t	 bdc_link;
 	/* Base pointer of the chunk address */
+	// chunk 的base 地址
 	void		*bdc_ptr;
 	/* Page offset (4K page) to unused fraction */
 	unsigned int	 bdc_pg_idx;
@@ -391,11 +392,17 @@ struct bio_xs_context {
 /* Per VOS instance I/O context */
 struct bio_io_context {
 	d_list_t		 bic_link; /* link to bxb_io_ctxts */
+	// 当前bio ctx 的blob 和blobstore
 	struct spdk_blob	*bic_blob;
 	struct bio_xs_blobstore	*bic_xs_blobstore;
+	// xs 的ctx
 	struct bio_xs_context	*bic_xs_ctxt;
 	uint32_t		 bic_inflight_dmas;
+	// xs 的io unit
+	// 根据bs 可以获取对应的io unit 个数
+	// 根据blob 可以获取对应的cluster 个数
 	uint32_t		 bic_io_unit;
+	// 当前bio 对应的pool 的uuid
 	uuid_t			 bic_pool_id;
 	unsigned int		 bic_opening:1,
 				 bic_closing:1,
@@ -405,12 +412,16 @@ struct bio_io_context {
 /* A contiguous DMA buffer region reserved by certain io descriptor */
 struct bio_rsrvd_region {
 	/* The DMA chunk where the region is located */
+	// region 所在的chunk
 	struct bio_dma_chunk	*brr_chk;
 	/* Start page idx within the DMA chunk */
+	// dma chunk 的起始页索引
 	unsigned int		 brr_pg_idx;
 	/* Payload offset (from brr_pg_idx) in bytes, used for SCM only */
+	// 这个是单独给scm 用的
 	unsigned int		 brr_chk_off;
 	/* Offset within the SPDK blob in bytes */
+	// spdk blob 的offset 字节
 	uint64_t		 brr_off;
 	/* End (not included) in bytes */
 	uint64_t		 brr_end;
@@ -419,27 +430,36 @@ struct bio_rsrvd_region {
 };
 
 /* Reserved DMA buffer for certain io descriptor */
+// dma region 和dma chunk 的信息（两个数组）
 struct bio_rsrvd_dma {
 	/* DMA regions reserved by the io descriptor */
+	// dma region 数组
 	struct bio_rsrvd_region	 *brd_regions;
 	/* Capacity of the region array */
+	// dma region 数组的capacity
 	unsigned int		  brd_rg_max;
 	/* Total number of reserved regions */
+	// dma region 数组个数
 	unsigned int		  brd_rg_cnt;
 	/* Pointer array for all referenced DMA chunks */
+	// 数组指针，描述所有的dma chunks
 	struct bio_dma_chunk	**brd_dma_chks;
 	/* Capacity of the pointer array */
+	// dma chunk 最大限制
 	unsigned int		  brd_chk_max;
 	/* Total number of chunks being referenced */
+	// 当前数组保存的dma chunk 的个数
 	unsigned int		  brd_chk_cnt;
 };
 
 /* I/O descriptor */
 struct bio_desc {
 	struct umem_instance	*bd_umem;
+	// bio ctx，里面有xs 的ctx
 	struct bio_io_context	*bd_ctxt;
 	/* DMA buffers reserved by this io descriptor */
 	// 当前biod 拥有的dma buffers，又会按照region 来拆分
+	// todo: 这里存储的是当前已经预留的所有资源，包括scm 和nvme 的资源，这个将决定哪个object 将被写到哪个硬盘上
 	struct bio_rsrvd_dma	 bd_rsrvd;
 	/* Report blob i/o completion */
 	ABT_eventual		 bd_dma_done;
@@ -460,6 +480,7 @@ struct bio_desc {
 				 bd_async_post:1,
 				 bd_non_blocking:1;
 	/* Cached bulk handles being used by this IOD */
+	// 当前iod 缓存的bulk hdls
 	struct bio_bulk_hdl    **bd_bulk_hdls;
 	unsigned int		 bd_bulk_max;
 	unsigned int		 bd_bulk_cnt;
@@ -589,6 +610,7 @@ iod_dma_buf(struct bio_desc *biod)
 	D_ASSERT(biod->bd_ctxt->bic_xs_ctxt);
 	D_ASSERT(biod->bd_ctxt->bic_xs_ctxt->bxc_dma_buf);
 
+	// 返回xs ctx 的dma buffer
 	return biod->bd_ctxt->bic_xs_ctxt->bxc_dma_buf;
 }
 
@@ -597,16 +619,18 @@ dma_biov2pg(struct bio_iov *biov, uint64_t *off, uint64_t *end,
 	    unsigned int *pg_cnt, unsigned int *pg_off)
 {
 	// biov 的头尾。中间包含的是当前biov 这些数据
+	// todo: 这里内部又是根据什么转化的，即 bi_addr.ba_off 是怎么来的
 	*off = bio_iov2raw_off(biov);
 	*end = bio_iov2raw_off(biov) + bio_iov2raw_len(biov);
 
-	// 不同设备的转换方式不同
+	// todo: 为啥不同设备的转换方式不同
 	if (bio_iov2media(biov) == DAOS_MEDIA_SCM) {
+		// 1. pmem 场景。每页4k大小
 		*pg_cnt = (*end - *off + BIO_DMA_PAGE_SZ - 1) >>
 				BIO_DMA_PAGE_SHIFT;
 		*pg_off = 0;
 	} else {
-		// 转换成page cnt 和page off
+		// 2. nvme ：转换成page cnt 和page off
 		*pg_cnt = ((*end + BIO_DMA_PAGE_SZ - 1) >> BIO_DMA_PAGE_SHIFT) -
 				(*off >> BIO_DMA_PAGE_SHIFT);
 		*pg_off = *off & ((uint64_t)BIO_DMA_PAGE_SZ - 1);

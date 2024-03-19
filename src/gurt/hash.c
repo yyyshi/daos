@@ -199,6 +199,8 @@ d_hash_murmur64(const unsigned char *key, unsigned int key_len,
  *                              num_buckets representing the bucket
  *                              the given key hashes to.
  */
+// jump 一致性hash 算法为给定的key 提供一个桶idx。这个算法在扩展桶时，将会
+// hash 最小数量(1/n)的key 到新的桶
 uint32_t
 d_hash_jump(uint64_t key, uint32_t num_buckets)
 {

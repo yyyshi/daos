@@ -132,12 +132,17 @@ typedef struct crt_group {
 } crt_group_t;
 
 /** transport endpoint identifier */
+// 传输对端唯一标识符
+// 描述的是xxx 个group 下的rank[yyy] 下的第zzz 个target
 typedef struct {
 	/** group handle, NULL means the primary group */
+	// todo: 所在的group，这个group 是怎么划分和维护的
 	crt_group_t	*ep_grp;
 	/** rank number within the group */
+	// 在上面所述的group 中的rank 索引
 	d_rank_t	 ep_rank;
 	/** tag, now used as the context ID of the target rank */
+	// ep_rank 所决定的rank 下的target 的索引 
 	uint32_t	 ep_tag;
 } crt_endpoint_t;
 

@@ -429,10 +429,16 @@ inline_aging_flush(struct vea_space_info *vsi, bool force, uint32_t nr_flush, ui
  *    if it fails, reserve from the largest free extent. (lookup vfc_size_btr)
  * 4. Fail reserve with ENOMEM if all above attempts fail.
  */
+// 预留块设备上的一个extent（预留规则）
+// 1. 从带hint 的offset 的extent 上保留
+// 2. 如果free extent 很大需要分割，一分为二然后选择一个
+// 3. 尝试从一些小的free extent 预留，如果失败了，从最大的free extent 预留
+// 4. 如果上述操作都失败了，预留失败返回 ENOMEM
 int
 vea_reserve(struct vea_space_info *vsi, uint32_t blk_cnt,
 	    struct vea_hint_context *hint, d_list_t *resrvd_list)
 {
+	// 本次预留的extent
 	struct vea_resrvd_ext	*resrvd;
 	uint32_t		 nr_flushed;
 	bool			 force = false;
@@ -460,6 +466,7 @@ vea_reserve(struct vea_space_info *vsi, uint32_t blk_cnt,
 	inline_aging_flush(vsi, force, MAX_FLUSH_FRAGS, NULL);
 retry:
 	/* Reserve from hint offset */
+	// 对应上面的 1
 	if (try_hint) {
 		rc = reserve_hint(vsi, blk_cnt, resrvd);
 		if (rc != 0)
@@ -469,6 +476,7 @@ retry:
 	}
 
 	/* Reserve from the largest extent or a small extent */
+	// 对应上面的 3 （从大块free extent 或者小的free extent 上预留）
 	rc = reserve_single(vsi, blk_cnt, resrvd);
 	if (rc != 0)
 		goto error;
@@ -498,6 +506,7 @@ done:
 			    &resrvd->vre_hint_seq);
 	}
 
+	// 将本次预留出来的extent，放到预留列表的尾部
 	d_list_add_tail(&resrvd->vre_link, resrvd_list);
 
 	return 0;

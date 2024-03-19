@@ -122,6 +122,7 @@ io_bypass_init(void)
 		tok = daos_str_trimwhite(tok);
 		for (iob = &io_bypass_dict[0]; iob->iob_str; iob++) {
 			if (strcasecmp(tok, iob->iob_str) == 0) {
+				// 用于debug 的io bypass 参数
 				daos_io_bypass |= iob->iob_bit;
 				D_PRINT("debugging mode: %s is disabled\n",
 				       iob->iob_str);

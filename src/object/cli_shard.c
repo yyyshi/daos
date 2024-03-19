@@ -963,9 +963,11 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 		void *shard_args, struct daos_shard_tgt *fw_shard_tgts,
 		uint32_t fw_cnt, tse_task_t *task)
 {
-	// 通过args 可以获取bulk 数据
+	// todo: 看下 args 和api_args 这俩参数的构建过程
+	// object 下 shard 级别的参数
 	struct shard_rw_args	*args = shard_args;
 	struct shard_auxi_args	*auxi = &args->auxi;
+	// object 读写参数。根据shard 的auxi 获取object 的auxi，再获取object task
 	daos_obj_rw_t		*api_args = dc_task_get_args(auxi->obj_auxi->obj_task);
 	struct dc_pool		*pool;
 	daos_key_t		*dkey = api_args->dkey;
@@ -974,6 +976,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 	d_sg_list_t		*sgls = api_args->sgls;
 	crt_rpc_t		*req = NULL;
 	struct obj_rw_in	*orw;
+	// 读写回调需要返回的一些参数
 	struct rw_cb_args	 rw_args;
 	crt_endpoint_t		 tgt_ep;
 	uuid_t			 cont_hdl_uuid;
@@ -1003,9 +1006,11 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 	if (pool == NULL)
 		D_GOTO(out, rc = -DER_NO_HDL);
 
+	// todo: 这个group 又是怎么来的
 	tgt_ep.ep_grp = pool->dp_sys->sy_group;
 	tgt_ep.ep_tag = shard->do_target_idx;
 	tgt_ep.ep_rank = shard->do_target_rank;
+	// crt rpc 发送的对端地址
 	rw_args.tgt_ep = tgt_ep;
 	if ((int)tgt_ep.ep_rank < 0)
 		D_GOTO(out, rc = (int)tgt_ep.ep_rank);
@@ -1020,12 +1025,13 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 	if (DAOS_FAIL_CHECK(DAOS_SHARD_OBJ_FAIL))
 		D_GOTO(out_req, rc = -DER_INVAL);
 
-	// 构建rpc 请求并填充数据
+	// 开始构建rpc 请求并填充数据
 	orw = crt_req_get(req);
 	D_ASSERT(orw != NULL);
 
 	if (fw_shard_tgts != NULL) {
 		D_ASSERT(fw_cnt >= 1);
+		// 将之前选择的forward targets 添加到rpc 请求里，传给服务端
 		orw->orw_shard_tgts.ca_count = fw_cnt;
 		orw->orw_shard_tgts.ca_arrays = fw_shard_tgts;
 	} else {
@@ -1033,6 +1039,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 		orw->orw_shard_tgts.ca_arrays = NULL;
 	}
 	orw->orw_map_ver = auxi->map_ver;
+	// start shard idx 和 oid 
 	orw->orw_start_shard = auxi->start_shard;
 	orw->orw_oid = shard->do_id;
 	uuid_copy(orw->orw_pool_uuid, pool->dp_pool);
@@ -1068,15 +1075,20 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 	orw->orw_dti_cos.ca_arrays = NULL;
 
 	orw->orw_api_flags = api_args->flags;
+	// 从shard_auxi 透传epoch 信息
 	orw->orw_epoch = auxi->epoch.oe_value;
 	orw->orw_epoch_first = auxi->epoch.oe_first;
 	orw->orw_dkey_hash = auxi->obj_auxi->dkey_hash;
 	orw->orw_nr = nr;
 	orw->orw_dkey = *dkey;
 	orw->orw_dkey_csum = args->dkey_csum;
+	// 来自于api_args 和args 两个参数变量
+	// 设置 iods 等信息
 	orw->orw_iod_array.oia_iod_nr = nr;
 	orw->orw_iod_array.oia_iods = api_args->iods;
+	// 填充客户端传递进来的 checksum，offs，iods 等
 	orw->orw_iod_array.oia_iod_csums = args->iod_csums;
+	// todo: object io 描述信息
 	orw->orw_iod_array.oia_oiods = args->oiods;
 	orw->orw_iod_array.oia_oiod_nr = (args->oiods == NULL) ?
 					 0 : nr;
@@ -1088,7 +1100,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 		tgt_ep.ep_tag, auxi->epoch.oe_value, DP_DTI(&orw->orw_dti),
 		orw->orw_start_shard, orw->orw_map_ver);
 
-	// 这个后面很多判断
+	// todo: 这个后面很多判断?
 	if (args->bulks != NULL) {
 		orw->orw_sgls.ca_count = 0;
 		orw->orw_sgls.ca_arrays = NULL;
@@ -1117,13 +1129,17 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 		orw->orw_bulks.ca_arrays = NULL;
 	}
 
+	// rpc 请求到这里已经构建完成，就差发送，这里是先构建cb 的一些参数
 	crt_req_addref(req);
+	// rw_args 里面有rpc 要发送的对端节点的地址，这里又和req 关联上
 	rw_args.rpc = req;
 	rw_args.hdlp = (daos_handle_t *)pool;
 	rw_args.map_ver = &auxi->map_ver;
 	rw_args.co = shard->do_co;
 	rw_args.shard_args = args;
 	/* remember the sgl to copyout the data inline for fetch */
+	// todo: 这又是在干什么操作，是在fetch 场景把什么数据传递回去了？
+	// todo: 这个是往客户端返回数据的吗？
 	rw_args.rwaa_sgls = (opc == DAOS_OBJ_RPC_FETCH) ? sgls : NULL;
 	if (args->reasb_req && args->reasb_req->orr_recov) {
 		rw_args.maps = NULL;
@@ -1149,11 +1165,13 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 	if (DAOS_FAIL_CHECK(DAOS_SHARD_OBJ_RW_CRT_ERROR))
 		D_GOTO(out_args, rc = -DER_HG);
 
+	// 注册读写完成的回调函数
 	rc = tse_task_register_comp_cb(task, dc_rw_cb, &rw_args,
 				       sizeof(rw_args));
 	if (rc != 0)
 		D_GOTO(out_args, rc);
 
+	// 用于性能debug
 	if (daos_io_bypass & IOBP_CLI_RPC) {
 		rc = daos_rpc_complete(req, task);
 	} else {

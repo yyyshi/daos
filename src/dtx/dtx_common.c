@@ -1309,6 +1309,8 @@ dtx_leader_end(struct dtx_leader_handle *dlh, struct ds_cont_hdl *coh, int resul
 
 	D_ASSERT(dth->dth_mbs != NULL);
 
+	// 直接在dth_mbs 尾部追加一个dte
+	// todo: 什么含义
 	size = sizeof(*dte) + sizeof(*mbs) + dth->dth_mbs->dm_data_size;
 	D_ALLOC(dte, size);
 	if (dte == NULL) {
@@ -1335,6 +1337,8 @@ dtx_leader_end(struct dtx_leader_handle *dlh, struct ds_cont_hdl *coh, int resul
 		flags = DCF_SHARED;
 	else
 		flags = 0;
+	
+	// 在一次dtx 要结束的时候，向cos 缓存中添加dtx entry
 	rc = dtx_add_cos(cont, dte, &dth->dth_leader_oid,
 			 dth->dth_dkey_hash, dth->dth_epoch, flags);
 	dtx_entry_put(dte);
@@ -1505,7 +1509,9 @@ dtx_end(struct dtx_handle *dth, struct ds_cont_child *cont, int result)
 	if (daos_is_zero_dti(&dth->dth_xid))
 		goto out;
 
+	// 说明tx 执行出错了
 	if (result < 0) {
+		// 虽然本次执行错误，但是因为cos 缓存中还没done，所以需要commit
 		if (dth->dth_dti_cos_count > 0 && !dth->dth_cos_done) {
 			int	rc;
 
@@ -1517,6 +1523,10 @@ dtx_end(struct dtx_handle *dth, struct ds_cont_child *cont, int result)
 			 *	 to commit them, because they are still in CoS cache,
 			 *	 and can be committed next time.
 			 */
+			// todo: 什么意思
+			// 1. 如果当前节点为非leader 节点，即使由于某种原因导致修改失败，我们依然需要
+			// 提交piggyback dtxs，因为这些可能已经在其他节点被提交了
+			// 2. 如果当前节点是leader 节点，是否提交失败不重要，因为他们已经在cos 缓存中了，下一次一定会被提交
 			rc = vos_dtx_commit(cont->sc_hdl, dth->dth_dti_cos,
 					    dth->dth_dti_cos_count, NULL);
 			if (rc < 0)

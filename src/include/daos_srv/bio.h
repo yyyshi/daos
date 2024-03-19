@@ -46,6 +46,8 @@ typedef struct {
 	 * Byte offset within PMDK pmemobj pool for SCM;
 	 * Byte offset within SPDK blob for NVMe.
 	 */
+	// 对于scm 来说，是pmem pool 的offset
+	// 对于nvme 来说，是spdk blob 的offset
 	uint64_t	ba_off;
 	/* DAOS_MEDIA_SCM or DAOS_MEDIA_NVME */
 	uint8_t		ba_type;
@@ -65,9 +67,14 @@ struct bio_iov {
 	 * For SCM, it's direct memory address of 'ba_off';
 	 * For NVMe, it's a DMA buffer allocated by SPDK malloc API.
 	 */
+	// todo: 这个地址就是biov 需要写入的地址
+	// 对于scm 来说，是 'ba_off' 的实际内存地址
+	// 对于nvme 来说，是一个spdk api 分配的dma buffer
 	void		*bi_buf;
 	/* Data length in bytes */
+	// buff 的长度
 	size_t		 bi_data_len;
+	// 这里的bi address 和上面的bi buff 是什么区别。bi buff 是地址，bi address 里存的是off
 	bio_addr_t	 bi_addr;
 
 	/** can be used to fetch more than actual address. Useful if more
@@ -75,6 +82,7 @@ struct bio_iov {
 	 * Prefix and suffix are needed because 'extra' needed data might
 	 * be before or after actual requested data.
 	 */
+	// 如果实际的数据量比所请求的多的场景是很有用的，可以获取更多的实际地址
 	size_t		 bi_prefix_len; /** bytes before */
 	size_t		 bi_suffix_len; /** bytes after */
 };
@@ -131,6 +139,8 @@ static inline void
 bio_addr_set(bio_addr_t *addr, uint16_t type, uint64_t off)
 {
 	addr->ba_type = type;
+	// 对于scm 来说，是内存实际地址
+	// 对于nvme 来说，是spdk blob 的offset
 	addr->ba_off = umem_off2offset(off);
 }
 
@@ -199,6 +209,7 @@ bio_iov2buf(const struct bio_iov *biov)
 static inline uint64_t
 bio_iov2raw_off(const struct bio_iov *biov)
 {
+	// 在 vos_update_begin-->akey_update_begin-->bio_addr_set 函数里面设置的
 	return biov->bi_addr.ba_off;
 }
 

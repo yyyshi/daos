@@ -179,6 +179,7 @@ example_daos_key_array()
 	 * for the oid.lo to allocate 1 or more unique oids in the
 	 * container. Please see: daos_cont_alloc_oids();
 	 */
+	// 设置object id
 	oid.hi = 0;
 	oid.lo = 1;
 
@@ -188,12 +189,13 @@ example_daos_key_array()
 	 * object (replication, Erasure coding, no protection). In this case, we
 	 * choose max striping with no data prorection - OC_SX.
 	 */
-	// oc 用于数据保护和sharding
+	// oc 用于数据保护和sharding。传入container hdl，返回oid
 	daos_obj_generate_oid(coh, &oid, 0, OC_SX, 0, 0);
 
 	/** open DAOS object */
 	// simple test
-	// 打开一个obj，返回object hdl。这里会查询元数据信息
+	// 输入container hdl 和oid，打开一个obj，返回object hdl == oh。这里会查询元数据信息
+	// todo: 如果layout 是根据oid 设置的，那么如果发生了数据移动，layout 是怎么变化的？
 	rc = daos_obj_open(coh, oid, DAOS_OO_RW, &oh, NULL);
 	ASSERT(rc == 0, "object open failed with %d", rc);
 
@@ -274,6 +276,7 @@ example_daos_key_array()
 		 */
 		// 写入一个dkey，当前场景一个dkey 下有一个akey，因此对应1 个iod 和 1个sgl。
 		// 对于多个akey 的场景，这个函数传递iods 和sgls 数组以及个数（参数5）作为函数参数
+		// 在open 的时候根据hdl 创建了dc_object 并添加link 信息到了hash table。之后fetch / update 请求再通过hdl 查找对应的dc_object 来获取相关信息
 		rc = daos_obj_update(oh, DAOS_TX_NONE, 0, &dkey, 1, &iod, &sgl,
 				     NULL);
 		ASSERT(rc == 0, "object update failed with %d", rc);
@@ -721,6 +724,7 @@ main(int argc, char **argv)
 	}
 
 	/** initialize the local DAOS stack */
+	// 这里会初始化所有的oc，后面在open object 时候会去做二分查找，根据oid 查找对应的oclass，比如OC_SX等
 	rc = daos_init();
 	ASSERT(rc == 0, "daos_init failed with %d", rc);
 

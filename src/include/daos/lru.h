@@ -29,6 +29,7 @@ struct daos_llink_ops {
 	void	 (*lop_print_key)(void *key, unsigned int ksize);
 };
 
+// oi table 里面保存的数据
 struct daos_llink {
 	d_list_t		 ll_link;	/**< LRU hash link */
 	d_list_t		 ll_qlink;	/**< Temp link for traverse */

@@ -76,6 +76,7 @@ struct pl_obj_layout {
 };
 
 /** common header of all placement map */
+// placement map 的header
 struct pl_map {
 	/** corresponding pool uuid */
 	uuid_t			 pl_uuid;

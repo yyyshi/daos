@@ -25,6 +25,7 @@ compound_alloc_extent(struct vea_space_info *vsi, struct vea_free_extent *vfe,
 	/* Remove the found free extent from compound index */
 	extent_free_class_remove(vsi, entry);
 
+	// todo: 没看懂
 	if (remain->vfe_blk_cnt == vfe->vfe_blk_cnt) {
 		d_iov_set(&key, &vfe->vfe_blk_off, sizeof(vfe->vfe_blk_off));
 		rc = dbtree_delete(vsi->vsi_free_btr, BTR_PROBE_EQ, &key, NULL);
@@ -105,6 +106,7 @@ reserve_extent(struct vea_space_info *vsi, uint32_t blk_cnt,
 	if (d_binheap_is_empty(&vfc->vfc_heap))
 		return 0;
 
+	// 大根堆直接获取最大的root 节点，即最大的free extent
 	root = d_binheap_root(&vfc->vfc_heap);
 	entry = container_of(root, struct vea_extent_entry, vee_node);
 
@@ -113,6 +115,7 @@ reserve_extent(struct vea_space_info *vsi, uint32_t blk_cnt,
 	       entry->vee_ext.vfe_blk_off, entry->vee_ext.vfe_blk_cnt);
 
 	/* The largest free extent can't satisfy huge allocate request */
+	// 最大的free extent 都太小了，返回失败
 	if (entry->vee_ext.vfe_blk_cnt < blk_cnt)
 		return 0;
 
@@ -122,7 +125,9 @@ reserve_extent(struct vea_space_info *vsi, uint32_t blk_cnt,
 	 * reserve from the small extents first, if it fails, reserve from the
 	 * largest free extent.
 	 */
+	// free extent 足够大，且可以拆分，那么一分为二，把其中半个预留出去
 	if (entry->vee_ext.vfe_blk_cnt <= (max(blk_cnt, vfc->vfc_large_thresh) * 2)) {
+		// 这里是不满足拆分的场景，将使用多个小的free extent 来预留
 		vfe.vfe_blk_off = entry->vee_ext.vfe_blk_off;
 		vfe.vfe_blk_cnt = blk_cnt;
 
@@ -136,10 +141,12 @@ reserve_extent(struct vea_space_info *vsi, uint32_t blk_cnt,
 
 		blk_off = entry->vee_ext.vfe_blk_off;
 		tot_blks = entry->vee_ext.vfe_blk_cnt;
+		// 减半
 		half_blks = tot_blks >> 1;
 		D_ASSERT(tot_blks >= (half_blks + blk_cnt));
 
 		/* Shrink the original extent to half size */
+		// 拆分成原来一半大小
 		extent_free_class_remove(vsi, entry);
 		entry->vee_ext.vfe_blk_cnt = half_blks;
 		rc = extent_free_class_add(vsi, entry);
@@ -147,6 +154,7 @@ reserve_extent(struct vea_space_info *vsi, uint32_t blk_cnt,
 			return rc;
 
 		/* Add the remaining part of second half */
+		// 把剩下的一半添加到free extent 列表中
 		if (tot_blks > (half_blks + blk_cnt)) {
 			vfe.vfe_blk_off = blk_off + half_blks + blk_cnt;
 			vfe.vfe_blk_cnt = tot_blks - half_blks - blk_cnt;
@@ -157,9 +165,11 @@ reserve_extent(struct vea_space_info *vsi, uint32_t blk_cnt,
 			if (rc)
 				return rc;
 		}
+		// 更新off
 		vfe.vfe_blk_off = blk_off + half_blks;
 	}
 
+	// 更新resrvd 的off
 	resrvd->vre_blk_off = vfe.vfe_blk_off;
 	resrvd->vre_blk_cnt = blk_cnt;
 
@@ -414,6 +424,7 @@ reserve_single(struct vea_space_info *vsi, uint32_t blk_cnt,
 	int			 rc;
 
 	/* No large free extent available */
+	// 如果没有较大的extent 可以预留，尝试从多个小的extent 预留
 	if (d_binheap_is_empty(&vfc->vfc_heap))
 		return reserve_small(vsi, blk_cnt, resrvd);
 
@@ -423,6 +434,10 @@ reserve_single(struct vea_space_info *vsi, uint32_t blk_cnt,
 			return rc;
 	}
 
+	// 有足够大的free extent 可以预留，直接用大的
+	// todo: extent 和block 的对应关系是什么
+	// 一个extent（盘区）包含多个连续的blocks
+	// todo: extent 又和blobstore，blob，cluster 是什么关系
 	return reserve_extent(vsi, blk_cnt, resrvd);
 }
 

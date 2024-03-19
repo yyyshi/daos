@@ -216,6 +216,8 @@ enum daos_obj_redun {
 	 * 8GX : 8 replicas, it spreads across all targets within the pool
 	 */
 	/** 2-way replicated object classes */
+	// todo: 冗余策略和数据保护不是一个事情么？
+	// 不都是通过副本来实现的么？
 	OC_RP_2G1  = OBJ_CLASS_DEF(OR_RP_2, 1ULL),
 	OC_RP_2G2  = OBJ_CLASS_DEF(OR_RP_2, 2ULL),
 	OC_RP_2G4  = OBJ_CLASS_DEF(OR_RP_2, 4ULL),

@@ -539,6 +539,7 @@ dc_obj_shard2anchor(daos_anchor_t *anchor, uint32_t shard)
 	anchor->da_shard = shard;
 }
 
+// todo: daos io 相关一些flags
 enum daos_io_flags {
 	/* The RPC will be sent to leader replica. */
 	DIOF_TO_LEADER		= 0x1,

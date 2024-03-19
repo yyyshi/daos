@@ -54,6 +54,7 @@ struct pool_comp_sorter {
 };
 
 /** In memory data structure for pool map */
+// pool map 的内存信息
 struct pool_map {
 	/** protect the refcount */
 	pthread_mutex_t		 po_lock;
@@ -62,18 +63,23 @@ struct pool_map {
 	/** refcount on the pool map */
 	int			 po_ref;
 	/** # domain layers */
+	// pool 的容错域信息
 	unsigned int		 po_domain_layers;
 	/**
 	 * Sorters for the binary search of different domain types.
 	 * These sorters are in ascending order for binary search of sorters.
 	 */
+	// 排好序的容错域信息
 	struct pool_comp_sorter	*po_domain_sorters;
 	/** sorter for binary search of target */
+	// 排好序的target 们
 	struct pool_comp_sorter	 po_target_sorter;
 	/**
 	 * Tree root of all components.
 	 * NB: All components must be stored in contiguous buffer.
 	 */
+	// 当前pool 的components 的tree 的root
+	// todo: 怎么构建和维护的tree
 	struct pool_domain	*po_tree;
 	/**
 	 * number of currently failed pool components of each type

@@ -36,12 +36,14 @@ daos_oclass_cid2allowedfailures(daos_oclass_id_t oc_id, uint32_t *tf)
 /**
  * Find the object class attributes for the provided @oid.
  */
+// 根据oid 查询oca
 struct daos_oclass_attr *
 daos_oclass_attr_find(daos_obj_id_t oid, uint32_t *nr_grps)
 {
 	struct daos_obj_class	*oc;
 
 	/* see daos_objid_generate */
+	// 先通过oid 转化成oclass id，再通过二分查找获取object class
 	oc = oclass_ident2cl(daos_obj_id2class(oid), nr_grps);
 	if (!oc) {
 		D_DEBUG(DB_PL, "Unknown object class %u for "DF_OID"\n",
@@ -680,6 +682,8 @@ static daos_sort_ops_t	oc_resil_sort_ops = {
  * not try to match oc_redun if ID is not less than OC_S1, number
  * of groups will be parsed from oc_id rather than array for this case.
  */
+// 根据oclass id 查询oca
+// oclass id 不等于 oid
 static struct daos_obj_class *
 oclass_ident2cl(daos_oclass_id_t oc_id, uint32_t *nr_grps)
 {
@@ -688,7 +692,8 @@ oclass_ident2cl(daos_oclass_id_t oc_id, uint32_t *nr_grps)
 	if (oc_id == OC_UNKNOWN)
 		return NULL;
 
-	// 二分查找
+	// 根据oc_id 二分查找object class
+	// oclass id 是通过oid 转化来的
 	idx = daos_array_find(oc_ident_array, oc_ident_array_sz, oc_id,
 			      &oc_ident_sort_ops);
 	if (idx >= 0) {

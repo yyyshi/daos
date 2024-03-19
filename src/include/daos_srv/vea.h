@@ -25,6 +25,7 @@ struct vea_resrvd_ext {
 	/* Link to a list for a series of vea_reserve() calls */
 	d_list_t		 vre_link;
 	/* Start block offset of the reserved extent */
+	// 预留的extent 的起始block 的offset
 	uint64_t		 vre_blk_off;
 	/* Hint offset before the reserve */
 	uint64_t		 vre_hint_off;

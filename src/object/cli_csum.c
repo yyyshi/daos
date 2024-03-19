@@ -22,6 +22,7 @@ dc_obj_csum_update(struct daos_csummer *csummer, struct cont_props props, daos_o
 		csummer, props.dcp_csum_type,
 		DP_BOOL(props.dcp_csum_enabled));
 
+	// 初始化
 	if (!daos_csummer_initialized(csummer)) /** Not configured */
 		return 0;
 
@@ -33,11 +34,13 @@ dc_obj_csum_update(struct daos_csummer *csummer, struct cont_props props, daos_o
 	/** Used to do actual checksum calculations. This prevents conflicts
 	 * between tasks
 	 */
+	// 用于实际的checksum 计算，避免和其他任务冲突
 	csummer_copy = daos_csummer_copy(csummer);
 	if (csummer_copy == NULL)
 		return -DER_NOMEM;
 
 	/** Calc 'd' key checksum */
+	// 根据dkey 计算dkey checksum
 	rc = daos_csummer_calc_key(csummer_copy, dkey, dkey_csum);
 	if (rc != 0) {
 		daos_csummer_destroy(&csummer_copy);
@@ -45,6 +48,7 @@ dc_obj_csum_update(struct daos_csummer *csummer, struct cont_props props, daos_o
 	}
 
 	/** Calc 'a' key checksum and value checksum */
+	// 根据iods 计算iod checksum
 	rc = daos_csummer_calc_iods(csummer_copy, sgls, iods, NULL,
 				    iod_nr, false,
 				    layout,
@@ -96,6 +100,7 @@ dc_obj_csum_fetch(struct daos_csummer *csummer, daos_key_t *dkey, daos_iod_t *io
 		return -DER_NOMEM;
 
 	/* dkey */
+	// 根据dkey 计算checksum
 	rc = daos_csummer_calc_key(csummer_copy, dkey, dkey_csum);
 	if (rc != 0) {
 		daos_csummer_destroy(&csummer_copy);
@@ -103,6 +108,7 @@ dc_obj_csum_fetch(struct daos_csummer *csummer, daos_key_t *dkey, daos_iod_t *io
 	}
 
 	/* akeys (1 for each iod) */
+	// 根据iod 计算checksum
 	rc = daos_csummer_calc_iods(csummer_copy, sgls, iods, NULL, iod_nr,
 				    true, layout,
 				    -1, iod_csums);

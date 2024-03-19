@@ -209,6 +209,7 @@ static btr_ops_t oi_btr_ops = {
 /**
  * Locate a durable object in OI table.
  */
+// 定位oi table 中的持久化object
 int
 vos_oi_find(struct vos_container *cont, daos_unit_oid_t oid,
 	    struct vos_obj_df **obj_p, struct vos_ts_set *ts_set)
@@ -223,6 +224,7 @@ vos_oi_find(struct vos_container *cont, daos_unit_oid_t oid,
 	d_iov_set(&key_iov, &oid, sizeof(oid));
 	d_iov_set(&val_iov, NULL, 0);
 
+	// 根据key 查询value
 	rc = dbtree_fetch(cont->vc_btr_hdl, BTR_PROBE_EQ,
 			  DAOS_INTENT_DEFAULT, &key_iov, NULL, &val_iov);
 	if (rc == 0) {

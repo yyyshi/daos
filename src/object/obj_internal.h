@@ -71,6 +71,7 @@ struct dc_obj_shard {
 struct dc_obj_layout {
 	/** The reference for the shards that are opened (in-using). */
 	unsigned int		do_open_count;
+	// object 的layout 其实指的是shard 们，不是target。shard 是具有所在的target idx 的
 	struct dc_obj_shard	do_shards[0];
 };
 
@@ -100,8 +101,11 @@ struct dc_object {
 	/** object open mode */
 	unsigned int		 cob_mode;
 	unsigned int		 cob_version;
+	// 一共多少个shard
 	unsigned int		 cob_shards_nr;
+	// 每个grp 有几个shard
 	unsigned int		 cob_grp_size;
+	// 用上面两个变量做除法，得到这些shard 分成多少个grp
 	unsigned int		 cob_grp_nr;
 	/**
 	 * The array for the latest time (in second) of
@@ -138,6 +142,9 @@ struct shard_fetch_stat {
  * 2) For EC obj, split iod/recxs to each target, generate new sgl to match with
  *    it, create oiod/siod to specify each shard/tgt's IO req.
  */
+// 重新组装的io 请求：用户输入iod/sgl 很可能需要在发送到server 之前在客户端进行重新组装
+// 1. merge 相邻的recxs，或者排序recxs 并重新生成sgl
+// 2. 对于EC obj，分割iod/recxs 到每个target，生成新的sgl
 struct obj_reasb_req {
 	/* object ID */
 	daos_obj_id_t			 orr_oid;
@@ -242,6 +249,7 @@ struct shard_rw_args {
 	crt_bulk_t		*bulks;
 	struct obj_io_desc	*oiods;
 	uint64_t		*offs;
+	// todo: 这俩checksum 是从哪里传递进来的，是根据dkey 和iods 计算的
 	struct dcs_csum_info	*dkey_csum;
 	struct dcs_iod_csums	*iod_csums;
 	struct obj_reasb_req	*reasb_req;
@@ -410,6 +418,7 @@ struct obj_auxi_args {
 	uint32_t			 iod_nr;
 	uint32_t			 initial_shard;
 	d_list_t			 shard_task_head;
+	// 重新组装的obj 请求
 	struct obj_reasb_req		 reasb_req;
 	struct obj_auxi_tgt_list	*failed_tgt_list;
 	uint64_t			 dkey_hash;
