@@ -315,12 +315,16 @@ struct vos_container {
 	/* Unique UID of VOS container */
 	uuid_t			vc_id;
 	/* DAOS handle for object index btree */
+	// 表示vos idx 的b+ 树的hdl
 	daos_handle_t		vc_btr_hdl;
 	/** Array for active DTX records */
+	// lru 数组存储active dtx
 	struct lru_array	*vc_dtx_array;
 	/* The handle for active DTX table */
+	// active 的dtx b+ 树
 	daos_handle_t		vc_dtx_active_hdl;
 	/* The handle for committed DTX table */
+	// committed 的dtx b+ 树
 	daos_handle_t		vc_dtx_committed_hdl;
 	/** The root of the B+ tree for active DTXs. */
 	struct btr_root		vc_dtx_active_btr;
@@ -333,6 +337,8 @@ struct vos_container {
 	/** Index for timestamp lookup */
 	uint32_t		*vc_ts_idx;
 	/** Direct pointer to the VOS container */
+	// 指向vos cont 的df
+	// 原来还有cont 的df
 	struct vos_cont_df	*vc_cont_df;
 	/** Set if container has objects to garbage collect */
 	d_list_t		vc_gc_link;
@@ -1224,6 +1230,7 @@ vos_iter2hdl(struct vos_iterator *iter)
 {
 	daos_handle_t	hdl;
 
+	// todo: iterator 的cookie
 	hdl.cookie = (uint64_t)iter;
 	return hdl;
 }
@@ -1730,10 +1737,12 @@ static inline struct bio_io_context *
 vos_data_ioctxt(struct vos_pool *vp)
 {
 	// 获取vos pool 的元数据信息
+	// todo: 这个信息是在什么时候初始化的。在函数 vos_pmemobj_create --> bio_mc_open 里
 	struct bio_meta_context	*mc = vos_pool2mc(vp);
 
 	// 返回data 类型的bio ctx（有data/meta/wal 三种类型的ctx，对应的是三种类型的存储设备）
 	if (mc != NULL && bio_mc2ioc(mc, SMD_DEV_TYPE_DATA) != NULL)
+		// 正常返回
 		return bio_mc2ioc(mc, SMD_DEV_TYPE_DATA);
 
 	/* Use dummy I/O context when data blob doesn't exist */

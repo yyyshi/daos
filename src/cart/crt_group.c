@@ -855,6 +855,7 @@ out:
  * rank where the tag resides in must exist in the cache before calling this
  * routine.
  */
+// na address 和rank 以及 target 有关
 int
 crt_grp_lc_addr_insert(struct crt_grp_priv *passed_grp_priv,
 		       struct crt_context *crt_ctx,
@@ -881,6 +882,8 @@ crt_grp_lc_addr_insert(struct crt_grp_priv *passed_grp_priv,
 	ctx_idx = crt_ctx->cc_idx;
 	D_RWLOCK_WRLOCK(&grp_priv->gp_rwlock);
 
+	// 存在本地的hash 表里
+	// 以rank 为key 去hash 表中查询address 信息，没有的话就添加进去，有的话用hg_address 更新里面已存在的
 	rlink = d_hash_rec_find(&grp_priv->gp_lookup_cache[ctx_idx],
 				(void *)&rank, sizeof(rank));
 	D_ASSERT(rlink != NULL);
@@ -921,6 +924,7 @@ out:
  * (hg_addr == NULL) means the caller only want to lookup the base_addr.
  * (base_addr == NULL) means the caller only want to lookup the hg_addr.
  */
+// todo: uri 和na address 各自功能
 void
 crt_grp_lc_lookup(struct crt_grp_priv *grp_priv, int ctx_idx,
 		  d_rank_t rank, uint32_t tag,
@@ -1604,6 +1608,7 @@ crt_hdlr_uri_lookup(crt_rpc_t *rpc_req)
 	}
 
 	/* step 1, lookup the URI in the local cache */
+	// 在本地的cache 中查询
 	crt_grp_lc_lookup(grp_priv_primary, crt_ctx->cc_idx, g_rank,
 			  ul_in->ul_tag, &cached_uri, NULL);
 	ul_out->ul_uri = cached_uri;
@@ -1622,7 +1627,8 @@ crt_hdlr_uri_lookup(crt_rpc_t *rpc_req)
 	/**
 	 * step 2, if rank:tag is not found, lookup rank:tag=0
 	 */
-	ul_out->ul_tag = 0;
+	ul_out->ul_tag = 0;。
+	// 按tag 为0 查询cache
 	crt_grp_lc_lookup(grp_priv_primary, crt_ctx->cc_idx,
 			  g_rank, 0, &cached_uri, NULL);
 	ul_out->ul_uri = cached_uri;

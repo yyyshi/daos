@@ -70,8 +70,11 @@ typedef struct {
 				  .da_buf = { 0 } }
 
 /** Generic handle for various DAOS components like container, object, etc. */
+// 不同的daos 组件都有统一的hdl，比如cont，obj等
+// todo: 功能是啥
 typedef struct {
 	/** generic handle value */
+	// hdl 的值
 	uint64_t	cookie;
 } daos_handle_t;
 
@@ -117,8 +120,10 @@ typedef uint64_t	daos_epoch_t;
  */
 typedef struct {
 	/** Low bound of the epoch range */
+	// epoch 的下围
 	daos_epoch_t	epr_lo;
 	/** High bound of the epoch range */
+	// epoch 的上围
 	daos_epoch_t	epr_hi;
 } daos_epoch_range_t;
 

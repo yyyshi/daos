@@ -30,6 +30,7 @@ struct dtx_share_peer {
 /**
  * DAOS two-phase commit transaction handle in DRAM.
  */
+// 两阶段提交的事务hdl
 struct dtx_handle {
 	union {
 		struct dtx_entry		 dth_dte;
@@ -47,11 +48,14 @@ struct dtx_handle {
 	/** The container handle */
 	daos_handle_t			 dth_coh;
 	/** The epoch# for the DTX. */
+	// dtx 的epoch
 	daos_epoch_t			 dth_epoch;
 	/**
 	 * The upper bound of the epoch uncertainty. dth_epoch_bound ==
 	 * dth_epoch means that dth_epoch has no uncertainty.
 	 */
+	// 向上bound，如果 dth_epoch == dth_epoch_bound 表示没有不确定性
+	// todo: 所以为啥要有个bound
 	daos_epoch_t			 dth_epoch_bound;
 	/**
 	 * The object ID is used to elect the DTX leader,

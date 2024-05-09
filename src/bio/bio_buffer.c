@@ -449,9 +449,11 @@ struct bio_copy_args {
 
 };
 
+// 将d_iov 中的数据拷贝到biov
 static int
 copy_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 {
+	// rdma 存储的bulk 数据或者是inline 模式下的sgls 数据
 	struct bio_copy_args	*arg = data;
 	d_sg_list_t		*sgl;
 	void			*addr = bio_iov2req_buf(biov);
@@ -466,6 +468,7 @@ copy_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 	sgl = &arg->ca_sgls[arg->ca_sgl_idx];
 
 	while (arg->ca_iov_idx < sgl->sg_nr) {
+		// sgls 中的d_iov
 		d_iov_t *iov;
 		ssize_t nob, buf_len;
 
@@ -499,6 +502,10 @@ copy_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 		if (addr != NULL) {
 			D_DEBUG(DB_TRACE, "bio copy %p size %zd\n",
 				addr, nob);
+			// 在addr 和 iov->iov_buf + arg->ca_iov_off 两个地址之间拷贝数据
+			// bio_iov 和 d_iov_t 之间进行数据拷贝
+			// 前者地址来自于传参与拷贝的 biov
+			// 后者的地址来自于函数第三个 data 参数（sgls）里面的 d_iov_t
 			bio_memcpy(biod, media, addr, iov->iov_buf +
 					arg->ca_iov_off, nob);
 			addr += nob;
@@ -551,11 +558,12 @@ iterate_biov(struct bio_desc *biod,
 
 	// 遍历所有的sgl list的数组，每个元素都是一个sgl list
 	for (i = 0; i < biod->bd_sgl_cnt; i++) {
-		// 遍历里面所有的sgls
+		// 遍历里面所有的bio sgls 下面的biov
+		// 在这之前所有的数据都是存储在d_sgls 的d_iov 里面的
 		struct bio_sglist *bsgl = &biod->bd_sgls[i];
 
 		if (data != NULL) {
-			// bulk 数据
+			// bulk 数据或者是sgls 数据拷贝
 			if (cb_fn == copy_one) {
 				struct bio_copy_args *arg = data;
 
@@ -581,8 +589,9 @@ iterate_biov(struct bio_desc *biod,
 		// 对当前sgl list，对里面所有的io 执行cb 函数
 		for (j = 0; j < bsgl->bs_nr_out; j++) {
 			struct bio_iov *biov = &bsgl->bs_iovs[j];
-			// 如果是bulk 数据，那么 cb_fn == bulk_map_one，否则cb_fn == dma_map_one
+			// 如果是bulk 数据，那么 cb_fn == bulk_map_one，否则cb_fn == dma_map_one，或者copy_one
 			// 实际上就是在处理所有的biov，iov 是存储在sgl list 中的，而这里biod 的bd_sgls 是sgl list 的一个数组
+			// 本质是rdma vs inline 传输方式
 			rc = cb_fn(biod, biov, data);
 			if (rc)
 				break;
@@ -738,6 +747,7 @@ iod_add_region(struct bio_desc *biod, struct bio_dma_chunk *chk,
 	// 是根据biov 计算出来的 dma_biov2pg
 	// todo: 这个预留出来的空间有什么说法，为啥这个object 要存在这里，而那个object 要存在那里？
 	// 当前数据需要存储到的blob 的offset
+	// off 在函数 nvme_rw 中会用到
 	rsrvd_dma->brd_regions[cnt].brr_off = off;
 	rsrvd_dma->brd_regions[cnt].brr_end = end;
 	rsrvd_dma->brd_regions[cnt].brr_media = media;
@@ -903,6 +913,8 @@ dma_map_one(struct bio_desc *biod, struct bio_iov *biov, void *arg)
 	bdb = iod_dma_buf(biod);
 	// biov 转化成page
 	// 现在要根据biov 数据的大小，申请相应的资源
+	// spdk_blob_io_write 时用到的off，是和当前off 有关联的
+	// off 在此根据biov 被初始化
 	dma_biov2pg(biov, &off, &end, &pg_cnt, &pg_off);
 
 	/*
@@ -1249,11 +1261,14 @@ nvme_rw(struct bio_desc *biod, struct bio_rsrvd_region *rg)
 	// todo: 研究下rg 的构造过程以及内部的brr_off 的赋值
 	// off 是上游reserve 的offset 地址
 	// 上游reserve 函数：vos_reserve_single / recx
+	// 这里设置的off，函数：bio_buffer.c 中 iod_add_region
+	// 追到底off 是在这里计算出来的：函数 dma_biov2pg
 	pg_idx = rg->brr_off >> BIO_DMA_PAGE_SHIFT;
 	pg_cnt = (rg->brr_end + BIO_DMA_PAGE_SZ - 1) >> BIO_DMA_PAGE_SHIFT;
 	D_ASSERT(pg_cnt > pg_idx);
 	pg_cnt -= pg_idx;
 
+	// 每次写这么多页，根据dma 的页计算出来的
 	while (pg_cnt > 0) {
 
 		drain_inflight_ios(xs_ctxt, bxb);
@@ -1271,14 +1286,17 @@ nvme_rw(struct bio_desc *biod, struct bio_rsrvd_region *rg)
 			blob, payload, pg_idx, pg_cnt, rw_cnt);
 
 		D_ASSERT(biod->bd_type < BIO_IOD_TYPE_GETBUF);
-		// nvme设备 都是通过spdk blob io 接口来完成读写的
+		// nvme设备 都是通过spdk blob io 接口来完成读写的，ceph 里面的nvmedevice 是直接走的块接口
 		// payload 是要参与读写的实际数据
 		// 将由biov 转化过来的 pg 再次转化为读写单元，填入spdk bio api
 		// spdk bio 接口
 		// 依赖pg idx 和bio ctx 的 bic_io_unit，通过函数 spdk_bs_get_io_unit_size 来获取
 		// todo: payload 是包含要写入数据的buffer
+		// 这里相当于走的是封装好的blob 的接口，而不是底层的通用块设备的接口 spdk_nvme_ns_cmd_readv_ext(spdk_nvme_ns_cmd_writev)
+		// blob 的write 接口，只需要指定blob 的起始io unit 的位置，和写入的数据length
 		if (biod->bd_type == BIO_IOD_TYPE_UPDATE)
 			spdk_blob_io_write(blob, channel, payload,
+						// 根据三个参数决定：io unit, pg idx, dma_page_size
 					   page2io_unit(biod->bd_ctxt, pg_idx, BIO_DMA_PAGE_SZ),
 					   page2io_unit(biod->bd_ctxt, rw_cnt, BIO_DMA_PAGE_SZ),
 					   rw_completion, biod);
@@ -1494,6 +1512,63 @@ retry:
 	// 遍历处理biov 里面的所有sgls
 	// 回调函数调用结构：cb_fn(biod, biov, data)，作用都是传入biod 和biov 做处理
 	// 这里映射的含义是，将biov 中存储的数据，映射到scm 的内存或者spdk 的硬盘空间
+
+	// NA_Mem_register 用于内存region 注册。调用函数：hg_bulk_register_segments 和 hg_bulk_register
+	// 当前支持的所有na class:
+	// ./na/na_ucx.c:887:    na_ucx_mem_register,                  /* mem_register */
+	// ./na/na_mpi.c:428:    NULL,                                 /* mem_register */
+	// ./na/na_psm.c:2612: *  - mem_register,mem_deregister: mem register not needed for psm I/O
+	// ./na/na_psm.c:2656:    NULL,                                  /* mem_register */
+	// ./na/na_bmi.c:484:    NULL,                                 /* mem_register */
+	// ./na/na_sm.c:1123:    NULL,                                /* mem_register */
+	// ./na/na_ofi.c:1752:    na_ofi_mem_register,                   /* mem_register */
+	// ./na/na_cci.c:402:    na_cci_mem_register,                  /* mem_register */
+	/*
+	在 na/na.c 中实现
+	NA_Mem_register(na_class_t *na_class, na_mem_handle_t *mem_handle,
+		enum na_mem_type mem_type, uint64_t device)
+	// 根据ops 对应的mem_register 函数
+    na_class->ops->mem_register(na_class, mem_handle, mem_type, device);
+
+	hg_bulk_register(na_class_t *na_class, void *base, size_t len,
+    unsigned long flags, enum na_mem_type mem_type, uint64_t device,
+    na_mem_handle_t **mem_handle_p, size_t *serialize_size_p)
+	(内部会连续调用 NA_Mem_handle_create，NA_Mem_register，NA_Mem_handle_get_serialize_size。即创建hdl，注册和缓存序列化后的hdl)
+
+	hg_bulk_register_segments(na_class_t *na_class, struct na_segment *segments,
+    size_t count, unsigned long flags, enum na_mem_type mem_type,
+    uint64_t device, na_mem_handle_t **mem_handle_p, size_t *serialize_size_p)
+
+	hg_bulk_create 中会调用 hg_bulk_register 和hg_bulk_register_segment
+	hg_bulk_create(hg_core_class_t *core_class, hg_uint32_t count, void **bufs,
+    const hg_size_t *lens, hg_uint8_t flags, const struct hg_bulk_attr *attrs,
+    struct hg_bulk **hg_bulk_p)
+
+	HG_Bulk_create 和 HG_Bulk_create_attr 中会调用 hg_bulk_create
+	HG_Bulk_create(hg_class_t *hg_class, hg_uint32_t count, void **buf_ptrs,
+    const hg_size_t *buf_sizes, hg_uint8_t flags, hg_bulk_t *handle)
+
+	HG_Bulk_create_attr(hg_class_t *hg_class, hg_uint32_t count, void **buf_ptrs,
+    const hg_size_t *buf_sizes, hg_uint8_t flags,
+    const struct hg_bulk_attr *attrs, hg_bulk_t *handle)
+
+	hg_set_struct(struct hg_private_handle *hg_handle,
+    const struct hg_proc_info *hg_proc_info, hg_op_t op, void *struct_ptr,
+    hg_size_t *payload_size, hg_bool_t *more_data)
+
+	HG_Forward(hg_handle_t handle, hg_cb_t callback, void *arg, void *in_struct);
+
+	总结：memory region 整个注册过程从上到下调用过程：
+	---条条大路通罗马---HG_Bulk_create --> hg_bulk_create
+	---条条大路通罗马---HG_Forward --> hg_set_struct --> HG_Bulk_create --> hg_bulk_create --> hg_bulk_register --> NA_Mem_register --> na_class->ops->mem_register  -->na_ofi_mem_register
+
+	na_ofi_mem_register 里面：
+	1. register region：fi_mr_regattr
+	2. attach mr to endpoint when provvider request it: fi_mr_bind & fi_mr_enable
+	3. Retrieve key: fi_mr_key
+
+	HG_Forward 函数的回调函数是通过 HG_Register() 来设置的，cb是通过执行HG_Trigger 函数来执行的。HG_Forward函数是非阻塞的。
+	*/
 	rc = iterate_biov(biod, arg ? bulk_map_one : dma_map_one, arg);
 	if (rc) {
 		/*
@@ -1710,9 +1785,13 @@ bio_iod_copy(struct bio_desc *biod, d_sg_list_t *sgls, unsigned int nr_sgl)
 	if (biod->bd_sgl_cnt != nr_sgl)
 		return -DER_INVAL;
 
+	// 这里是d_sgls 和d_iov
 	arg.ca_sgls = sgls;
 	arg.ca_sgl_cnt = nr_sgl;
 
+	// 小块的数据处理流程。小块数都存储在sgls 结构里
+	// 所以要遍历slg，依次处理每个sgl 下面的biov，对biov 执行cb 函数
+	// copy_one(biod, biov, data);  其中 data == NULL
 	return iterate_biov(biod, copy_one, &arg);
 }
 

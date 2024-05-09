@@ -938,6 +938,7 @@ key_tree_prepare(struct vos_object *obj, daos_handle_t toh,
 	int			 tmprc;
 
 	/** reset the saved hash */
+	// todo: 将 vos thread local storage 的 vtl_hash_set 成员设置为 false
 	vos_kh_clear(obj->obj_cont->vc_pool->vp_sysdb);
 
 	if (krecp != NULL)
@@ -968,6 +969,9 @@ key_tree_prepare(struct vos_object *obj, daos_handle_t toh,
 	 *   create the root for the subtree, or just return it if it's already
 	 *   there.
 	 */
+	// 为了避免将参数传递到多嵌套树的复杂性，树操作不嵌套，而是：
+	// 1. fetch 场景，我们存储加载在父树叶子中的子树根
+	// 2. update/insert 场景，我们调用dbtree_update()，它可以为子树创建根，或者如果已经存在将直接返回
 	rc = dbtree_fetch(toh, BTR_PROBE_EQ, intent, key,
 			  NULL, &riov);
 	switch (rc) {
@@ -1162,8 +1166,10 @@ obj_tree_init(struct vos_object *obj)
 	if (daos_handle_is_valid(obj->obj_toh))
 		return 0;
 
+	// 为object 初始化btree
 	D_ASSERT(obj->obj_df);
 	if (obj->obj_df->vo_tree.tr_class == 0) {
+		// 创建新btree
 		uint64_t tree_feats = 0;
 		enum daos_otype_t type;
 
@@ -1175,6 +1181,7 @@ obj_tree_init(struct vos_object *obj)
 		else if (daos_is_dkey_lexical_type(type))
 			tree_feats |= VOS_KEY_CMP_LEXICAL_SET;
 
+		// 创建btree
 		rc = dbtree_create_inplace_ex(ta->ta_class, tree_feats,
 					      ta->ta_order, vos_obj2uma(obj),
 					      &obj->obj_df->vo_tree,
@@ -1182,7 +1189,9 @@ obj_tree_init(struct vos_object *obj)
 					      vos_obj2pool(obj),
 					      &obj->obj_toh);
 	} else {
+		// 打开已有的btree
 		D_DEBUG(DB_DF, "Open btree for object\n");
+		// 打开btree
 		rc = dbtree_open_inplace_ex(&obj->obj_df->vo_tree,
 					    vos_obj2uma(obj),
 					    vos_cont2hdl(obj->obj_cont),

@@ -86,6 +86,7 @@ ds_obj_remote_update(struct dtx_leader_handle *dlh, void *data, int idx,
 	int				 rc = 0;
 
 	D_ASSERT(idx < dlh->dlh_normal_sub_cnt + dlh->dlh_delay_sub_cnt);
+	// todo: leader 管理的所有子事务
 	sub = &dlh->dlh_subs[idx];
 	// sub 事务的tgt 信息
 	shard_tgt = &sub->dss_tgt;
@@ -135,6 +136,7 @@ ds_obj_remote_update(struct dtx_leader_handle *dlh, void *data, int idx,
 
 	D_DEBUG(DB_TRACE, DF_UOID" forwarding to rank:%d tag:%d.\n",
 		DP_UOID(orw->orw_oid), tgt_ep.ep_rank, tgt_ep.ep_tag);
+	// 转发到远端target
 	rc = crt_req_send(req, shard_update_req_cb, remote_arg);
 	if (rc != 0) {
 		D_ASSERT(sub->dss_comp == 1);

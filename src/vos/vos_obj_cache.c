@@ -326,6 +326,8 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	if (cont->vc_pool->vp_dying)
 		return -DER_SHUTDOWN;
 
+	// 如果是fetch 场景： VOS_OBJ_VISIBLE                       create == false
+	// 如果是update场景： VOS_OBJ_CREATE & VOS_OBJ_VISIBLE      create == true
 	create = flags & VOS_OBJ_CREATE;
 	visible_only = flags & VOS_OBJ_VISIBLE;
 	/** Pass NULL as the create_args if we are not creating the object so we avoid
@@ -340,10 +342,12 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		create ? "true" : "false", epr->epr_lo, epr->epr_hi);
 
 	/* Create the key for obj cache */
+	// 构建用于去cache 里查询的key
 	lkey.olk_cont = cont;
 	lkey.olk_oid = oid;
 
-	// 从lru cache 里查询，如果没查到就insert 进去
+	// 先从lru cache 里查询，如果没查到就insert 进去
+	// todo: 没查到直接加进去，但是pmem 中没有，还不是没用，应该和pmem 中保持一致吧？
 	rc = daos_lru_ref_hold(occ, &lkey, sizeof(lkey), create_flag, &lret);
 	if (rc == -DER_NONEXIST) {
 		D_ASSERT(obj_local.obj_cont == NULL);
@@ -355,7 +359,8 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		D_GOTO(failed_2, rc);
 	} else {
 		/** Object is in cache */
-		// cache 里面有，返回
+		// lru 中查到了
+		// cache hit里面有object 在pmem 上的地址，通过 goto check_object 返回
 		obj = container_of(lret, struct vos_object, obj_llink);
 	}
 
@@ -375,11 +380,13 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 			goto out; /* Ok to delete */
 	}
 
+	// 如果获取到了object 在pmem 中的地址，直接go check_object，否则可能还需要去oi table 中查询df
 	if (obj->obj_df) {
 		D_DEBUG(DB_TRACE, "looking up object ilog");
 		if (create || intent == DAOS_INTENT_PUNCH)
 			vos_ilog_ts_ignore(vos_obj2umm(obj),
 					   &obj->obj_df->vo_ilog);
+		// todo: 这个就是所说的所有操作都会被记录下来吗，所以记录是存储在ilog 中的？
 		tmprc = vos_ilog_ts_add(ts_set, &obj->obj_df->vo_ilog,
 					&oid, sizeof(oid));
 		D_ASSERT(tmprc == 0); /* Non-zero only valid for akey */
@@ -392,8 +399,12 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		epr->epr_hi);
 
 	obj->obj_sync_epoch = 0;
+	// 如果是fetch 操作，并且cache 中没查到df，那么去oi table 的btree 中查询df
 	if (!create) {
 		// 查询oi table，查询object 的pmem 中的地址
+		// 传入cont 和oid 去该container 下的b+ 树中查询object 元数据信息
+		// todo: object 的元数据信息都包括哪些内容，这里貌似只是一个object 在pmem上的地址
+		// 这个地址对应的其实就是object 的元数据信息，因为pmem 本来就是存储元数据和小容量数据的
 		rc = vos_oi_find(cont, oid, &obj->obj_df, ts_set);
 		if (rc == -DER_NONEXIST) {
 			D_DEBUG(DB_TRACE, "non exist oid "DF_UOID"\n",
@@ -402,6 +413,8 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		}
 	} else {
 
+		// 如果是update 操作，先去oi table 中查询，查到了返回
+		// 没查到则将在oi table 中创建并返回
 		rc = vos_oi_find_alloc(cont, oid, epr->epr_hi, false,
 				       &obj->obj_df, ts_set);
 		D_ASSERT(rc || obj->obj_df);
@@ -410,12 +423,14 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	if (rc != 0)
 		goto failed;
 
+	// df 不可用，fail 退出
 	if (!obj->obj_df) {
 		D_DEBUG(DB_TRACE, "nonexistent obj "DF_UOID"\n",
 			DP_UOID(oid));
 		D_GOTO(failed, rc = -DER_NONEXIST);
 	}
 
+	// 如果获取到了有效的df，那么会走到这里
 check_object:
 	if (obj->obj_discard && (create || (flags & VOS_OBJ_DISCARD) != 0)) {
 		/** Cleanup before assert so unit test that triggers doesn't corrupt the state */
@@ -428,7 +443,11 @@ check_object:
 	if ((flags & VOS_OBJ_DISCARD) || intent == DAOS_INTENT_KILL || intent == DAOS_INTENT_PUNCH)
 		goto out;
 
+	// 如果是fetch 操作
 	if (!create) {
+		// todo: 先 ilog fetch，这返回的是什么信息
+		// 使用的epoch 信息：epr->epr_hi, bound
+		// 上面获取到了df，这里使用从df 里获取到的ilog 信息--ilog 的tree root
 		rc = vos_ilog_fetch(vos_cont2umm(cont), vos_cont2hdl(cont),
 				    intent, &obj->obj_df->vo_ilog, epr->epr_hi,
 				    bound, false, /* has_cond: no object level condition. */
@@ -442,6 +461,7 @@ check_object:
 			goto failed;
 		}
 
+		// todo: 再 ilog check
 		rc = vos_ilog_check(&obj->obj_ilog_info, epr, epr,
 				    visible_only);
 		if (rc != 0) {
@@ -463,8 +483,14 @@ check_object:
 	/** If it's a conditional update, we need to preserve the -DER_NONEXIST
 	 *  for the caller.
 	 */
+	// todo: 如果是update 操作 & 是条件更新
 	if (ts_set && ts_set->ts_flags & VOS_COND_UPDATE_OP_MASK)
 		cond_mask = VOS_ILOG_COND_UPDATE;
+	// todo: ilog 更新
+	// 使用的epoch 信息： epr, bound
+	// 这里也是用到上边获取到的df 里面的ilog 成员--ilog 的tree root
+	// 另外两个ilog 是dkey 和akey 的ilog 信息，数据结构是 vos_krec_df 里面的kr_ilog
+	// 当前的obj_df 是pmem 中object 的地址，而 vos_krec_df 是dkey/akey 的pmem 地址
 	rc = vos_ilog_update(cont, &obj->obj_df->vo_ilog, epr, bound, NULL,
 			     &obj->obj_ilog_info, cond_mask, ts_set);
 	if (rc == -DER_TX_RESTART)
@@ -503,6 +529,7 @@ out:
 
 	if (obj == &obj_local) {
 		/** Ok, it's successful, go ahead and cache the object. */
+		// 更新lru cache
 		rc = cache_object(occ, &obj);
 		if (rc != 0)
 			goto failed_2;

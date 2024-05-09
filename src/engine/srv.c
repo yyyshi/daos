@@ -425,7 +425,7 @@ dss_srv_handler(void *arg)
 
 	if (dx->dx_comm) {
 		/* create private transport context */
-		// 创建crt ctx
+		// 创建crt ctx，里面会有注册hg_ 相关
 		rc = crt_context_create(&dmi->dmi_ctx);
 		if (rc != 0) {
 			D_ERROR("failed to create crt ctxt: "DF_RC"\n",
@@ -1356,6 +1356,7 @@ dss_sys_db_init()
 		return -DER_NOMEM;
 
 db_init:
+	// /mnt/daos0/daos_sys/sys_db
 	rc = vos_db_init(bio_nvme_configured(SMD_DEV_TYPE_META) ? sys_db_path : dss_storage_path);
 	if (rc)
 		goto out;
@@ -1426,6 +1427,7 @@ dss_srv_init(void)
 	}
 	xstream_data.xd_init_step = XD_INIT_TLS_INIT;
 
+	// 创建 /mnt/daos0/daos_sys/sys_db 等
 	rc = dss_sys_db_init();
 	if (rc != 0) {
 		D_ERROR("Failed to initialize local DB: "DF_RC"\n", DP_RC(rc));

@@ -99,6 +99,7 @@ crt_bulk_create(crt_context_t crt_ctx, d_sg_list_t *sgl,
 	}
 
 	ctx = crt_ctx;
+	// 使用d_sgl_list 创建bulks
 	rc = crt_hg_bulk_create(&ctx->cc_hg_ctx, sgl, bulk_perm, bulk_hdl);
 	if (rc != 0)
 		D_ERROR("crt_hg_bulk_create() failed, rc: "DF_RC"\n",
@@ -201,6 +202,7 @@ crt_bulk_bind_transfer(struct crt_bulk_desc *bulk_desc,
 		D_GOTO(out, rc = -DER_INVAL);
 	}
 
+	// bulk 描述里面有本地和远端的内存描述符，根据描述符可以获得本地和远端的内存hdl，进而来完成rdma
 	rc = crt_hg_bulk_transfer(bulk_desc, complete_cb, arg, opid, true);
 	if (rc != 0)
 		D_ERROR("crt_hg_bulk_transfer() failed, rc: %d.\n", rc);

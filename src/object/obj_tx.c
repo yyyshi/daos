@@ -792,6 +792,7 @@ dc_tx_hdl2epoch_and_pmv(daos_handle_t th, struct dtx_epoch *epoch,
 			tx->tx_pm_ver = dc_pool_get_version(tx->tx_pool);
 
 		*pm_ver = tx->tx_pm_ver;
+		// 返回table 里面的epoch
 		*epoch = tx->tx_epoch;
 		D_MUTEX_UNLOCK(&tx->tx_lock);
 		dc_tx_decref(tx);

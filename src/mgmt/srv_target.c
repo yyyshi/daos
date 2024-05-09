@@ -23,6 +23,7 @@
 #include "srv_internal.h"
 #include "srv_layout.h"		/* for a couple of constants only */
 
+// todo: 这俩是干啥的，是中间态么
 /** directory for newly created pool, reclaimed on restart */
 static char *newborns_path;
 /** directory for destroyed pool */
@@ -647,6 +648,7 @@ tgt_vos_create_one(void *varg)
 	// 普通的vos pool，这个应该和/mnt/daos/2/ 下的vos-idx 一一对应
 	// 内部会创建memobj，进而wal open，进而 flush wal
 	// scm_sz = 0
+	// 创建vos pool
 	rc = vos_pool_create(path, (unsigned char *)vpa->vpa_uuid,
 			     vpa->vpa_scm_size, vpa->vpa_nvme_size, 0, NULL);
 	if (rc)
@@ -981,6 +983,7 @@ static int tgt_destroy(uuid_t pool_uuid, char *path);
 /**
  * RPC handler for target creation
  */
+// todo: 创建target 也是通过rpc 来的吗
 void
 ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 {
@@ -1030,6 +1033,7 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 	tca.tca_scm_size  = tc_in->tc_scm_size;
 	tca.tca_nvme_size = tc_in->tc_nvme_size;
 	tca.tca_dx = dss_current_xstream();
+	// 创建target 前预准备
 	rc = pthread_create(&thread, NULL, tgt_create_preallocate, &tca);
 	if (rc) {
 		rc = daos_errno2der(rc);
@@ -1104,6 +1108,7 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 		}
 
 		/** ready for prime time, move away from NEWBORNS dir */
+		// 重命名newborn 文件
 		rc = rename(tca.tca_newborn, tca.tca_path);
 		if (rc < 0) {
 			rc = daos_errno2der(errno);
@@ -1128,6 +1133,7 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 	tc_out->tc_ranks.ca_arrays = rank;
 	tc_out->tc_ranks.ca_count  = 1;
 
+	// todo: 这都做了些啥，提供什么功能
 	rc = ds_pool_start(tc_in->tc_pool_uuid);
 	if (rc) {
 		D_ERROR(DF_UUID": failed to start pool: "DF_RC"\n",

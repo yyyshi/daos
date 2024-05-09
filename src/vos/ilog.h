@@ -29,6 +29,7 @@ struct ilog_id {
 };
 
 /** Opaque root for incarnation log */
+// ilog 的 root
 struct  ilog_df {
 	char	id_pad[24];
 };

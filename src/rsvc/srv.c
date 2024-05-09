@@ -663,6 +663,7 @@ self_only(d_rank_list_t *replicas)
 		replicas->rl_ranks[0] == dss_self_rank());
 }
 
+// ds_rsvc_start 中将执行
 static int
 start(enum ds_rsvc_class_id class, d_iov_t *id, uuid_t db_uuid, uint64_t term, bool create,
       size_t size, d_rank_list_t *replicas, void *arg, struct ds_rsvc **svcp)

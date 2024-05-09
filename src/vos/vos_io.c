@@ -26,6 +26,7 @@
 struct vos_io_context {
 	EVT_ENT_ARRAY_LG_PTR(ic_ent_array);
 	/** The epoch bound including uncertainty */
+	// io ctx 的epoch bound
 	daos_epoch_t		 ic_bound;
 	daos_epoch_range_t	 ic_epr;
 	daos_unit_oid_t		 ic_oid;
@@ -36,7 +37,7 @@ struct vos_io_context {
 	/** reference on the object */
 	struct vos_object	*ic_obj;
 	/** BIO descriptor, has ic_iod_nr SGLs */
-	// biod 有那么多个 sgls
+	// biod 有那么多个 sgls，这是存储的传输的数据payload
 	struct bio_desc		*ic_biod;
 	struct vos_ts_set	*ic_ts_set;
 	/** Checksums for bio_iovs in \ic_biod */
@@ -349,6 +350,8 @@ next:
 	bio_sgl_fini(bsgl_dup);
 }
 
+// todo: 这个cookie 是什么东西
+// 这个是为了复用io ctx吗
 static struct vos_io_context *
 vos_ioh2ioc(daos_handle_t ioh)
 {
@@ -628,7 +631,9 @@ vos_ioc_create(daos_handle_t coh, daos_unit_oid_t oid, bool read_only,
 	       struct vos_io_context **ioc_pp)
 {
 	struct vos_container	*cont;
+	// 主要目的是为了创建vos io ctx
 	struct vos_io_context	*ioc = NULL;
+	// 在vos io ctx 构建的函数里，先新建一个bio ctx，这个bioc 代表某种设备，比如存储元数据设备，存储实际数据的设备，存储wal日志的设备
 	struct bio_io_context	*bioc;
 	daos_epoch_t		 bound;
 	uint64_t		 cflags = 0;
@@ -672,9 +677,13 @@ vos_ioc_create(daos_handle_t coh, daos_unit_oid_t oid, bool read_only,
 	// 设置iods
 	ioc->ic_iod_nr = iod_nr;
 	ioc->ic_iods = iods;
+	// epoch 的上下围
+	// 如果dth 有效就取它的epoch，否则用客户端传递来的epoch
 	ioc->ic_epr.epr_hi = dtx_is_valid_handle(dth) ? dth->dth_epoch : epoch;
 	bound = dtx_is_valid_handle(dth) ? dth->dth_epoch_bound : epoch;
+	// todo: 后边查询btree 的时候用的是这个bound。这里取bound 和上围中较大的
 	ioc->ic_bound = MAX(bound, ioc->ic_epr.epr_hi);
+	// epoch 下围设置为 0
 	ioc->ic_epr.epr_lo = 0;
 	ioc->ic_oid = oid;
 	ioc->ic_cont       = cont;
@@ -738,6 +747,7 @@ vos_ioc_create(daos_handle_t coh, daos_unit_oid_t oid, bool read_only,
 	}
 
 	// 返回data 类型的bio ctx。bioc 根据vc_pool 转化过来（根据vc_pool 可以查询到data/meta/wal 三种类型的ctx，对应不同的存储设备）
+	// bioc 就表示某种设备，比如存储元数据的设备，存储实际数据的设备，或者存储wal 日志的设备
 	bioc = vos_data_ioctxt(cont->vc_pool);
 	// 里面有blob id 的设置
 	// ioc: 类型 vos_io_contex
@@ -746,6 +756,7 @@ vos_ioc_create(daos_handle_t coh, daos_unit_oid_t oid, bool read_only,
 	// bio_desc 有 bio_io_context
 	// todo: 这个spdk_blob 从那里来的
 	// todo: 所以这个blob 是在什么时候创建的
+	// 根据bioc 构建vos io ctx 的biod
 	ioc->ic_biod = bio_iod_alloc(bioc, vos_ioc2umm(ioc), iod_nr,
 			read_only ? BIO_IOD_TYPE_FETCH : BIO_IOD_TYPE_UPDATE);
 	if (ioc->ic_biod == NULL) {
@@ -772,7 +783,9 @@ vos_ioc_create(daos_handle_t coh, daos_unit_oid_t oid, bool read_only,
 		if (ioc->ic_size_fetch)
 			continue;
 
+		// 获取bsgl = biod->bd_sgls[i]
 		bsgl = bio_iod_sgl(ioc->ic_biod, i);
+		// 给bsgl 申请资源
 		rc = bio_sgl_init(bsgl, iov_nr);
 		if (rc != 0)
 			goto error;
@@ -839,40 +852,56 @@ save_csum(struct vos_io_context *ioc, struct dcs_csum_info *csum_info,
 }
 
 /** Fetch the single value within the specified epoch range of an key */
+// 根据key 获取指定epoch range 内的值
+// todo: 不是应该传入一个key 作为参数么，还是说当前的toh 已经确定是某个key 下面的value 了
 static int
 akey_fetch_single(daos_handle_t toh, const daos_epoch_range_t *epr,
 		  daos_size_t *rsize, struct vos_io_context *ioc)
 {
 	struct vos_svt_key	 key;
 	struct vos_rec_bundle	 rbund;
+	// 存储key 的
 	d_iov_t			 kiov; /* iov to carry key bundle */
+	// 存储record 的
 	d_iov_t			 riov; /* iov to carry record bundle */
+	// 返回buffer 的，会riov 绑定
 	struct bio_iov		 biov; /* iov to return data buffer */
 	int			 rc;
 	struct dcs_csum_info	csum_info = {0};
 	bool			 standalone = ioc->ic_cont->vc_pool->vp_sysdb;
 
+	// 构造一些key 的结构，都是空的
+	// todo: key 也没提供什么有用的信息呀？为什么可以根据key 来查询
 	d_iov_set(&kiov, &key, sizeof(key));
+	// todo: 为什么不用epoch range 来查询呢
 	key.sk_epoch	= ioc->ic_bound;
 	key.sk_minor_epc = VOS_SUB_OP_MAX;
 
+	// 构造riov，也都是空的
 	tree_rec_bundle2iov(&rbund, &riov);
 	memset(&biov, 0, sizeof(biov));
 	rbund.rb_biov	= &biov;
 	rbund.rb_csum = &csum_info;
 
+	// todo: k 和v 里面也没啥有用信息呀？依靠什么来做查询呢
+	// k 和v 都构建好了，传入toh 去获取k 和v 的值--kiov & riov
+	// 这里传入两个kiov，第一个为想要查询的key，第二个为实际查询到的key
 	rc = dbtree_fetch(toh, BTR_PROBE_LE, DAOS_INTENT_DEFAULT, &kiov, &kiov,
 			  &riov);
 	if (vos_dtx_hit_inprogress(standalone))
 		D_GOTO(out, rc = (rc == 0 ? -DER_INPROGRESS : rc));
 
 	if (rc == -DER_NONEXIST) {
+		// todo: 没查到，打个洞？
 		rbund.rb_gsize = 0;
 		bio_addr_set_hole(&biov.bi_addr, 1);
 		rc = 0;
 	} else if (rc != 0) {
+		// 发生错误，out
 		goto out;
 	} else if (key.sk_epoch < epr->epr_lo) {
+		// 查到了，但是查询请求带的epoch 比查到的epoch 大
+		// todo: 这是什么场景，需要怎么处理
 		/* The single value is before the valid epoch range (after a
 		 * punch when incarnation log is available)
 		 */
@@ -880,10 +909,13 @@ akey_fetch_single(daos_handle_t toh, const daos_epoch_range_t *epr,
 		rbund.rb_gsize = 0;
 		bio_addr_set_hole(&biov.bi_addr, 1);
 	} else if (key.sk_epoch > epr->epr_hi) {
+		// 我要查的epoch 比查到的epoch 小
+		// todo: 这个又是什么场景
 		/* Uncertainty violation */
 		D_GOTO(out, rc = -DER_TX_RESTART);
 	}
 
+	// 设置了hole 或者查到了想要的epoch
 	if (ci_is_valid(&csum_info))
 		save_csum(ioc, &csum_info, NULL, 0);
 
@@ -892,6 +924,9 @@ akey_fetch_single(daos_handle_t toh, const daos_epoch_range_t *epr,
 		return -DER_CSUM;
 	}
 
+	// biov 里面存储了查询到的value
+	// 这里是将biov 中的数据传到ioc 的bsgls 中
+	// 这样，数据由ioc 带回
 	rc = iod_fetch(ioc, &biov);
 	if (rc != 0)
 		goto out;
@@ -1261,11 +1296,15 @@ fetch_value(struct vos_io_context *ioc, daos_iod_t *iod, daos_handle_t toh,
 	if (ioc->ic_read_ts_only || ioc->ic_check_existence)
 		return rc;
 
+	// 如果是单值类型，akey_fetch_single 来查询数据后结束
+	// 这里还带着epoch range
+	// toh 为树根
 	if (iod->iod_type == DAOS_IOD_SINGLE) {
 		rc = akey_fetch_single(toh, epr, &iod->iod_size, ioc);
 		return rc;
 	}
 
+	// recx 类型的value
 	iod->iod_size = 0;
 	shadow = (ioc->ic_shadows == NULL) ? NULL :
 					     &ioc->ic_shadows[ioc->ic_sgl_at];
@@ -1364,6 +1403,7 @@ akey_fetch(struct vos_io_context *ioc, daos_handle_t ak_toh)
 		flags |= SUBTR_EVT;
 	}
 
+	// 根据parent dkey树加载子树akey 
 	rc = key_tree_prepare(
 	    ioc->ic_obj, ak_toh, VOS_BTR_AKEY, &iod->iod_name, flags, DAOS_INTENT_DEFAULT, &krec,
 	    (ioc->ic_check_existence || ioc->ic_read_ts_only) ? NULL : &toh, ioc->ic_ts_set);
@@ -1386,6 +1426,7 @@ akey_fetch(struct vos_io_context *ioc, daos_handle_t ak_toh)
 		}
 	}
 
+	// akey fetch 也要check ilog，也是不需要fetch 吗
 	rc = key_ilog_check(ioc, krec, &ioc->ic_dkey_info, &val_epr, &ioc->ic_akey_info, has_cond);
 
 	if (stop_check(ioc, VOS_OF_COND_AKEY_FETCH, iod, &rc, false)) {
@@ -1399,6 +1440,8 @@ akey_fetch(struct vos_io_context *ioc, daos_handle_t ak_toh)
 	}
 
 fetch_value:
+	// 开始fetch value
+	// fetch 值需要子树的hdl-- toh
 	rc = fetch_value(ioc, iod, toh, &val_epr, standalone);
 out:
 	if (daos_handle_is_valid(toh))
@@ -1429,6 +1472,7 @@ dkey_fetch(struct vos_io_context *ioc, daos_key_t *dkey)
 	bool			 has_cond;
 	bool			 standalone = ioc->ic_cont->vc_pool->vp_sysdb;
 
+	// btree 初始化
 	rc = obj_tree_init(obj);
 	if (rc != 0)
 		return rc;
@@ -1439,6 +1483,9 @@ dkey_fetch(struct vos_io_context *ioc, daos_key_t *dkey)
 			flags |= SUBTR_EVT;
 	}
 
+	// obj->obj_toh 为当前树的hdl，toh 是子树的hdl
+	// krec 是object 下的dkey 的df
+	// 根据parent object 加载子树dkey
 	rc = key_tree_prepare(obj, obj->obj_toh, VOS_BTR_DKEY, dkey, flags, DAOS_INTENT_DEFAULT,
 			      &krec, &toh, ioc->ic_ts_set);
 	if (stop_check(ioc, VOS_COND_FETCH_MASK | VOS_OF_COND_PER_AKEY, NULL,
@@ -1460,6 +1507,7 @@ dkey_fetch(struct vos_io_context *ioc, daos_key_t *dkey)
 	else
 		has_cond = false;
 
+	// todo: check ilog，这里不用fetch 了么，也就是说fetch dkey 不需要记录到ilog 吗
 	rc = key_ilog_check(ioc, krec, &obj->obj_ilog_info, &ioc->ic_epr,
 			    &ioc->ic_dkey_info, has_cond);
 
@@ -1484,12 +1532,16 @@ dkey_fetch(struct vos_io_context *ioc, daos_key_t *dkey)
 	}
 
 fetch_akey:
+	// 开始fetch akey
+	// value 直接存储在dkey 下，没有akey。传入子树的hdl-- toh
 	if (krec->kr_bmap & KREC_BF_NO_AKEY) {
 		iod_set_cursor(ioc, 0);
 		rc = fetch_value(ioc, &ioc->ic_iods[0], toh, &ioc->ic_epr, standalone);
 	} else {
+		// 通过akey 获取value
 		for (i = 0; i < ioc->ic_iod_nr; i++) {
 			iod_set_cursor(ioc, i);
+			// 嵌套 fetch akey
 			rc = akey_fetch(ioc, toh);
 			if (vos_dtx_continue_detect(rc, standalone))
 				continue;
@@ -1551,13 +1603,16 @@ vos_fetch_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 		struct daos_recx_ep_list *shadows, daos_handle_t *ioh,
 		struct dtx_handle *dth)
 {
+	// vos 开始后创建一个vos io ctx
 	struct vos_io_context	*ioc;
 	int			 i, rc;
 
+	// todo: 这里从客户端带来的epoch 不是也已经在process_epoch 里面被改了么
 	D_DEBUG(DB_TRACE, "Fetch "DF_UOID", desc_nr %d, epoch "DF_X64"\n",
 		DP_UOID(oid), iod_nr, epoch);
 
 	// fetch 场景。read_only == true。checksum 传NULL
+	// todo: dth 里面有epoch，这里又传递一个epoch
 	rc = vos_ioc_create(coh, oid, true, epoch, iod_nr, iods,
 			    NULL, vos_flags, shadows, 0, dth, &ioc);
 	if (rc != 0)
@@ -1565,10 +1620,14 @@ vos_fetch_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 
 	vos_dth_set(dth, ioc->ic_cont->vc_pool->vp_sysdb);
 
+	// todo: ts 的作用和操作
 	rc = vos_ts_set_add(ioc->ic_ts_set, ioc->ic_cont->vc_ts_idx, NULL, 0);
 	D_ASSERT(rc == 0);
 
-	// 先会去内存 lru 缓存中查询，再会去查询pmem 中的oi table
+	// fetch 操作
+	// 先会去内存 lru 缓存中查询，miss 后再会去查询pmem 中的oi table（是b+ 树结构）
+	// 查到了返回df，没查到返回错误码
+	// 使用的epoch 信息：&ioc->ic_epr, ioc->ic_bound
 	rc = vos_obj_hold(vos_obj_cache_current(ioc->ic_cont->vc_pool->vp_sysdb),
 			  ioc->ic_cont, oid, &ioc->ic_epr, ioc->ic_bound, VOS_OBJ_VISIBLE,
 			  DAOS_INTENT_DEFAULT, &ioc->ic_obj, ioc->ic_ts_set);
@@ -1593,6 +1652,7 @@ fetch_dkey:
 		D_GOTO(out, rc = -DER_INVAL);
 	}
 
+	// 开始 fetch deky
 	rc = dkey_fetch(ioc, dkey);
 	if (rc != 0)
 		goto out;
@@ -1889,6 +1949,7 @@ akey_update(struct vos_io_context *ioc, uint32_t pm_ver, daos_handle_t ak_toh,
 	if (is_array)
 		flags |= SUBTR_EVT;
 
+	// 同样的，获取akey 的df krec
 	rc = key_tree_prepare(obj, ak_toh, VOS_BTR_AKEY,
 			      &iod->iod_name, flags, DAOS_INTENT_UPDATE,
 			      &krec, &toh, ioc->ic_ts_set);
@@ -1923,6 +1984,7 @@ akey_update(struct vos_io_context *ioc, uint32_t pm_ver, daos_handle_t ak_toh,
 		}
 	}
 
+	// 更新akey 的 ilog
 	rc = vos_ilog_update(ioc->ic_cont, &krec->kr_ilog, &ioc->ic_epr,
 			     ioc->ic_bound, &ioc->ic_dkey_info,
 			     &ioc->ic_akey_info, update_cond, ioc->ic_ts_set);
@@ -1941,6 +2003,7 @@ akey_update(struct vos_io_context *ioc, uint32_t pm_ver, daos_handle_t ak_toh,
 		goto out;
 	}
 
+	// 更新value
 	rc = update_value(ioc, iod, iod_csums, pm_ver, toh, minor_epc);
 out:
 	if (daos_handle_is_valid(toh))
@@ -1964,6 +2027,7 @@ dkey_update(struct vos_io_context *ioc, uint32_t pm_ver, daos_key_t *dkey,
 	bool			 subtr_created = false;
 	int			 i, rc;
 
+	// btree 初始化
 	rc = obj_tree_init(obj);
 	if (rc != 0)
 		return rc;
@@ -1974,6 +2038,7 @@ dkey_update(struct vos_io_context *ioc, uint32_t pm_ver, daos_key_t *dkey,
 			flags |= SUBTR_EVT;
 	}
 
+	// 根据object 获取dkey 的df krec
 	rc = key_tree_prepare(obj, obj->obj_toh, VOS_BTR_DKEY, dkey, flags, DAOS_INTENT_UPDATE,
 			      &krec, &ak_toh, ioc->ic_ts_set);
 	if (rc != 0) {
@@ -1989,6 +2054,7 @@ dkey_update(struct vos_io_context *ioc, uint32_t pm_ver, daos_key_t *dkey,
 			update_cond = VOS_ILOG_COND_INSERT;
 	}
 
+	// 更新ilog -- krec
 	rc = vos_ilog_update(ioc->ic_cont, &krec->kr_ilog, &ioc->ic_epr,
 			     ioc->ic_bound, &obj->obj_ilog_info,
 			     &ioc->ic_dkey_info, update_cond, ioc->ic_ts_set);
@@ -2014,6 +2080,7 @@ dkey_update(struct vos_io_context *ioc, uint32_t pm_ver, daos_key_t *dkey,
 		for (i = 0; i < ioc->ic_iod_nr; i++) {
 			iod_set_cursor(ioc, i);
 
+			// 同样的，处理akey update
 			rc = akey_update(ioc, pm_ver, ak_toh, minor_epc);
 			if (rc != 0)
 				goto out;
@@ -2097,6 +2164,7 @@ vos_reserve_blocks(struct vos_container *cont, d_list_t *rsrvd_nvme,
 
 	// 可以找到指定的extent 的第一个block
 	// 3. 返回首个extent 的第一个块的offset
+	// todo: 描述的是哪块硬盘的哪个位置呢？跟后面blob 的信息又是什么关联？
 	*off = ext->vre_blk_off << VOS_BLK_SHIFT;
 	return 0;
 }
@@ -2133,6 +2201,9 @@ reserve_space(struct vos_io_context *ioc, uint16_t media, daos_size_t size,
 
 	D_ASSERT(media == DAOS_MEDIA_NVME);
 	// nvme 资源预留，内部通过vea 模块，再内部是调用的spdk 接口
+	// todo: extent 是个什么样的概念，是什么结构。junchong之前提到过这个
+	// todo: 输入ic_blk_exts 和size，输出off
+	// todo: ic_blk_extent 是指的server 管理的nvme list 吗？
 	rc = vos_reserve_blocks(ioc->ic_cont, &ioc->ic_blk_exts, size, VOS_IOS_GENERIC, off);
 	if (rc == -DER_NOSPACE) {
 		now = daos_gettime_coarse();
@@ -2225,6 +2296,8 @@ vos_reserve_single(struct vos_io_context *ioc, uint16_t media,
 		off = umoff + (payload_addr - (char *)irec);
 	} else {
 		// 预留nvme 资源，传入ioc，不是iod
+		// nvme 场景下，最终spdk_blob_io_write 写入时候用到的offset，就是在这里预先申请到的，实际上就是spdk blob的offset
+		// 传入ioc 和size，输出off
 		rc = reserve_space(ioc, DAOS_MEDIA_NVME, size, &off);
 		if (rc) {
 			D_ERROR("Reserve NVMe for SV failed. "DF_RC"\n",
@@ -2475,7 +2548,8 @@ vos_update_end(daos_handle_t ioh, uint32_t pm_ver, daos_key_t *dkey, int err,
 			D_FREE(daes);
 	}
 
-	// 先会去查询lru 缓存，再会去pmem 的oi table tree 中查询
+	// update 操作
+	// 先会去查询lru 缓存，miss 后会先去oi table 中查询，查到了返回，没查到的话创建一个并插入到oi table，返回新创建的df
 	// todo: lru 的evict 策略是什么
 	err = vos_obj_hold(vos_obj_cache_current(ioc->ic_cont->vc_pool->vp_sysdb),
 			   ioc->ic_cont, ioc->ic_oid, &ioc->ic_epr, ioc->ic_bound,
@@ -2485,6 +2559,10 @@ vos_update_end(daos_handle_t ioh, uint32_t pm_ver, daos_key_t *dkey, int err,
 		goto abort;
 
 	/* Update tree index */
+	// todo: 这里的tree 指的是保存什么的tree
+	// 上面的hold 中会先获取到object 的df 信息
+	// 1. fetch 的场景，只会通过 vos_obj_hold 里面进行object 级别的ilog fetch 操作
+	// 2. update 的场景，也需要通过 vos_obj_hold 来进行object 级别的ilog update，同时需要dkey & akey级别的ilog update 操作
 	err = dkey_update(ioc, pm_ver, dkey, dtx_is_valid_handle(dth) ?
 			  dth->dth_op_seq : VOS_SUB_OP_MAX);
 	if (err) {
@@ -2496,6 +2574,7 @@ vos_update_end(daos_handle_t ioh, uint32_t pm_ver, daos_key_t *dkey, int err,
 	/** Now that we are past the existence checks, ensure there isn't a
 	 * read conflict
 	 */
+	// todo: 现在我们已经通过了存在性检查，确保没有读冲突
 	if (vos_ts_set_check_conflict(ioc->ic_ts_set, ioc->ic_epr.epr_hi)) {
 		err = -DER_TX_RESTART;
 		goto abort;
@@ -2560,6 +2639,7 @@ abort:
 	return err;
 }
 
+
 void
 vos_update_renew_epoch(daos_handle_t ioh, struct dtx_handle *dth)
 {
@@ -2592,7 +2672,7 @@ vos_update_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 		DF_X64", flags="DF_X64"\n", DP_UOID(oid), iod_nr, epoch, flags);
 
 	// update 场景。参数3 read_only == false
-	// 构建vos io ctx
+	// 构建vos io ctx，ioc 里面的 ic_epr 保存了epoch 的范围range 信息
 	rc = vos_ioc_create(coh, oid, false, epoch, iod_nr, iods, iods_csums,
 			    flags, NULL, dedup_th, dth, &ioc);
 	if (rc != 0)
@@ -2616,6 +2696,8 @@ vos_update_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 		D_ERROR(DF_UOID ": dkey update begin failed. " DF_RC "\n", DP_UOID(oid), DP_RC(rc));
 		goto error;
 	}
+
+	// 在这里将vos io ctx 和daos hdl 关联起来的，buffer map 之前会用到这个关联关系
 	*ioh = vos_ioc2ioh(ioc);
 	return 0;
 error:
@@ -2636,7 +2718,7 @@ vos_ioh2desc(daos_handle_t ioh)
 	struct vos_io_context *ioc = vos_ioh2ioc(ioh);
 
 	D_ASSERT(ioc->ic_biod != NULL);
-	// 从io ctx 里拿到biod
+	// 从vos io ctx 里拿到biod
 	return ioc->ic_biod;
 }
 
@@ -2855,11 +2937,13 @@ vos_obj_copy(struct vos_io_context *ioc, d_sg_list_t *sgls,
 	int rc;
 
 	D_ASSERT(sgl_nr == ioc->ic_iod_nr);
+	// 标准的bio 的读写流程，最终还是走到 dma_rw 函数
 	rc = bio_iod_prep(ioc->ic_biod, BIO_CHK_TYPE_IO, NULL, 0);
 	if (rc)
 		return rc;
 
 	rc = bio_iod_copy(ioc->ic_biod, sgls, sgl_nr);
+	// dma_rw 函数
 	rc = bio_iod_post(ioc->ic_biod, rc);
 
 	return rc;
@@ -2875,6 +2959,7 @@ vos_obj_update_ex(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	daos_handle_t ioh;
 	int rc;
 
+	// todo: 这个begin 和end 在读写io流程里也看到过
 	rc = vos_update_begin(coh, oid, epoch, flags, dkey, iod_nr, iods,
 			      iods_csums, 0, &ioh, dth);
 	if (rc) {
@@ -2883,6 +2968,8 @@ vos_obj_update_ex(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 		return rc;
 	}
 
+	// todo: vos obj 的update 只是做个copy 吗
+	// 其实也是走的bio 的读写，scm 和nvme 的读写都是通过bio 完成。即元数据和实际数据的更新都是通过bio
 	if (sgls) {
 		rc = vos_obj_copy(vos_ioh2ioc(ioh), sgls, iod_nr);
 		if (rc)
@@ -2952,6 +3039,14 @@ vos_obj_fetch_ex(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	uint32_t	vos_flags = flags | fetch_flags;
 	int		rc;
 
+	// 查询这个pool 下这个oid 的这个epoch
+	// todo: 需要指定的参数很多啊
+	/*
+	47929e77-60e2-4467-8547-16b3cbfa35e3 为pool uuid。配置了4个target
+	root@ubuntu:/mnt/daos0/47929e77-60e2-4467-8547-16b3cbfa35e3# ls
+	rdb-pool  vos-0  vos-1  vos-2  vos-3
+	root@ubuntu:/mnt/daos0/47929e77-60e2-4467-8547-16b3cbfa35e3#
+	*/
 	rc = vos_fetch_begin(coh, oid, epoch, dkey, iod_nr, iods,
 			     vos_flags, NULL, &ioh, dth);
 	if (rc) {
@@ -2975,6 +3070,7 @@ vos_obj_fetch_ex(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 			}
 		}
 
+		// 和update 一样，也是走copy 函数，内部也还是走dma_rw 函数
 		rc = vos_obj_copy(ioc, sgls, iod_nr);
 		if (rc)
 			D_ERROR("Copy "DF_UOID" failed "DF_RC"\n",

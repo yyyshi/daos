@@ -341,6 +341,7 @@ scrubbing_ult(void *arg)
 	while (!dss_ult_exiting(child->spc_scrubbing_req)) {
 		uint32_t sleep_time = 1000;
 
+		// 开始 scrub pool
 		rc = vos_scrub_pool(&ctx);
 		if (rc == -DER_SHUTDOWN) {
 			D_ERROR("tgt_id %d shutting down. Scrubber should quit\n",

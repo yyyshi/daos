@@ -224,6 +224,7 @@ example_daos_key_array()
 	// todo: 一个object 下的10 个dkey 是什么布局的
 	for (i = 0; i < KEYS; i++) {
 		d_sg_list_t	sgl;
+		// 这里是d_iov 后面会转化为biov 再持久化到设备
 		d_iov_t		sg_iov;
 		daos_iod_t	iod;
 		// 存储records，是extent 的数组
@@ -277,6 +278,10 @@ example_daos_key_array()
 		// 写入一个dkey，当前场景一个dkey 下有一个akey，因此对应1 个iod 和 1个sgl。
 		// 对于多个akey 的场景，这个函数传递iods 和sgls 数组以及个数（参数5）作为函数参数
 		// 在open 的时候根据hdl 创建了dc_object 并添加link 信息到了hash table。之后fetch / update 请求再通过hdl 查找对应的dc_object 来获取相关信息
+		// todo: 创建layout 时候是根据dkey 的hash来通过jump 算法选择targets 的
+		// todo: 也就是说同一个object下不同的dkey 会生成不同的layout吗（不是）
+		// 是每个object 有一个自己的layout，layout 里面是当前object 分布数据到shards 的整体信息。再根据dkey 散列到shards 环的不同桶中
+		// todo: 只能传 DAOS_TX_NONE 这个吗
 		rc = daos_obj_update(oh, DAOS_TX_NONE, 0, &dkey, 1, &iod, &sgl,
 				     NULL);
 		ASSERT(rc == 0, "object update failed with %d", rc);
@@ -309,6 +314,8 @@ example_daos_key_array()
 		iod.iod_type	= DAOS_IOD_ARRAY; /** value type of the akey */
 
 		/** fetch a dkey */
+		// tx hdl 还是传递的 DAOS_TX_NONE
+		// todo: 只能传这个吗
 		rc = daos_obj_fetch(oh, DAOS_TX_NONE, 0, &dkey, 1, &iod, &sgl,
 				    NULL, NULL);
 		ASSERT(rc == 0, "object update failed with %d", rc);

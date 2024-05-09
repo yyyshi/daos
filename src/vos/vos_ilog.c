@@ -264,6 +264,7 @@ vos_ilog_fetch_internal(struct umem_instance *umm, daos_handle_t coh, uint32_t i
 			bool has_cond, const struct vos_punch_record *punched,
 			const struct vos_ilog_info *parent, struct vos_ilog_info *info)
 {
+	// 调用：umm, coh, intent, ilog, &epr, bound, false, NULL, NULL, info
 	struct ilog_desc_cbs	 cbs;
 	struct vos_punch_record	 punch = {0};
 	int			 rc;
@@ -313,6 +314,7 @@ vos_ilog_fetch_(struct umem_instance *umm, daos_handle_t coh, uint32_t intent, s
 	epr.epr_lo = 0;
 	epr.epr_hi = epoch;
 
+	// 调用：umm, coh, intent, ilog, &epr, bound, false, NULL, NULL, info
 	return vos_ilog_fetch_internal(umm, coh, intent, ilog, &epr, bound, has_cond,
 				       punched, parent, info);
 }

@@ -218,6 +218,8 @@ void vea_hint_unload(struct vea_hint_context *thc);
  *				added in the @resrvd_list; Appropriated
  *				negative value on error
  */
+// 通过vea 模块在块设备上预留一个extent（一些连续的块），blk_cnt 是预留的块的个数，预留出来的块保存到 resrvd_list 中
+// 块设备信息保存在vsi 中
 int vea_reserve(struct vea_space_info *vsi, uint32_t blk_cnt,
 		struct vea_hint_context *hint, d_list_t *resrvd_list);
 

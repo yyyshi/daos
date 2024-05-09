@@ -1003,6 +1003,7 @@ vos_pool_create_ex(const char *path, uuid_t uuid, daos_size_t scm_sz,
 		goto end;
 
 	memset(pool_df, 0, sizeof(*pool_df));
+	// 创建pool 的btree，得到btree hdl
 	rc = dbtree_create_inplace(VOS_BTR_CONT_TABLE, 0, VOS_CONT_ORDER,
 				   &uma, &pool_df->pd_cont_root, &hdl);
 	if (rc != 0)
@@ -1270,6 +1271,7 @@ pool_open(void *ph, struct vos_pool_df *pool_df, unsigned int flags, void *metri
 	}
 
 	/* Cache container table btree hdl */
+	// 打开已创建的pool，传入pool 的btree 的root
 	rc = dbtree_open_inplace_ex(&pool_df->pd_cont_root, &pool->vp_uma,
 				    DAOS_HDL_INVAL, pool, &pool->vp_cont_th);
 	if (rc) {

@@ -32,6 +32,7 @@ func getDefaultFaultDomain(getHostname hostnameGetterFn) (*system.FaultDomain, e
 }
 
 // getFaultDomain determines the fault domain for the system.
+// todo: 获取容错域
 func getFaultDomain(cfg *config.Server) (*system.FaultDomain, error) {
 	if cfg == nil {
 		return nil, config.FaultBadConfig

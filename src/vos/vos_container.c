@@ -322,6 +322,7 @@ static const struct lru_callbacks lru_cont_cbs = {
 /**
  * Open a container within a VOSP
  */
+// 打开一个vos pool
 int
 vos_cont_open(daos_handle_t poh, uuid_t co_uuid, daos_handle_t *coh)
 {
@@ -358,6 +359,7 @@ vos_cont_open(daos_handle_t poh, uuid_t co_uuid, daos_handle_t *coh)
 		D_GOTO(exit, rc);
 	}
 
+	// 按pool 查询cont 的df
 	rc = cont_df_lookup(pool, &ukey, &args);
 	if (rc) {
 		D_DEBUG(DB_TRACE, DF_UUID" container does not exist\n",
@@ -383,10 +385,14 @@ vos_cont_open(daos_handle_t poh, uuid_t co_uuid, daos_handle_t *coh)
 	cont->vc_cmt_dtx_reindex_pos = cont->vc_cont_df->cd_dtx_committed_head;
 	D_INIT_LIST_HEAD(&cont->vc_dtx_act_list);
 	cont->vc_dtx_committed_count = 0;
+	// todo: 什么叫做solo dtx
 	cont->vc_solo_dtx_epoch = d_hlc_get();
 	gc_check_cont(cont);
 
 	/* Cache this btr object ID in container handle */
+	// 根据地址 &cont->vc_cont_df->cd_obj_root 创建object idx 的索引b+ 树
+	// vc_btr_hdl 存储oi table
+	// 创建object 的btree，得到 cont->vc_btr_hdl
 	rc = dbtree_open_inplace_ex(&cont->vc_cont_df->cd_obj_root,
 				    &pool->vp_uma, vos_cont2hdl(cont),
 				    cont->vc_pool, &cont->vc_btr_hdl);
@@ -398,6 +404,7 @@ vos_cont_open(daos_handle_t poh, uuid_t co_uuid, daos_handle_t *coh)
 	memset(&uma, 0, sizeof(uma));
 	uma.uma_id = UMEM_CLASS_VMEM;
 
+	// todo: lru数组
 	rc = lrua_array_alloc(&cont->vc_dtx_array, DTX_ARRAY_LEN, DTX_ARRAY_NR,
 			      sizeof(struct vos_dtx_act_ent),
 			      LRU_FLAG_REUSE_UNIQUE, &lru_cont_cbs,
@@ -408,6 +415,7 @@ vos_cont_open(daos_handle_t poh, uuid_t co_uuid, daos_handle_t *coh)
 		D_GOTO(exit, rc);
 	}
 
+	// 创建btree，存储active 的dtx
 	rc = dbtree_create_inplace_ex(VOS_BTR_DTX_ACT_TABLE, 0,
 				      DTX_BTREE_ORDER, &uma,
 				      &cont->vc_dtx_active_btr,
@@ -419,6 +427,7 @@ vos_cont_open(daos_handle_t poh, uuid_t co_uuid, daos_handle_t *coh)
 		D_GOTO(exit, rc);
 	}
 
+	// 创建btree，存储已提交的dtx
 	rc = dbtree_create_inplace_ex(VOS_BTR_DTX_CMT_TABLE, 0,
 				      DTX_BTREE_ORDER, &uma,
 				      &cont->vc_dtx_committed_btr,

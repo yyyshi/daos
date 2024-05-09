@@ -32,6 +32,8 @@ enum {
  *  The tree is used more like a set where only the key is used.
  */
 
+// todo: 啥意思，啥时候是root df，啥时候是b+ 树
+// ilog 是干啥用的
 struct ilog_tree {
 	umem_off_t	it_root;
 	uint64_t	it_embedded;
@@ -319,6 +321,7 @@ ilog_lctx2hdl(struct ilog_context *lctx)
 {
 	daos_handle_t	hdl;
 
+	// todo: ilog 的cookie
 	hdl.cookie = (uint64_t)lctx;
 
 	return hdl;
@@ -412,6 +415,7 @@ ilog_open(struct umem_instance *umm, struct ilog_df *root,
 	if (rc != 0)
 		return rc;
 
+	// todo: ilog cookie 相关
 	*loh = ilog_lctx2hdl(lctx);
 
 	return 0;

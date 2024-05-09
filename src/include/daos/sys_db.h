@@ -18,6 +18,9 @@ typedef int (*sys_db_trav_cb_t)(struct sys_db *db, char *table, d_iov_t *key,
 #define SYS_DB_NAME_SZ		32
 
 /** system database is a simple local KV store */
+// todo: vos db 是个本地的kv 存储，用于保存元数据？vos 是以任意时间顺序捕获和记录对象更新，并
+// 将这些更新集成到可以按需高效遍历的有序epoch history 中，为并行io 提供了基本扩展保障。
+// todo: rdb 是个类似zk 的协调服务，是分布式的，作用是用于副本一致性那些？
 struct sys_db {
 	char	 sd_name[SYS_DB_NAME_SZ];
 	/** look up the provided key in \a table and return its value */

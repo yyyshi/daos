@@ -92,6 +92,8 @@ The primary purpose of the VOS is to capture and log object updates in arbitrary
 This provides a major scalability improvement for parallel I/O by correctly ordering conflicting updates without requiring them to be serialized in time.
 For example, if two application processes agree on how to resolve a conflict on a given update, they may write their updates independently with the assurance that they will be resolved in the correct order at the VOS.
 
+vos 的主要目的是以任意时间顺序捕获和记录对象更新，并将这些更新集成到可以按需高效遍历的有序epoch history中，这为并行io 提供了主要的可扩展性改进。
+
 The VOS also allows all object updates associated with a given epoch and process group to be discarded.
 This functionality ensures that when a DAOS transaction must be aborted, all associated updates are invisible before the epoch is committed for that process group and becomes immutable.
 This ensures that distributed updates are atomic - i.e.
@@ -100,14 +102,22 @@ when a commit completes, either all updates have been applied or been discarded.
 Finally, the VOS may aggregate the epoch history of objects in order to reclaim space used by inaccessible data and to speed access by simplifying indices.
 For example, when an array object is "punched" from 0 to infinity in a given epoch, all data updated after the latest snapshot before this epoch becomes inaccessible once the container is closed.
 
+vos agg 是做空间回收的。
+
 Internally, the VOS maintains an index of container UUIDs that references each container stored in a particular pool.
 The container itself contains three indices.
 The first is an object index used to map an object ID and epoch to object metadata efficiently when servicing I/O requests.
 The other two indices are for maintining active and committed <a href="#811">DTX</a> records for ensuring efficient updates across multiple replicas.
 
+container 本身包含三种索引，第一种是对象索引，用来映射object id + epoch 到object 元数据的。(索引所采用的数据结构是b+树，可以见后面的图)
+剩下的两种索引是来维护active 和committed事务记录的
+
 DAOS supports two types of values, each associated with a Distribution Key (DKEY) and an Attribute Key (AKEY): Single value and Array value.
 The DKEY is used for placement, determining which VOS pool is used to store the data.
 The AKEY identifies the data to be stored.
+
+daos提供两种key，dkey 用来做放置，决定某个object 放到哪个vos pool。akey 用来标识要存储的数据。
+
 The ability to specify both a DKEY and an AKEY provides applications with the flexibility to either distribute or co-locate different values in DAOS.
 A single value is an atomic value meaning that writes to an AKEY update the entire value and reads retrieve the latest value in its entirety.
 An array value is an index of equally sized records.  Each update to an array value only affects the specified records and reads read the latest updates to each record index requested.
@@ -118,6 +128,9 @@ For the remainder of the VOS description, Key-Value and Key-Array shall be used 
 In other words, they shall describe the DKEY-AKEY-Value in a single VOS pool.
 
 VOS objects are not created explicitly but are created on the first write by creating the object metadata and inserting a reference to it in the owning container's object index.
+
+vos object 不是显式创建，而是在第一次写的时候，将会创建object 的元数据并且插入一个引用到container 的object idx。
+
 All object updates log the data for each update, which may be an object, DKEY, AKEY, a single value, or array value punch or an update to a single value or array value.
 Note that "punch" of an extent of an array object is logged as zeroed extents, rather than causing relevant array extents or key values to be discarded. A punch of an object, DKEY, AKEY, or single value is logged, so that reads at a later timestamp see no data.
 This ensures that the full version history of objects remain accessible.   The DAOS api, however, only allows accessing data at snapshots so VOS aggregation can aggressively remove objects, keys, and values that are no longer accessible at a known snapshot.
@@ -126,6 +139,9 @@ This ensures that the full version history of objects remain accessible.   The D
 ![../../docs/graph/Fig_067.png](../../docs/graph/Fig_067.png "VOS Pool storage layout")
 
 When performing lookup on a single value in an object, the object index is traversed to find the index node with the highest epoch number less than or equal to the requested epoch (near-epoch) that matches the key.
+
+vos中记录了所有的更新记录。当执行一个object 的查找，object 索引被遍历来查找具有最高epoch 的索引节点，该索引节点小于或者等于与关键词匹配的请求epoch。
+如果找到值或者负记录，直接返回。否则返回miss，表示该key 从未来此vos 中做过更新。
 If a value or negative entry is found, it is returned.
 Otherwise, a "miss" is returned, meaning that this key has never been updated in this VOS.
 This ensures that the most recent value in the epoch history of is returned irrespective of the time-order in which they were integrated and that all updates after the requested epoch are ignored.
@@ -156,6 +172,8 @@ associated entity.   The log is checked for each entity in the path to the value
 to ensure the entity, and therefore the value, is visible at the requested
 time.
 
+对象索引表的值，由oid可以查询出来，结果指向dkey 的索引。同样的dkey 表的值可以获取到akey，akey 索引表的值指向single value 的索引。
+
 <a id="712"></a>
 
 ### Object Listing
@@ -163,6 +181,7 @@ time.
 VOS provides a generic iterator that can be used to iterate through containers, objects, DKEYs, AKEYs, single values, and array extents in a VOS pool.
 The iteration API is shown in the <a href="#7b">figure</a> below.
 
+vos 提供了一个通用的迭代器用来迭代某个vos pool 中的container、object、dkey、akey、single value 等。
 <a id="7b"></a>
 ```C
 /**
@@ -199,23 +218,31 @@ Additionally, it supports iteration through visible extents.
 
 ## Key Value Stores (Single Value)
 
+vos 的kv 存储。
+
 High-performance simulations generating large quantities of data require indexing and analysis of data, to achieve good insight.
 Key Value (KV) stores can play a vital role in simplifying the storage of such complex data and allowing efficient processing.
 
+生成大量数据的高性能模拟需要对数据进行索引和分析，以实现良好的洞察力，kv 存储在简化此类复杂数据的存储和实现高效处理方面发挥着至关重要的作用。
 VOS provides a multi-version, concurrent KV store on persistent memory that can grow dynamically and provide quick near-epoch retrieval and enumeration of key values.
 
+vos在持久内存上提供了一个多版本、并发kv存储，可以动态增长，并提供快速的epoch 检索和kv 查询。
 Although there is an array of previous work on KV stores, most of them focus on cloud environments and do not provide effective versioning support.
 Some KV stores provide versioning support but expect monotonically increasing ordering of versions and further, do not have the concept of near-epoch retrieval.
+现有的一些kv 存储，并没有提供有效的版本控制支持。有些提供了版本支持，但是我们希望版本的顺序单调增加，此外，需要near-epoch 的概念。
 
 VOS must be able to accept insertion of KV pairs at any epoch and must be able to provide good scalability for concurrent updates and lookups on any key-value object.
 KV objects must also be able to support any type and size of keys and values.
 
+vos 必须能在任何时候接受kv 对的插入，并且必须能够为任何键值对对象的并发更新和查找提供良好的可扩展性。kv 对象还必须支持任意大小和类型的键值。
 
 <a id="721"></a>
 
 ### Operations Supported with Key Value Store
 
 VOS supports large keys and values with four types of operations; update, lookup, punch, and key enumeration.
+
+vos 支持的操作：更新、查找、打孔、按key 枚举。
 
 The update and punch operations add a new key to a KV store or log a new value of an existing key.
 Punch logs the special value "punched", effectively a negative entry, to record the epoch when the key was deleted.
@@ -269,6 +296,7 @@ DTX ensures that replicas are consistent, and failed or uncommitted updates are 
 
 ### Internal Data Structures
 
+vos kv 存储内部数据结构。（比较b+树和红黑树并分析为什么要选择b+树作为kv 存储数据结构）
 Designing a VOS KV store requires a tree data structure that can grow dynamically and remain self-balanced.
 The tree needs to be balanced to ensure that time complexity does not increase with an increase in tree size.
 Tree data structures considered are red-black trees and B+ Trees, the former is a binary search tree, and the latter an n-ary search tree.
@@ -354,7 +382,7 @@ In addition to the enumeration of keys for an object valid in an epoch, VOS also
 The epoch index table provides keys updated in each epoch.
 On aggregating the list of keys associated with each epoch, (by keeping the latest update of the key and discarding the older versions) VOS can generate a list of keys with their latest epoch.
 By looking up each key from the list in its associated index data structure, VOS can extract values with an iterator-based approach.
-
+（到此都在说为什么b+树更适合实现vos kv 存储，从kv 存储支持的操作一一分析）
 <a id="73"></a>
 
 ## Key Array Stores
@@ -436,7 +464,8 @@ These operations are discussed in a following section (<a href="#74">Epoch Based
 
 <a id="82"></a>
 ## Conditional Update and MVCC
-
+条件更新和多版本并发控制。
+todo: 条件更新是什么
 VOS supports conditional operations on individual dkeys and akeys.  The
 following operations are supported:
 
@@ -456,6 +485,8 @@ MVCC to prevent read/write races and provide serializability guarantees.
 VOS maintains an in-memory cache of read and write timestamps in order to
 enforce MVCC semantics.  The timestamp cache itself consists of two parts:
 
+todo: mvcc
+vos 维护一个内存的读写时间戳缓存来实现mvcc 语义。包含两部分：
 1. Negative entry cache. A global array per target for each type of entity
 including objects, dkeys, and akeys.  The index at each level is determined by
 the combination of the index of the parent entity, or 0 in the case of
@@ -470,6 +501,8 @@ entity exists.  These entries are initialized at startup using the global
 time of the starting server.   This ensures that any updates at an earlier
 time are forced to restart to ensure we maintain automicity since timestamp
 data is lost when a server goes down.
+
+负记录缓存。每个target有一个全局数组，来保存所有类型的实体（objects，dkeys，akeys）。
 2. Positive entry cache. An LRU cache per target for existing containers,
 objects, dkeys, and akeys.  One LRU array is used for each level such that
 containers, objects, dkeys, and akeys only conflict with cache entries of the
@@ -648,7 +681,9 @@ values.
 <a id="74"></a>
 
 ## Epoch Based Operations
+基于epoch 的操作。
 
+todo: vos 提供了一种在不破坏更新/写入的情况下修改vos 对线的方法。
 Epochs provide a way for modifying VOS objects without destroying the history of updates/writes.
 Each update consumes memory and discarding unused history can help reclaim unused space.
 VOS provides methods to compact the history of writes/updates and reclaim space in every storage node.
@@ -794,6 +829,9 @@ its modification in parallel.  Bulk transfers are not forwarded by the leader
 but rather transferred directly from the client, improving load balance and
 decreasing latency by utilizing the full client-server bandwidth.
 
+更新时，client 将发送rpc 给leader shard。leader 分发rpc 到相关的shards，所有的shard 并行修改。bulk 数据不由leader 转发
+而是由客户端直接传输。
+
 Before modifications are made, a local transaction, called 'DTX', is started
 on each related shard (both leader and non-leaders) with a client generated
 DTX identifier that is unique for the modification within the container. All
@@ -806,6 +844,10 @@ all non-leaders.  If any shard(s) fail to execute the modification, it will
 reply to the leader with failure, and the leader will globally abort the DTX.
 Once the DTX is set by the leader to 'committable' or 'aborted', it replies to
 the client with the appropriate status.
+
+在修改执行之前，一个本地事务开启（依赖一个客户端产生的dtx container 范围内唯一的标识符）在每个shards上（包括leader 和非leader）。
+一个dtx 的所有修改被log 到dtx 事务表。本地修改完后，非leader shard将dtx 状态修改为 prepared 并回复leader 节点。
+leader 收到所有非leader 的修改成功后将完成本地修改并设置dtx 状态为committable。如果非leader 回复fail，leader 将回复abort 给client。
 
 The client may consider a modification complete as soon as it receives a
 successful reply from the leader, regardless of whether the DTX is actually
@@ -825,6 +867,14 @@ is also 'prepared', then for transactional read, ask the client to wait and
 retry via returning -DER_INPROGRESS; for non-transactional read, related entry
 is ignored and the latest committed modification is returned to the client.
 
+当引用程序想要从一个object 读取数据，这个object 分布式在多个副本上。client 将发送rpc 给任意的replica节点
+。服务端收到rpc 后如果相关的dtx 是committed 或者committable，那么返回要查询的记录。1. 如果这个dtx 状态为 prepared，
+并且这个replica 不是leader，将回复给client 重新请求leader 节点读取数据。2. 如果当前replica是leader并且状态为committed 
+或者committable，那么这些记录将对应用程序可见。3. 如果是leader 上的dtx 并且处于prepared 状态，a. 如果是事务读，
+将回复client 一个特殊的错误码 DER_INPROGRESS 请求客户端等待并重试。b. 如果非事务读，相关的记录将被忽略最新的已提交修改
+将被回复给client。
+
+todo: EC 场景
 If the read operation refers to an EC object and the data read from a data
 shard (non-leader) has a 'prepared' DTX, the data may be 'committable' on the
 leader due to the aforementioned asynchronous batched commit mechanism.
@@ -835,6 +885,8 @@ for transactional read, ask the client to wait and retry via returning
 -DER_INPROGRESS; for non-transactional read, related entry is ignored and the
 latest committed modification is returned to the client.
 
+dtx 模型内置在daos container，每个daos container 维护各自的dtx 表----两个存储在scm 的b+树。一个是存储
+active dtx，一个存储已经提交的dtx。
 The DTX model is built inside a DAOS container. Each container maintains its own
 DTX table that is organized as two B+trees in SCM: one for active DTXs and the
 other for committed DTXs.

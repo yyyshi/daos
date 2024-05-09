@@ -79,6 +79,7 @@ oi_rec_alloc(struct btr_instance *tins, d_iov_t *key_iov,
 	int			 rc;
 
 	/* Allocate a PMEM value of type vos_obj_df */
+	// 申请pmem 空间
 	obj_off = umem_zalloc(&tins->ti_umm, sizeof(struct vos_obj_df));
 	if (UMOFF_IS_NULL(obj_off))
 		return -DER_NOSPACE;
@@ -91,6 +92,7 @@ oi_rec_alloc(struct btr_instance *tins, d_iov_t *key_iov,
 	if (val_out == NULL) {
 		obj->vo_id	= *key;
 		obj->vo_sync	= 0;
+		// 创建ilog
 		rc = ilog_create(&tins->ti_umm, &obj->vo_ilog);
 		if (rc != 0) {
 			D_ERROR("Failure to create incarnation log: "DF_RC"\n",
@@ -224,7 +226,7 @@ vos_oi_find(struct vos_container *cont, daos_unit_oid_t oid,
 	d_iov_set(&key_iov, &oid, sizeof(oid));
 	d_iov_set(&val_iov, NULL, 0);
 
-	// 根据key 查询value
+	// 根据key 查询value，b+树
 	rc = dbtree_fetch(cont->vc_btr_hdl, BTR_PROBE_EQ,
 			  DAOS_INTENT_DEFAULT, &key_iov, NULL, &val_iov);
 	if (rc == 0) {
@@ -251,6 +253,7 @@ vos_oi_find_alloc(struct vos_container *cont, daos_unit_oid_t oid,
 		  struct vos_ts_set *ts_set)
 {
 	struct dtx_handle	*dth = vos_dth_get(cont->vc_pool->vp_sysdb);
+	// 如果没找到，重新创建一个返回
 	struct vos_obj_df	*obj = NULL;
 	d_iov_t			 key_iov;
 	d_iov_t			 val_iov;
@@ -261,6 +264,7 @@ vos_oi_find_alloc(struct vos_container *cont, daos_unit_oid_t oid,
 	D_DEBUG(DB_TRACE, "Lookup obj "DF_UOID" in the OI table.\n",
 		DP_UOID(oid));
 
+	// 先去oi table 查询
 	rc = vos_oi_find(cont, oid, &obj, ts_set);
 	if (rc == 0)
 		goto do_log;
@@ -268,12 +272,15 @@ vos_oi_find_alloc(struct vos_container *cont, daos_unit_oid_t oid,
 		return rc;
 
 	/* Object ID not found insert it to the OI tree */
+	// 没查到，创建一个插入到oi table
 	D_DEBUG(DB_TRACE, "Object "DF_UOID" not found adding it..\n",
 		DP_UOID(oid));
 
 	d_iov_set(&val_iov, NULL, 0);
 	d_iov_set(&key_iov, &oid, sizeof(oid));
 
+	// insert 新创建的元素到oi table。
+	// 执行 vos_cont_open 的时候创建树，即创建 cont->vc_btr_hdl
 	rc = dbtree_upsert(cont->vc_btr_hdl, BTR_PROBE_EQ, DAOS_INTENT_DEFAULT,
 			   &key_iov, &val_iov, NULL);
 	if (rc) {

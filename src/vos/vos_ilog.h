@@ -44,8 +44,10 @@ struct vos_punch_record {
 };
 
 struct vos_ilog_info {
+	// ilog 的记录
 	struct ilog_entries	 ii_entries;
 	/** Visible uncommitted epoch */
+	// 可见的未提交的 epoch
 	daos_epoch_t		 ii_uncommitted;
 	/** If non-zero, earliest creation timestamp in current incarnation. */
 	daos_epoch_t		 ii_create;

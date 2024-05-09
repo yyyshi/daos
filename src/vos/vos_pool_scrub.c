@@ -839,6 +839,7 @@ sc_pool_start(struct scrub_ctx *ctx)
 	d_gettime(&ctx->sc_pool_start_scrub);
 
 	sc_m_pool_csum_reset(ctx);
+	// scrub pool
 	sc_m_pool_start(ctx);
 	sc_scrub_bytes_scrubbed_reset(ctx);
 	ctx->sc_status = SCRUB_STATUS_RUNNING;
@@ -944,6 +945,7 @@ vos_scrub_pool(struct scrub_ctx *ctx)
 
 	param.ip_hdl = ctx->sc_vos_pool_hdl;
 	param.ip_epr.epr_hi = DAOS_EPOCH_MAX;
+	// 执行scrub
 	rc = vos_iterate(&param, VOS_ITER_COUUID, false, &anchor,
 			 NULL, cont_iter_scrub_cb, ctx, NULL);
 	sc_scrub_count_inc(ctx);

@@ -468,6 +468,7 @@ struct daos_cpd_punch {
  * It is fake read style (daos fetch/enumerate/query) operation, only for set
  * read timestamp on related target(s). It does not need iod/sgl information.
  */
+// todo: cpd 是什么
 struct daos_cpd_read {
 	daos_iod_t			*dcr_iods;
 };

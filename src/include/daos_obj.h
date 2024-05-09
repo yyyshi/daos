@@ -194,6 +194,7 @@ daos_is_dkey_uint64_type(enum daos_otype_t type)
 static inline bool
 daos_is_dkey_uint64(daos_obj_id_t oid)
 {
+	// 返回false
 	return daos_is_dkey_uint64_type(daos_obj_id2type(oid));
 }
 

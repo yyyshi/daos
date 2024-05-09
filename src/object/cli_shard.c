@@ -965,6 +965,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 {
 	// todo: 看下 args 和api_args 这俩参数的构建过程
 	// object 下 shard 级别的参数
+	// shard_args 里面会有bulk 信息，rdma 传输时候会用到
 	struct shard_rw_args	*args = shard_args;
 	struct shard_auxi_args	*auxi = &args->auxi;
 	// object 读写参数。根据shard 的auxi 获取object 的auxi，再获取object task
@@ -1007,14 +1008,19 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 		D_GOTO(out, rc = -DER_NO_HDL);
 
 	// todo: 这个group 又是怎么来的
+	// 使用sy group 下的shard 下的rank 和target 作为接收对端
+	// todo: 保存本地或者远程数据的地址是在哪里提供的
 	tgt_ep.ep_grp = pool->dp_sys->sy_group;
+	// 当前shard 所在的target idx
 	tgt_ep.ep_tag = shard->do_target_idx;
+	// 当前shard 所对应的id
 	tgt_ep.ep_rank = shard->do_target_rank;
 	// crt rpc 发送的对端地址
 	rw_args.tgt_ep = tgt_ep;
 	if ((int)tgt_ep.ep_rank < 0)
 		D_GOTO(out, rc = (int)tgt_ep.ep_rank);
 
+	// req 就是rpc priv 的pub
 	rc = obj_req_create(daos_task2ctx(task), &tgt_ep, opc, &req);
 	D_DEBUG(DB_TRACE, "rpc %p opc:%d "DF_UOID" "DF_KEY" rank:%d tag:%d eph "
 		DF_U64"\n", req, opc, DP_UOID(shard->do_id), DP_KEY(dkey),
@@ -1100,14 +1106,16 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 		tgt_ep.ep_tag, auxi->epoch.oe_value, DP_DTI(&orw->orw_dti),
 		orw->orw_start_shard, orw->orw_map_ver);
 
-	// todo: 这个后面很多判断?
+	// 传输方式为rdma 的数据都是通过bulks 来作为数据结构来组织数据的
 	if (args->bulks != NULL) {
 		orw->orw_sgls.ca_count = 0;
 		orw->orw_sgls.ca_arrays = NULL;
 		// todo: 输入带过来的数据？比如写场景，就表示要写的数据？
 		// bulk 方式传输，走rdma
+		// bulk 里有remote 内存地址信息
 		orw->orw_bulks.ca_count = nr;
 		orw->orw_bulks.ca_arrays = args->bulks;
+		// todo: 如果要是走rdma 的话，需要提供读写的本地和远程地址的呀，是在哪里处理的
 		if (fw_shard_tgts != NULL)
 			orw->orw_flags |= ORF_BULK_BIND;
 	} else {
@@ -1118,6 +1126,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 			orw->orw_sgls.ca_arrays = NULL;
 		} else {
 			/* Transfer data inline */
+			// 非rdma，而是inline 方式传输的数据
 			if (sgls != NULL)
 				orw->orw_sgls.ca_count = nr;
 			else
@@ -1185,6 +1194,32 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 		    }
 
 		// 发送rpc 请求
+		// rdma 发送接收，读写操作中都是rnic 网卡直接和参与数据传输的已经注册过的内存区域直接数据传输，rnic替代了cpu，不需要cpu参与
+		// todo: 那么在我要做rpc 操作之前，我需要知道哪块内存区域是我要进行数据传输的，或者说注册的内存区域是哪块
+		// rdma 存取都是直接通过硬件来操作内存的
+		// rdma 是基于消息的数据传输协议，所有的数据包的组装都在rdma 硬件上完成
+		// rdma 应用和rnic 之间的传输接口层被称为Verbs或RDMA api
+		// rdma api 主要有两种verbs：
+		// 1. 内存verbs：也叫one-side rdma。包括rdma read，rdma write，rdma atomic。这种模式下的rdma 访问完全不需要远端机器的任何确认。
+		// 2. 消息verbs：也叫two-side rdma。包括rdma send，rdma receive。这种模式下的rdma 需要远端cpu 的参与
+		// 实际中，send/receive 常用于连接控制类报文，而数据报文多是通过read/write来完成
+		// ---read: rdma 读本质上就是pull 操作，把远程系统内存里的数据拉回到本地系统的内存里。
+		// 接收方必须要提供虚拟地址和目标存储内存的remote_key。接收方需要初始和接受提醒通知，发送方是完全被动的，并且不会接收任何通知
+		// ---write: rdma 写本质就是push 操作，把本地系统内存里的数据推送到远程系统的内存里。
+		// 发送方必须提供虚拟地址和目标读取内存的remote_key。发送方需要初始和接受提醒通知，接受方是完全被动的，并且不会接收任何通知
+		
+		/*---------读操作--------------
+		对于单边操作，以B对A的read操作为例，数据的流程如下：
+		1. 首先A、B建立连接，QP已经创建并且初始化。
+		2. 数据被存档在A的buffer地址VA，注意VA应该提前注册到A的RNIC，并拿到返回的local key，相当于RDMA操作这块buffer的权限。
+		3. A把数据地址VA，key封装到专用的报文传送到B，这相当于A把数据buffer的操作权交给了B。同时A在它的WQ中注册进一个WR，以用于接收数据传输的B返回的状态。
+		4. B在收到A的送过来的数据VA和R_key后，RNIC会把它们连同存储地址VB到封装RDMA READ，这个过程A、B两端不需要任何软件参与，就可以将A的数据存储到B的VB虚拟地址。
+		5. B在存储完成后，会向A返回整个数据传输的状态信息。
+		单边操作传输方式是RDMA与传统网络传输的最大不同，只需提供直接访问远程的虚拟地址，无须远程应用的参与其中，这种方式适用于批量数据传输。
+		
+		https://blog.csdn.net/qq_40323844/article/details/90680159
+		// todo: 先看下mercury 的rdma api，再看下crt 的rdma api
+		*/
 		rc = daos_rpc_send(req, task);
 	}
 

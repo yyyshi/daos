@@ -1062,6 +1062,7 @@ evt_tcx2hdl(struct evt_context *tcx)
 	daos_handle_t hdl;
 
 	evt_tcx_addref(tcx); /* +1 for opener */
+	// todo: evtree 的cookie
 	hdl.cookie = (uint64_t)tcx;
 	return hdl;
 }

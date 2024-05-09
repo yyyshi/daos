@@ -204,6 +204,7 @@ btr_tcx2hdl(struct btr_context *tcx)
 	daos_handle_t hdl;
 
 	/* XXX use handle table */
+	// todo: btree 的cookie
 	hdl.cookie = (uint64_t)tcx;
 	return hdl;
 }
@@ -550,6 +551,7 @@ btr_rec_alloc(struct btr_context *tcx, d_iov_t *key, d_iov_t *val,
 		return -DER_KEY2BIG;
 	}
 
+	// kv_rec_alloc、oi_rec_alloc 等
 	return btr_ops(tcx)->to_rec_alloc(&tcx->tc_tins, key, val, rec, val_out);
 }
 
@@ -576,6 +578,7 @@ static int
 btr_rec_fetch(struct btr_context *tcx, struct btr_record *rec,
 	      d_iov_t *key, d_iov_t *val)
 {
+	// kv_rec_fetch
 	return btr_ops(tcx)->to_rec_fetch(&tcx->tc_tins, rec, key, val);
 }
 
@@ -1412,6 +1415,7 @@ btr_probe_valid(dbtree_probe_opc_t opc)
  *
  * \return	see btr_probe_rc
  */
+// 根据key 查询btree，将查到的path 存到tcx::tc_traces 里
 static enum btr_probe_rc
 btr_probe(struct btr_context *tcx, dbtree_probe_opc_t probe_opc,
 	  uint32_t intent, d_iov_t *key, char hkey[DAOS_HKEY_MAX])
@@ -1676,9 +1680,11 @@ static enum btr_probe_rc
 btr_probe_key(struct btr_context *tcx, dbtree_probe_opc_t probe_opc,
 	      uint32_t intent, d_iov_t *key)
 {
+	// 根据key 生成hash key
 	char hkey[DAOS_HKEY_MAX];
 
 	btr_hkey_gen(tcx, key, hkey);
+	// 根据hash key 探针
 	return btr_probe(tcx, probe_opc, intent, key, hkey);
 }
 
@@ -1822,7 +1828,9 @@ int
 dbtree_fetch(daos_handle_t toh, dbtree_probe_opc_t opc, uint32_t intent,
 	     d_iov_t *key, d_iov_t *key_out, d_iov_t *val_out)
 {
+	// 存储在btree 里面的kv record
 	struct btr_record  *rec;
+	// 构建btr 的ctx
 	struct btr_context *tcx;
 	int		    rc;
 
@@ -1830,10 +1838,14 @@ dbtree_fetch(daos_handle_t toh, dbtree_probe_opc_t opc, uint32_t intent,
 	if (tcx == NULL)
 		return -DER_NO_HDL;
 
+	// 校验key
 	rc = btr_verify_key(tcx, key);
 	if (rc)
 		return rc;
 
+	// 探测key，设置探针。opc 为小于等于，intent 为fetch 操作，key 为要查询的key
+	// todo: 这里key 中也没存储什么有用信息呢，为什么最后可以按key 查询
+	// 如果查到了，会存储到 tcx::tc_traces 里
 	rc = btr_probe_key(tcx, opc, intent, key);
 	switch (rc) {
 	case PROBE_RC_INPROGRESS:
@@ -1852,8 +1864,11 @@ dbtree_fetch(daos_handle_t toh, dbtree_probe_opc_t opc, uint32_t intent,
 		break;
 	}
 
+	// 根据trace 返回kv record
 	rec = btr_trace2rec(tcx, tcx->tc_depth - 1);
 
+	// 查找value
+	// tcx 里面有tree 相关的信息，rec 中有record 的off
 	return btr_rec_fetch(tcx, rec, key_out, val_out);
 }
 
@@ -2132,6 +2147,7 @@ btr_tx_begin(struct btr_context *tcx)
 	if (!btr_has_tx(tcx))
 		return 0;
 
+	// pmem 硬件层提供了事务级别的读写
 	return umem_tx_begin(btr_umm(tcx), NULL);
 }
 
@@ -3342,16 +3358,19 @@ dbtree_create_inplace_ex(unsigned int tree_class, uint64_t tree_feats,
 		return -DER_NO_PERM;
 	}
 
+	// btree ctx 创建
 	rc = btr_context_create(BTR_ROOT_NULL, root, tree_class, tree_feats,
 				tree_order, uma, coh, priv, &tcx);
 	if (rc != 0)
 		return rc;
 
+	// btree 事务初始化
 	rc = btr_tx_tree_init(tcx, root);
 
 	if (rc != 0)
 		goto failed;
 
+	// 转换为hdl
 	*toh = btr_tcx2hdl(tcx);
 	return 0;
  failed:

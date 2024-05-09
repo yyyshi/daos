@@ -862,6 +862,9 @@ obj_dkey2grpidx(struct dc_object *obj, uint64_t hash, unsigned int map_ver)
 	// 由hash 来决定当前oid 所在的grp 的idx
 	// 当时生成layout，实际就是根据oid 生成多个随机数，每个随机数代表一个target（todo：其实准确的说应该是shard 吧）。而这里就是在所有的随机数里面根据hash 选择一个（todo：或者多个？）
 	// 根据hash 返回桶的位置
+	// todo：容错域指的是 obj->cob_shards_nr / grp_size 信息吗？
+	// 在open 阶段创建的layout 实际上就是一个object 的shard 分布信息，这里使用当时的layout 信息和dkey 的hash 来获取所在桶
+	// 其实是每个object 自己一个hash 环，环上是容错域对应的shard 信息。再根据dkey 不同散列到不同的shard 上
 	grp_idx = obj_pl_grp_idx(obj->cob_layout_version, hash,
 				 obj->cob_shards_nr / grp_size);
 	D_RWLOCK_UNLOCK(&obj->cob_lock);
@@ -1105,6 +1108,7 @@ obj_shard_tgts_query(struct dc_object *obj, uint32_t map_ver, uint32_t shard,
 		}
 		shard_tgt->st_ec_tgt = tgt_idx;
 	}
+	// 将obj_shard 中的数据通过 shard_tgt 返回
 	shard_tgt->st_rank	= obj_shard->do_target_rank;
 	shard_tgt->st_shard	= shard;
 	shard_tgt->st_shard_id	= obj_shard->do_id.id_shard;
@@ -1167,6 +1171,7 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 		    uint32_t start_shard, uint32_t shard_cnt, uint32_t grp_nr,
 		    uint32_t flags, struct obj_auxi_args *obj_auxi)
 {
+	// 这里的一个目的是为了填充 req_tgts
 	struct obj_req_tgts	*req_tgts = &obj_auxi->req_tgts;
 	struct daos_shard_tgt	*tgt = NULL;
 	struct daos_oclass_attr	*oca = obj_get_oca(obj);
@@ -1177,6 +1182,7 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 	int			 rc = 0;
 
 	D_ASSERT(shard_cnt >= 1);
+	// grp_nr 上游传递的是 1
 	grp_size = shard_cnt / grp_nr;
 	D_ASSERT(grp_size * grp_nr == shard_cnt);
 	if (cli_disp || bit_map != NIL_BITMAP)
@@ -1249,7 +1255,7 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 		int			tgt_idx;
 
 		cur_grp_size = req_tgts->ort_grp_size;
-		// 不断移动 & 填充tgt 达到设置整个 ort_shard_tgts 数组的目的
+		// 不断移动 & 填充tgt 达到设置整个 ort_shard_tgts 数组的目的，实际上就遍历一次
 		head = tgt = req_tgts->ort_shard_tgts + i * grp_size;
 		grp_idx = shard_idx / obj_get_grp_size(obj);
 		grp_start = grp_idx * obj_get_grp_size(obj);
@@ -1263,6 +1269,7 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 				leader_shard = 0;
 			} else {
 				// 获取leader shard
+				// todo: leader
 				leader_shard = obj_grp_leader_get(obj, grp_idx, obj_auxi->dkey_hash,
 								  obj_auxi->cond_modify,
 								  map_ver, bit_map);
@@ -1278,6 +1285,7 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 			}
 			// 填充tgt 信息
 			// 根据leader shard 返回target id
+			// 设置req_tgts 数组中当前位置的target 值
 			rc = obj_shard_tgts_query(obj, map_ver, leader_shard,
 						  tgt, obj_auxi, NIL_BITMAP);
 			if (rc < 0)
@@ -2083,6 +2091,7 @@ obj_bulk_prep(d_sg_list_t *sgls, unsigned int nr, bool bulk_bind,
 	for (; sgls != NULL && i < nr; i++) {
 		if (sgls[i].sg_iovs != NULL &&
 		    sgls[i].sg_iovs[0].iov_buf != NULL) {
+			// 创建多个bulks
 			// 每一个sgls 对应一个bulk
 			rc = crt_bulk_create(daos_task2ctx(task), &sgls[i],
 					     bulk_perm, &bulks[i]);
@@ -2155,6 +2164,7 @@ obj_rw_bulk_prep(struct dc_object *obj, daos_iod_t *iods, d_sg_list_t *sgls,
 	    (obj_is_ec(obj) && !obj_auxi->reasb_req.orr_single_tgt)) {
 		bulk_perm = update ? CRT_BULK_RO : CRT_BULK_RW;
 		// 根据sgl 填充bulks 成员
+		// 构建object 的bulk，用于rdma 传输
 		rc = obj_bulk_prep(sgls, nr, bulk_bind, bulk_perm, task,
 				   &obj_auxi->bulks);
 	}
@@ -2479,6 +2489,7 @@ obj_req_valid(tse_task_t *task, void *args, int opc, struct dtx_epoch *epoch,
 	struct obj_auxi_args	*obj_auxi;
 	struct dc_object	*obj = NULL;
 	daos_handle_t		oh;
+	// 事务的hdl
 	daos_handle_t		th = DAOS_HDL_INVAL;
 	int			rc = 0;
 
@@ -2741,8 +2752,10 @@ obj_req_valid(tse_task_t *task, void *args, int opc, struct dtx_epoch *epoch,
 		}
 	}
 
+	// 这个hdl 是事务的hdl，epoch 初始化和事务有关
 	// 如果hdl 是valid
 	// todo: 啥时候是valid，啥时候是invalid 呀
+	// todo: 什么时候有cookie，什么时候没有cookie
 	if (daos_handle_is_valid(th)) {
 		// opt 不具备修改属性，比如fetch
 		if (!obj_is_modification_opc(opc)) {
@@ -2753,7 +2766,8 @@ obj_req_valid(tse_task_t *task, void *args, int opc, struct dtx_epoch *epoch,
 				D_GOTO(out, rc);
 		}
 	} else {
-		// todo: 如果不是valid，那还能用吗？这里直接设置成 DAOS_EPOCH_MAX
+		// 第一次走这里，这里是直接设置成 DAOS_EPOCH_MAX
+		// todo: 如果不是valid，那还能用吗？
 		dc_io_epoch_set(epoch, opc);
 		D_DEBUG(DB_IO, "set fetch epoch "DF_U64"\n", epoch->oe_value);
 	}
@@ -2788,6 +2802,7 @@ shard_auxi_set_param(struct shard_auxi_args *shard_arg, uint32_t map_ver,
 		     uint32_t shard, uint32_t tgt_id, struct dtx_epoch *epoch,
 		     uint16_t ec_tgt_idx)
 {
+	// 透传epoch
 	shard_arg->epoch = *epoch;
 	// shard_auxi 的shard 索引是在这里设置的
 	shard_arg->shard = shard;
@@ -2926,7 +2941,8 @@ shard_io(tse_task_t *task, struct shard_auxi_args *shard_auxi)
 {
 	struct obj_auxi_args		*obj_auxi = shard_auxi->obj_auxi;
 	struct dc_object		*obj = obj_auxi->obj;
-	// 构建dc_obj_shard
+	// 根据shard auxi 构建dc_obj_shard，从object io 到 shard io
+	// 直接根据shard_aixi 里的shard idx 从object 里面获取指定的shard 信息，shard 里面包含所在的target 和rank 信息
 	struct dc_obj_shard		*obj_shard;
 	struct obj_req_tgts		*req_tgts;
 	struct daos_shard_tgt		*fw_shard_tgts;
@@ -2975,6 +2991,8 @@ shard_io(tse_task_t *task, struct shard_auxi_args *shard_auxi)
 
 	// obj_req_fanout 里面传入的shard 读写的cb 函数。当前函数也是在 obj_req_fanout 里面调用的
 	// shard_io_cb == dc_obj_shard_rw
+	// obj_shard 里面已经有所在的target 和rank 信息
+	// shard_auxi 里面的的bulk 信息中有用于rdma 传输时候的remote 内存信息
 	rc = shard_auxi->shard_io_cb(obj_shard, obj_auxi->opc, shard_auxi,
 				     fw_shard_tgts, fw_cnt, task);
 	return rc;
@@ -3173,6 +3191,7 @@ obj_req_fanout(struct dc_object *obj, struct obj_auxi_args *obj_auxi,
 		// 这里设置了shard_auxi 的shard 索引，后面shard_open 时获取的就是tgt->st_shard 索引的do_shards 元素
 		// 这里因为tgts 只有一个，所以设置的是第一个target 的st_shard
 		// 这里也设置了epoch，是上游传递来的，是在创建任务的时候构建的epoch
+		// 透传 epoch
 		shard_auxi_set_param(shard_auxi, map_ver, tgt->st_shard,
 				     tgt->st_tgt_id, epoch, (uint16_t)tgt->st_ec_tgt);
 		shard_auxi->grp_idx = 0;
@@ -5080,6 +5099,7 @@ shard_rw_prep(struct shard_auxi_args *shard_auxi, struct dc_object *obj,
 	// 将shard_auxi 作为 shard_arg 的auxi 成员
 	shard_arg = container_of(shard_auxi, struct shard_rw_args, auxi);
 
+	// todo: 生成新的dti
 	if (daos_handle_is_inval(obj_auxi->th))
 		// 如果tx hdl非法，在这里生成的dti。默认第一次传递的参数就是 DAOS_TX_NONE，需要生成
 		daos_dti_gen(&shard_arg->dti,
@@ -5090,6 +5110,7 @@ shard_rw_prep(struct shard_auxi_args *shard_auxi, struct dc_object *obj,
 		// 如果tx hdl 合法，直接获取当前hdl 的dti（通过查表得到）
 		dc_tx_get_dti(obj_auxi->th, &shard_arg->dti);
 
+	// shard_auxi 的bulk 是从object 透传来的
 	shard_arg->bulks = obj_auxi->bulks;
 	// todo: 都是什么场景
 	if (obj_auxi->req_reasbed) {
@@ -5598,6 +5619,7 @@ dc_obj_fetch_task(tse_task_t *task)
 	uint8_t                 *tgt_bitmap = NIL_BITMAP;
 	unsigned int		map_ver = 0;
 	// 在任务创建后，创建一个epoch
+	// 这里创建了一个dtx_epoch
 	struct dtx_epoch	epoch;
 	uint32_t		shard = 0;
 	uint32_t		shard_cnt = 0;
@@ -5712,6 +5734,8 @@ dc_obj_fetch_task(tse_task_t *task)
 	if (!obj_auxi->io_retry && !obj_auxi->is_ec_obj)
 		obj_auxi->initial_shard = obj_auxi->req_tgts.ort_shard_tgts[0].st_shard;
 
+	// 在dc 端fetch 和update 请求操作之前都要先执行此函数，准备bulk 数据，实际就是填充object 中的bulks 成员
+	// bulks 里面会有本地mem 地址和远端mem 地址的信息
 	rc = obj_rw_bulk_prep(obj, args->iods, args->sgls, args->nr,
 			      false, false, task, obj_auxi);
 	if (rc != 0)
@@ -5744,6 +5768,9 @@ obj_update_shards_get(struct dc_object *obj, daos_obj_fetch_t *args, unsigned in
 		// 找桶
 		// 根据dkey hash选择一个桶，这个桶表示grp idx，之后返回这个grp 的shard 们，被叫做grp members
 		// todo: 研究下jump 算法
+		// 这里会考虑到容错域，即从容错域中选择targets 来随机的分布对象
+		// todo: 容错域的构建和维护
+		// todo: 当容错域发生变化后呢，rebalance 和recover 相关
 		return obj_dkey2grpmemb(obj, obj_auxi->dkey_hash, map_ver, shard, shard_cnt);
 
 	grp_idx = obj_dkey2grpidx(obj, obj_auxi->dkey_hash, map_ver);
@@ -5822,7 +5849,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 	int			rc;
 
 	// todo: obj 能提供哪些信息？
-	// 根据obj 构建obj auxi
+	// 根据obj 构建obj auxi。obj 添加到obj_auxi 里
 	rc = obj_task_init(task, DAOS_OBJ_RPC_UPDATE, map_ver, args->th,
 			   &obj_auxi, obj);
 	if (rc != 0) {
@@ -5847,6 +5874,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 		return dc_tx_convert(obj, DAOS_OBJ_RPC_UPDATE, task);
 	}
 
+	// 用于生成layout 的dkey hash 是由 oid 和dkey 生成的
 	obj_auxi->dkey_hash = obj_dkey2hash(obj->cob_md.omd_id, args->dkey);
 	obj_auxi->iod_nr = args->nr;
 	if (obj_is_ec(obj)) {
@@ -5920,6 +5948,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 		DP_OID(obj->cob_md.omd_id), obj_auxi->dkey_hash);
 
 	// 判断sgls 数据的大小是否超过bulk 限制，超过的话使用sgls 组装bulks 结构，bulks将采用rdma 传输（另外一种传输方式是inline传输，传统的直接拷贝rpc 中数据）
+	// 这里会创建bulks 里面会有本地mem 地址和远端mem 地址信息
 	rc = obj_rw_bulk_prep(obj, args->iods, args->sgls, args->nr, true,
 			      obj_auxi->req_tgts.ort_srv_disp, task, obj_auxi);
 	if (rc != 0)
@@ -5960,6 +5989,9 @@ dc_obj_update_task(tse_task_t *task)
 	当不同的用户进程可以覆盖与dkey/akey对相关联的值时，通常需要进行事务处理。
 	todo: 如果冲突比较多呢，那不是要一直重新提交？
 	*/
+
+	// todo: 有三种epoch 的数据类型，daos_epoch_t、dtx_epoch、uint64
+	// process_epoch(uint64_t *epoch
 	struct dtx_epoch	 epoch = {0};
 	unsigned int		 map_ver = 0;
 	int			 rc;
@@ -5971,7 +6003,7 @@ dc_obj_update_task(tse_task_t *task)
 	if (rc != 0)
 		goto comp;
 
-	// todo: 事务相关
+	// todo: 事务相关，按 simple test 中传入的是invalid
 	if (daos_handle_is_valid(args->th))
 		/* add the operation to DTX and complete immediately */
 		return dc_tx_attach(args->th, obj, DAOS_OBJ_RPC_UPDATE, task, 0, true);

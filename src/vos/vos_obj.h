@@ -36,6 +36,7 @@ struct vos_object {
 	// 关联daos lru cache 的
 	struct daos_llink		obj_llink;
 	/** Cache of incarnation log */
+	// 缓存的ilog 信息
 	struct vos_ilog_info		obj_ilog_info;
 	/** Key for searching, object ID within a container */
 	daos_unit_oid_t			obj_id;

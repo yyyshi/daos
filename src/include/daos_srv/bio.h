@@ -140,7 +140,8 @@ bio_addr_set(bio_addr_t *addr, uint16_t type, uint64_t off)
 {
 	addr->ba_type = type;
 	// 对于scm 来说，是内存实际地址
-	// 对于nvme 来说，是spdk blob 的offset
+	// 对于nvme 来说，是spdk blob 的offset，最后调用spdk_blob_io_write 接口时候是用的这个offset
+	// todo: 那么这个off 是从哪里来的呢
 	addr->ba_off = umem_off2offset(off);
 }
 
@@ -209,7 +210,7 @@ bio_iov2buf(const struct bio_iov *biov)
 static inline uint64_t
 bio_iov2raw_off(const struct bio_iov *biov)
 {
-	// 在 vos_update_begin-->akey_update_begin-->bio_addr_set 函数里面设置的
+	// 在 vos_update_begin-->akey_update_begin-->vos_reserve_single/vos_reserve_recx-->bio_addr_set 函数里面设置的
 	return biov->bi_addr.ba_off;
 }
 

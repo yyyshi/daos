@@ -1170,12 +1170,15 @@ kv_rec_free(struct btr_instance *tins, struct btr_record *rec, void *args)
 	return 0;
 }
 
+// &tcx->tc_tins, rec, key, val
 static int
 kv_rec_fetch(struct btr_instance *tins, struct btr_record *rec, d_iov_t *key,
 	     d_iov_t *val)
 {
+	// 获取到kv 数据
 	struct kv_rec *r = umem_off2ptr(&tins->ti_umm, rec->rec_off);
 
+	// 把r 中数据传递到key，val 中。key 是 out key
 	if (key != NULL) {
 		if (key->iov_buf == NULL)
 			key->iov_buf = r->kr_key;

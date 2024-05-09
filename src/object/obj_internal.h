@@ -46,9 +46,11 @@ extern unsigned int	srv_io_mode;
 extern bool	tx_verify_rdg;
 
 /** client object shard */
+// 含有所在的rank 和target 的信息
 struct dc_obj_shard {
 	/** refcount */
 	unsigned int		do_ref;
+	// rank id
 	uint32_t		do_target_rank;
 	/** object id */
 	daos_unit_oid_t		do_id;
@@ -58,6 +60,7 @@ struct dc_obj_shard {
 	/** point back to object */
 	struct dc_object	*do_obj;
 	uint32_t		do_shard_idx;
+	// target id
 	uint8_t			do_target_idx;	/* target VOS index in node */
 };
 
@@ -229,6 +232,7 @@ typedef int (*shard_io_cb_t)(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 struct shard_auxi_args {
 	struct obj_auxi_args	*obj_auxi;
 	shard_io_cb_t		 shard_io_cb;
+	// shard auxi 里会有epoch
 	struct dtx_epoch	 epoch;
 	uint32_t		 shard;
 	uint32_t		 target;
@@ -246,6 +250,7 @@ struct shard_rw_args {
 	struct shard_auxi_args	 auxi;
 	d_sg_list_t		*sgls_dup;
 	struct dtx_id		 dti;
+	// 用于rdma 的bulk 信息，这里保存了remote 的内存信息
 	crt_bulk_t		*bulks;
 	struct obj_io_desc	*oiods;
 	uint64_t		*offs;
@@ -334,6 +339,7 @@ struct shard_k2a_args {
 
 struct obj_req_tgts {
 	/* to save memory allocation if #targets <= OBJ_TGT_INLINE_NR */
+	// todo: 什么叫inline target
 	struct daos_shard_tgt	 ort_tgts_inline[OBJ_TGT_INLINE_NR];
 	/* Shard target array, with (ort_grp_nr * ort_grp_size) targets.
 	 * If #targets <= OBJ_TGT_INLINE_NR then it points to ort_tgts_inline.
@@ -345,11 +351,15 @@ struct obj_req_tgts {
 	 * Now there is only one case for (ort_grp_nr > 1) that for object
 	 * punch, all other cases with (ort_grp_nr == 1).
 	 */
+	// shard 的target 数组。数组总数 == ort_grp_nr * ort_grp_size
+	// 第一组shards 信息：[0，ort_grp_size - 1]
+	// 第二组shards 信息：[ort_grp_size, ort_grp_size * 2 - 1]
 	struct daos_shard_tgt	*ort_shard_tgts;
 	uint32_t		 ort_grp_nr;
 	/* ort_grp_size is the size of the group that is sent as forwarded
 	 * shards
 	 */
+	// 描述forward shards 的group 的数量
 	uint32_t		 ort_grp_size;
 	/* ort_start_shard is only for EC object, it is the start shard number
 	 * of the EC stripe. To facilitate calculate the offset of different
@@ -688,8 +698,10 @@ shard_task_abort(tse_task_t *task, void *arg)
 static inline void
 dc_io_epoch_set(struct dtx_epoch *epoch, uint32_t opc)
 {
+	// todo: 设置为max，first 与value 一样
 	epoch->oe_value = DAOS_EPOCH_MAX;
 	epoch->oe_first = epoch->oe_value;
+	// flags
 	epoch->oe_flags = 0;
 }
 
@@ -752,12 +764,18 @@ static inline uint64_t
 obj_dkey2hash(daos_obj_id_t oid, daos_key_t *dkey)
 {
 	/* return 0 for NULL dkey, for example obj punch and list dkey */
+	// 空deky，直接返回 0
 	if (dkey == NULL)
 		return 0;
 
+	// simple test 例子中：oid.hi = 0; oid.lo = 1，所以这里返回false
+	// todo: oid 和dkey 的使用说法
 	if (daos_is_dkey_uint64(oid))
 		return *(uint64_t *)dkey->iov_buf;
 
+	// 继续走这里，根据dkey 里面的字符串做hash
+	// todo: simple test 里给每个dkey 的字符串都是不一样的，但是这些dkey 是落在同一个object 下的
+	// todo: 所以同一个object 下不同的dkey 可能会落到不同的桶中，但是他们的layout 是一样的吧，因为在open 的时候就创建了
 	return d_hash_murmur64((unsigned char *)dkey->iov_buf,
 			       dkey->iov_len, 5731);
 }

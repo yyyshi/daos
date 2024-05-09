@@ -125,6 +125,7 @@ func newServer(log logging.Logger, cfg *config.Server, faultDomain *system.Fault
 		return nil, errors.Wrap(err, "get username")
 	}
 
+	// todo: 传递容错域信息给engine
 	harness := NewEngineHarness(log).WithFaultDomain(faultDomain)
 
 	return &server{
@@ -557,12 +558,14 @@ func Start(log logging.Logger, cfg *config.Server) error {
 		return err
 	}
 
+	// todo: 容错域
 	faultDomain, err := getFaultDomain(cfg)
 	if err != nil {
 		return err
 	}
 	log.Debugf("fault domain: %s", faultDomain.String())
 
+	// todo: 容错域信息传递到server
 	srv, err := newServer(log, cfg, faultDomain)
 	if err != nil {
 		return err

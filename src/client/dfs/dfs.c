@@ -1461,6 +1461,7 @@ set_sb_params(bool for_update, daos_iod_t *iods, daos_key_t *dkey)
 	set_daos_iod(for_update, &iods[CONT_HINT_IDX], CONT_HINT_NAME, DAOS_CONT_HINT_MAX_LEN);
 }
 
+// 创建 superblock
 static int
 open_sb(daos_handle_t coh, bool create, bool punch, int omode, daos_obj_id_t super_oid,
 	dfs_attr_t *attr, daos_handle_t *oh, dfs_layout_ver_t *ver)
@@ -1808,6 +1809,7 @@ dfs_cont_create(daos_handle_t poh, uuid_t *cuuid, dfs_attr_t *attr,
 	}
 
 	/** Create SB */
+	// 创建 superblock
 	rc = open_sb(coh, true, false, DAOS_OO_RW, roots.cr_oids[0], &dattr, &super_oh, NULL);
 	if (rc)
 		D_GOTO(err_close, rc);

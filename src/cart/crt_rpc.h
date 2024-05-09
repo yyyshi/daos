@@ -125,6 +125,7 @@ struct crt_corpc_info {
 };
 
 struct crt_rpc_priv {
+	// rpc priv 中的pub 信息是以rpc 数据结构呈现的
 	crt_rpc_t		crp_pub; /* public part */
 	/* link to crt_ep_inflight::epi_req_q/::epi_req_waitq */
 	d_list_t		crp_epi_link;
@@ -145,8 +146,11 @@ struct crt_rpc_priv {
 	ATOMIC uint32_t		crp_refcount;
 	crt_rpc_state_t		crp_state; /* RPC state */
 	hg_handle_t		crp_hg_hdl; /* HG request handle */
+	// todo: 这个address 和设置的对端（group，rank，target，shard的位置信息）是一样的么？
+	// todo: na 地址就是虚拟地址和物理地址的映射那个吗？
 	hg_addr_t		crp_hg_addr; /* target na address */
 	struct crt_hg_hdl	*crp_hdl_reuse; /* reused hg_hdl */
+	// todo: 这个address 又是干啥的
 	crt_phy_addr_t		crp_tgt_uri; /* target uri address */
 	crt_rpc_t		*crp_ul_req; /* uri lookup request */
 

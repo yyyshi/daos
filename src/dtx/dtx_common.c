@@ -745,6 +745,7 @@ check:
 }
 
 /* Return the epoch uncertainty upper bound. */
+// 返回向上bound 的epoch 值
 static daos_epoch_t
 dtx_epoch_bound(struct dtx_epoch *epoch)
 {
@@ -908,6 +909,8 @@ dtx_handle_init(struct dtx_id *dti, daos_handle_t coh, struct dtx_epoch *epoch,
 	if (daos_is_zero_dti(dti))
 		return 0;
 
+	// 将服务端的epoch 传递给dtx的hdl
+	// 不走这，非法的epoch 才走这里
 	if (!dtx_epoch_chosen(epoch)) {
 		D_ERROR("initializing DTX "DF_DTI" with invalid epoch: value="
 			DF_U64" first="DF_U64" flags=%x\n",
@@ -915,7 +918,10 @@ dtx_handle_init(struct dtx_id *dti, daos_handle_t coh, struct dtx_epoch *epoch,
 			epoch->oe_flags);
 		return -DER_INVAL;
 	}
+
+	// 给dth 设置epoch
 	dth->dth_epoch = epoch->oe_value;
+	// todo: 这是什么意图
 	dth->dth_epoch_bound = dtx_epoch_bound(epoch);
 
 	if (dth->dth_modification_cnt == 0)
@@ -1135,6 +1141,7 @@ dtx_leader_begin(daos_handle_t coh, struct dtx_id *dti,
 	}
 
 	dth = &dlh->dlh_handle;
+	// 根据epoch 设置dth 的epoch
 	rc = dtx_handle_init(dti, coh, epoch, sub_modification_cnt, pm_ver,
 			     leader_oid, dti_cos, dti_cos_cnt, mbs, true,
 			     (flags & DTX_SOLO) ? true : false,
@@ -1476,6 +1483,7 @@ dtx_begin(daos_handle_t coh, struct dtx_id *dti,
 	if (dth == NULL)
 		return -DER_NOMEM;
 
+	// dth 的epoch 根据epoch 设置 
 	rc = dtx_handle_init(dti, coh, epoch, sub_modification_cnt,
 			     pm_ver, leader_oid, dti_cos, dti_cos_cnt, mbs,
 			     false, false, false,
@@ -2018,6 +2026,7 @@ dtx_leader_exec_ops_ult(void *arg)
 			continue;
 		}
 
+		// func == obj_tgt_update
 		rc = ult_arg->func(dlh, ult_arg->func_arg, i, dtx_sub_comp_cb);
 		if (rc != 0) {
 			if (sub->dss_comp == 0)
@@ -2063,6 +2072,7 @@ dtx_leader_exec_ops(struct dtx_leader_handle *dlh, dtx_sub_func_t func,
 	int			local_rc = 0;
 	int			remote_rc = 0;
 
+	// func == obj_tgt_update
 	ult_arg.func = func;
 	ult_arg.func_arg = func_arg;
 	ult_arg.dlh = dlh;

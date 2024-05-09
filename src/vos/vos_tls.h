@@ -27,6 +27,7 @@ struct vos_ts_table;
 struct dtx_handle;
 
 /** VOS thread local storage structure */
+// vos 的thread local storage 数据结构
 struct vos_tls {
 	/** pools registered for GC */
 	d_list_t			 vtl_gc_pools;
@@ -136,6 +137,7 @@ vos_dth_get(bool standalone)
 static inline void
 vos_kh_clear(bool standalone)
 {
+	// 当前thread local storage 的 vtl_hash_set 成员
 	vos_tls_get(standalone)->vtl_hash_set = false;
 }
 

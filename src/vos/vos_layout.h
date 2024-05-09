@@ -107,6 +107,7 @@ enum vos_gc_type {
 /**
  * Durable format for VOS pool
  */
+// pool 的df，cont 的df，object 和dkey & akey 的df 都有
 struct vos_pool_df {
 	/** Structs stored in LE or BE representation */
 	uint32_t				pd_magic;
@@ -134,6 +135,8 @@ struct vos_pool_df {
 	/** offset for the btree of the dedup table (placeholder) */
 	umem_off_t				pd_dedup;
 	/** Typed PMEMoid pointer for the container index table */
+	// pool df 拥有cont btree root
+	// 就像官网的那张图一样，pool 的叶子都是cont，cont 的叶子都是object，object 的叶子都是dkey，，，akey，，，value 展开
 	struct btr_root				pd_cont_root;
 	/** Free space tracking for NVMe device */
 	struct vea_space_df			pd_vea_df;
@@ -254,6 +257,8 @@ struct vos_cont_df {
 	uint32_t			cd_pad;
 	daos_size_t			cd_used;
 	daos_epoch_t			cd_hae;
+	// cont 的df 拥有object btree 的root，就类似object df 有dkey 的btree root
+	// object btree 根
 	struct btr_root			cd_obj_root;
 	/** reserved for placement algorithm upgrade */
 	uint64_t			cd_reserv_upgrade;
@@ -301,6 +306,7 @@ enum vos_krec_bf {
  * Persisted VOS (d/a)key record, it is referenced by btr_record::rec_off
  * of btree VOS_BTR_DKEY/VOS_BTR_AKEY.
  */
+// akey/akey 的pmem 地址
 struct vos_krec_df {
 	/** record bitmap, e.g. has evtree, see vos_krec_bf */
 	uint8_t				kr_bmap;
@@ -363,17 +369,21 @@ struct vos_irec_df {
  * VOS object, assume all objects are KV store...
  * NB: PMEM data structure.
  */
+// vos object数据结构，假设所有的objects 都是kv 存储，对应的是dkey/akey 的地址的数据结构: vos_krec_df
 struct vos_obj_df {
 	daos_unit_oid_t			vo_id;
 	/** The latest sync epoch */
+	// todo: 这个epoch 是干啥用的
 	daos_epoch_t			vo_sync;
 	/** Offset of known existing dkey */
 	umem_off_t			vo_known_dkey;
 	/** Attributes for future use */
 	daos_epoch_t			vo_max_write;
 	/** Incarnation log for the object */
+	// todo: 这个log 是md 文档中说的 ‘基于日志’ 的log 吗
 	struct ilog_df			vo_ilog;
 	/** VOS dkey btree root */
+	// 当前vos object 的dkey 节点的tree 的根  
 	struct btr_root			vo_tree;
 };
 

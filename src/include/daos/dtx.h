@@ -272,8 +272,10 @@ enum daos_tx_flags {
 /** Epoch context of a DTX */
 struct dtx_epoch {
 	/** epoch */
+	// todo: 这个又是啥
 	daos_epoch_t		oe_value;
 	/** first epoch chosen */
+	// todo: 这个是啥
 	daos_epoch_t		oe_first;
 	/** such as DTX_EPOCH_UNCERTAIN, etc. */
 	uint32_t		oe_flags;
@@ -291,6 +293,7 @@ struct dtx_epoch {
 static inline bool
 dtx_epoch_chosen(struct dtx_epoch *epoch)
 {
+	// value 不为 0 并且 不是max，返回true。第一次的时候设置为 max
 	return (epoch->oe_value != 0 && epoch->oe_value != DAOS_EPOCH_MAX);
 }
 

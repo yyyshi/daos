@@ -312,6 +312,7 @@ pool_child_add_one(void *varg)
 		goto out_free;
 	}
 
+	// 生成ovs-0，vos-1 等文件
 	rc = ds_mgmt_tgt_file(arg->pla_uuid, VOS_FILE, &info->dmi_tgt_id,
 			      &path);
 	if (rc != 0)
@@ -349,6 +350,7 @@ pool_child_add_one(void *varg)
 	if (rc != 0)
 		goto out_gc;
 
+	// 开始scrub
 	rc = ds_start_scrubbing_ult(child);
 	if (rc != 0)
 		goto out_flush;

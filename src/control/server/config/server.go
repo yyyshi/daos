@@ -55,6 +55,7 @@ type Server struct {
 	ControlLogJSON    bool                      `yaml:"control_log_json,omitempty"`
 	HelperLogFile     string                    `yaml:"helper_log_file,omitempty"`
 	FWHelperLogFile   string                    `yaml:"firmware_helper_log_file,omitempty"`
+	// todo: 容错域 conf
 	FaultPath         string                    `yaml:"fault_path,omitempty"`
 	TelemetryPort     int                       `yaml:"telemetry_port,omitempty"`
 	CoreDumpFilter    uint8                     `yaml:"core_dump_filter,omitempty"`
@@ -215,6 +216,7 @@ func (cfg *Server) WithTransportConfig(cfgTransport *security.TransportConfig) *
 }
 
 // WithFaultPath sets the fault path (identification string e.g. rack/shelf/node).
+// todo: 设置容错域
 func (cfg *Server) WithFaultPath(fp string) *Server {
 	cfg.FaultPath = fp
 	return cfg

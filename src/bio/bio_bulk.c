@@ -667,6 +667,7 @@ bulk_map_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 	// 更新dma buffer 的地址
 	bio_iov_set_raw_buf(biov, bulk_hdl2addr(hdl, pg_off));
 	// 添加region 到biod 的rsrvd_dma 里面的region 数组里
+	// todo: 具体到硬件注册memory region是在哪完成的
 	rc = iod_add_region(biod, hdl->bbh_chunk, hdl->bbh_pg_idx, hdl->bbh_used_bytes,
 			    off, end, bio_iov2media(biov));
 	if (rc) {

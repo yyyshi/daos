@@ -374,6 +374,8 @@ crt_hg_addr_free(struct crt_hg_context *hg_ctx, hg_addr_t addr)
 	return 0;
 }
 
+// 获取hg_ 地址lookup
+// todo: hg_class 是区分什么的，是函数 HG_Init 返回的
 int
 crt_hg_get_addr(hg_class_t *hg_class, char *addr_str, size_t *str_size)
 {
@@ -407,6 +409,7 @@ out:
 }
 
 /* some simple helper functions */
+// 封装的mercury 的HG_Register
 typedef hg_rpc_cb_t crt_hg_rpc_cb_t;
 static inline int
 crt_hg_reg(hg_class_t *hg_class, hg_id_t rpcid, crt_proc_cb_t in_proc_cb, crt_proc_cb_t out_proc_cb,
@@ -431,6 +434,9 @@ crt_hg_reg_rpcid(hg_class_t *hg_class)
 {
 	int rc;
 
+	// todo: 怎么注册的，注册了哪些函数，这三个函数作用和区别。
+	// 这三个描述了rpc 中用到的传入参数，传出参数，回调函数
+	// 主要目的是为了rpc 发送端和接收端能匹配到对应的处理函数
 	rc = crt_hg_reg(hg_class, CRT_HG_RPCID,
 			(crt_proc_cb_t)crt_proc_in_common,
 			(crt_proc_cb_t)crt_proc_out_common,
@@ -885,6 +891,7 @@ crt_hg_class_init(int provider, int idx, bool primary, hg_class_t **ret_hg_class
 	if (prov_data->cpg_max_unexp_size > 0)
 		init_info.na_init_info.max_unexpected_size = prov_data->cpg_max_unexp_size;
 
+	// hg 初始化
 	hg_class = HG_Init_opt(info_string, crt_is_service(), &init_info);
 	if (hg_class == NULL) {
 		D_ERROR("Could not initialize HG class.\n");
@@ -906,6 +913,7 @@ crt_hg_class_init(int provider, int idx, bool primary, hg_class_t **ret_hg_class
 			strncpy(prov_data->cpg_addr, addr_str, str_size);
 	}
 
+	// 内部调用mercury 的HG_Register 函数
 	rc = crt_hg_reg_rpcid(hg_class);
 	if (rc != 0) {
 		D_ERROR("crt_hg_reg_rpcid() for prov=%d idx=%d failed; rc=%d\n",
@@ -1193,6 +1201,7 @@ crt_hg_req_create(struct crt_hg_context *hg_ctx, struct crt_rpc_priv *rpc_priv)
 	D_ASSERT(rpc_priv != NULL);
 	D_ASSERT(rpc_priv->crp_opc_info != NULL);
 
+	// 请求类型是否需要回复。即单向或者双向
 	if (!rpc_priv->crp_opc_info->coi_no_reply) {
 		rpcid = CRT_HG_RPCID;
 		rpc_priv->crp_hdl_reuse = crt_hg_pool_get(hg_ctx);
@@ -1200,6 +1209,8 @@ crt_hg_req_create(struct crt_hg_context *hg_ctx, struct crt_rpc_priv *rpc_priv)
 		rpcid = CRT_HG_ONEWAY_RPCID;
 	}
 
+	// 创建HG 需要有效的 crp_hg_addr.
+	// 这个返回的新创建的hdl 已经和 crp_hg_addr 绑定
 	if (rpc_priv->crp_hdl_reuse == NULL) {
 		hg_ret = HG_Create(hg_ctx->chc_hgctx, rpc_priv->crp_hg_addr,
 				   rpcid, &rpc_priv->crp_hg_hdl);
@@ -1407,6 +1418,7 @@ crt_hg_req_send(struct crt_rpc_priv *rpc_priv)
 	 */
 	RPC_ADDREF(rpc_priv);
 
+	// 开始发送
 	hg_ret = HG_Forward(rpc_priv->crp_hg_hdl, crt_hg_req_send_cb, rpc_priv,
 			    &rpc_priv->crp_pub.cr_input);
 	if (hg_ret != HG_SUCCESS) {
@@ -1629,10 +1641,41 @@ crt_hg_bulk_create(struct crt_hg_context *hg_ctx, d_sg_list_t *sgl,
 			buf_ptrs = buf_ptrs_stack;
 		}
 
+		// 内存段就是保存sgls list 的那段内存
+		// 后面会根据buf_ptrs 创建bulk 并通过hg 层传到服务端，服务端从bulk 中获取内存信息完成rdma
+		// ---读场景，其实就是pull 操作，把远程操作系统内存里的数据拉回到本地操作系统的内存里
+		// ---写场景，其实就是push 操作，把本地操作系统内存里的数据推送到远程操作系统的内存里
+		// 本质上就是在本地和远端网卡上进行的内存数据传输
+		// rdma 场景除了pull，push对应的读写操作，还有send/receive 操作，跟tcp/ip的send/receive 是类似的
+		// 不同的是，rdma是基于消息的数据传输协议，所有的数据包的组装都是在rdma 硬件上完成的
+		// todo: tpc/ip send/receive，read/write 的区别
 		for (i = 0; i < sgl->sg_nr; i++)
 			buf_ptrs[i] = sgl->sg_iovs[i].iov_buf;
 	}
 
+	// 创建bulks
+	// todo: 里面的两个mem 相关的信息是由什么决定的
+	// Create an abstract bulk handle from specified memory segments.
+	// 创建一个bulk hdl 通过指定的内存段
+	/**
+	 * Create an abstract bulk handle from specified memory segments.
+	 * Memory allocated is then freed when HG_Bulk_free() is called.
+	 * \remark If NULL is passed to buf_ptrs, i.e.,
+	 * \verbatim HG_Bulk_create(count, NULL, buf_sizes, flags, &handle) \endverbatim
+	 * memory for the missing buf_ptrs array will be internally allocated.
+	 *
+	 * \param hg_class [IN]         pointer to HG class
+	 * \param count [IN]            number of segments
+	 * \param buf_ptrs [IN]         array of pointers
+	 * \param buf_sizes [IN]        array of sizes
+	 * \param flags [IN]            permission flag:
+	 *                                - HG_BULK_READWRITE
+	 *                                - HG_BULK_READ_ONLY
+	 *                                - HG_BULK_WRITE_ONLY
+	 * \param handle [OUT]          pointer to returned abstract bulk handle
+	 *
+	 * \return HG_SUCCESS or corresponding HG error code
+	 */
 	hg_ret = HG_Bulk_create(hg_ctx->chc_bulkcla, sgl->sg_nr, buf_ptrs,
 				buf_sizes, flags, &hg_bulk_hdl);
 	if (hg_ret == HG_SUCCESS) {
@@ -1838,10 +1881,24 @@ crt_hg_bulk_transfer(struct crt_bulk_desc *bulk_desc, crt_bulk_cb_t complete_cb,
 	bulk_cbinfo->bci_cb = complete_cb;
 	bulk_cbinfo->bci_arg = arg;
 
+	// rdma 中推还是拉
+	/*
+	//  Map op to NA op
+	switch (op) {
+		case HG_BULK_PUSH:
+			na_bulk_op = hg_bulk_na_put;
+			break;
+		case HG_BULK_PULL:
+			na_bulk_op = hg_bulk_na_get;
+	*/
+	// 如果是update，是 CRT_BULK_GET，那么hg 层就是 HG_BULK_PULL
 	hg_bulk_op = (bulk_desc->bd_bulk_op == CRT_BULK_PUT) ?
 		     HG_BULK_PUSH : HG_BULK_PULL;
 	rpc_priv = container_of(bulk_desc->bd_rpc, struct crt_rpc_priv,
 				crp_pub);
+	// bulk 传输结束后，回调函数会在 HG_Trigger 函数中执行
+	// 一个是根据bind 后的bulk hdl 来传输，一个是根据非bind 的ctx id 来传输
+	// 第5，7两个参数中存储了本地和远端内存的描述符，描述符里有内存的hdl，最后rdma 是通过这个hdl 来传输的
 	if (bind)
 		hg_ret = HG_Bulk_bind_transfer(hg_ctx->chc_bulkctx,
 				crt_hg_bulk_transfer_cb, bulk_cbinfo,

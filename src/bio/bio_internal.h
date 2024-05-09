@@ -38,10 +38,12 @@ struct bio_bulk_args {
 };
 
 /* Cached bulk handle for avoiding expensive MR */
+// bio 大块数据hdl
 struct bio_bulk_hdl {
 	/* Link to bbg_idle_bulks */
 	d_list_t		 bbh_link;
 	/* DMA chunk the hdl localted on */
+	// 大块数据的chunk
 	struct bio_dma_chunk	*bbh_chunk;
 	/* Page offset (4k pages) within the chunk */
 	unsigned int		 bbh_pg_idx;
@@ -120,6 +122,7 @@ struct bio_dma_stats {
  * Per-xstream DMA buffer, used as SPDK dma I/O buffer or as temporary
  * RDMA buffer for ZC fetch/update over NVMe devices.
  */
+// todo: 每个xs 的dma buffer，作为spdk 的dma io buffer 或者nvme 的rdma 操作
 struct bio_dma_buffer {
 	d_list_t		 bdb_idle_list;
 	d_list_t		 bdb_used_list;
@@ -390,6 +393,7 @@ struct bio_xs_context {
 };
 
 /* Per VOS instance I/O context */
+// 对应不同的存储设备，存储元数据，存储数据或者存储wal 日志的设备
 struct bio_io_context {
 	d_list_t		 bic_link; /* link to bxb_io_ctxts */
 	// 当前bio ctx 的blob 和blobstore
@@ -453,9 +457,11 @@ struct bio_rsrvd_dma {
 };
 
 /* I/O descriptor */
+// todo: 这个是在什么时候创建的，跟xs 或者io 请求的对应关系是什么样子的
 struct bio_desc {
+	// 对应scm 设备
 	struct umem_instance	*bd_umem;
-	// bio ctx，里面有xs 的ctx
+	// 对应nvme 设备。bio ctx，里面有xs 的ctx
 	struct bio_io_context	*bd_ctxt;
 	/* DMA buffers reserved by this io descriptor */
 	// 当前biod 拥有的dma buffers，又会按照region 来拆分
@@ -488,6 +494,7 @@ struct bio_desc {
 	void			 (*bd_completion)(void *cb_arg, int err);
 	void			*bd_comp_arg;
 	/* SG lists involved in this io descriptor */
+	// 存储实际的数据
 	unsigned int		 bd_sgl_cnt;
 	struct bio_sglist	 bd_sgls[0];
 };
@@ -504,6 +511,8 @@ is_blob_valid(struct bio_io_context *ctxt)
 	return ctxt->bic_blob != NULL && !ctxt->bic_closing;
 }
 
+// 一个page 可以划分为多个io units。找到当前pg idx 指定的page 对应的io unit 的起始位置
+// todo: 直接从起始位置写吗，如果当前page 有两个io unit，第一个被写了，那第二次不是应该找到第二个io unit 位置再开始写吗？
 static inline uint64_t
 page2io_unit(struct bio_io_context *ctxt, uint64_t page, uint32_t pg_sz)
 {
@@ -598,6 +607,10 @@ struct bio_dma_buffer *dma_buffer_create(unsigned int init_cnt, int tgt_id);
 void bio_memcpy(struct bio_desc *biod, uint16_t media, void *media_addr,
 		void *addr, ssize_t n);
 int dma_map_one(struct bio_desc *biod, struct bio_iov *biov, void *arg);
+
+// todo: rdma region 是ib 协议的概念
+// cpu 通过mmu 和页表完成va 和pa 的转换（虚拟地址和物理地址）
+// 注册memory region的时候，硬件网卡会在内存中存储va 到pa 的映射关系，供后续查询
 int iod_add_region(struct bio_desc *biod, struct bio_dma_chunk *chk,
 		   unsigned int chk_pg_idx, unsigned int chk_off, uint64_t off,
 		   uint64_t end, uint8_t media);

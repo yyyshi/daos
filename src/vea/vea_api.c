@@ -429,7 +429,7 @@ inline_aging_flush(struct vea_space_info *vsi, bool force, uint32_t nr_flush, ui
  *    if it fails, reserve from the largest free extent. (lookup vfc_size_btr)
  * 4. Fail reserve with ENOMEM if all above attempts fail.
  */
-// 预留块设备上的一个extent（预留规则）
+// 预留块设备上的一个extent（预留规则---extent 就是一些连续的block？跟blob 是什么关系？）
 // 1. 从带hint 的offset 的extent 上保留
 // 2. 如果free extent 很大需要分割，一分为二然后选择一个
 // 3. 尝试从一些小的free extent 预留，如果失败了，从最大的free extent 预留

@@ -195,11 +195,17 @@ enum daos_tgt_flags {
 };
 
 /** to identify each obj shard's target */
+// 描述shard 的target 相关的信息
 struct daos_shard_tgt {
+	// 所在的rank
 	uint32_t		st_rank;	/* rank of the shard */
+	// shard idx
 	uint32_t		st_shard;	/* shard index */
+	// shard id
 	uint32_t		st_shard_id;	/* shard id */
+	// target id
 	uint32_t		st_tgt_id;	/* target id */
+	// target idx
 	uint16_t		st_tgt_idx;	/* target xstream index */
 	/* Target idx for EC obj, only used for client, consider OBJ_EC_MAX_M, 8-bits is enough. */
 	uint8_t			st_ec_tgt;

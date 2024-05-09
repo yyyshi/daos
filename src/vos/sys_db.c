@@ -34,17 +34,44 @@
 #define SYS_DB_EPC		1
 
 /** private information of VOS system DB (pool & container) */
+/*
+root@ubuntu:/mnt/daos0# ls -R
+.:
+47929e77-60e2-4467-8547-16b3cbfa35e3  control_raft  daos_nvme.conf  daos_sys  NEWBORNS  superblock  ZOMBIES
+
+./47929e77-60e2-4467-8547-16b3cbfa35e3:
+rdb-pool  vos-0  vos-1  vos-2  vos-3
+
+./control_raft:
+daos_system.db  snapshots
+
+./control_raft/snapshots:
+2-40-1711442292850
+
+./control_raft/snapshots/2-40-1711442292850:
+meta.json  state.bin
+
+./daos_sys:
+sys_db
+
+./NEWBORNS:
+
+./ZOMBIES:
+*/
 struct vos_sys_db {
 	/** exported part of VOS system DB */
+	// 简易的本地kv 存储
 	struct sys_db		 db_pub;
 	char			*db_file;
 	char			*db_path;
+	// todo: 和sys_db 是什么关系，怎么关联的
 	struct umem_instance	*db_umm;
 	/* DB should be destroyed on exit */
 	bool			 db_destroy_db;
 	ABT_mutex		 db_lock;
 	uuid_t			 db_pool;
 	uuid_t			 db_cont;
+	// 当前db 所描述的pool，container 和object hdl
 	daos_handle_t		 db_poh;
 	daos_handle_t		 db_coh;
 	daos_unit_oid_t		 db_obj;
@@ -214,13 +241,16 @@ db_io_init(struct sys_db_io *io, char *table, d_iov_t *key, d_iov_t *val)
 static int
 db_fetch(struct sys_db *db, char *table, d_iov_t *key, d_iov_t *val)
 {
+	// 根据sys db 获取vos db
 	struct vos_sys_db *vdb = db2vos(db);
+	// 这个可以根据用户端传入的参数来构建
 	struct sys_db_io   io;
 	int		   rc;
 
 	D_ASSERT(!daos_handle_is_inval(vdb->db_coh));
 
 	db_io_init(&io, table, key, val);
+	// 根据vos db 获取hdl
 	rc = vos_obj_fetch(vdb->db_coh, vdb->db_obj, SYS_DB_EPC, 0,
 			   &io.io_key, 1, &io.io_iod, &io.io_sgl);
 	/* NB: VOS returns zero for empty key */
@@ -347,6 +377,31 @@ vos_db_init(const char *db_path)
 	return vos_db_init_ex(db_path, NULL, false, false);
 }
 
+// vos相关的初始化
+/*
+root@ubuntu:/mnt/daos0# ls -R
+.:
+47929e77-60e2-4467-8547-16b3cbfa35e3  control_raft  daos_nvme.conf  daos_sys  NEWBORNS  superblock  ZOMBIES
+
+./47929e77-60e2-4467-8547-16b3cbfa35e3:
+rdb-pool  vos-0  vos-1  vos-2  vos-3
+
+./control_raft:
+daos_system.db  snapshots
+
+./control_raft/snapshots:
+2-40-1711442292850
+
+./control_raft/snapshots/2-40-1711442292850:
+meta.json  state.bin
+
+./daos_sys:
+sys_db
+
+./NEWBORNS:
+
+./ZOMBIES:
+*/
 int
 vos_db_init_ex(const char *db_path, const char *db_name, bool force_create, bool destroy_db_on_fini)
 {
@@ -384,6 +439,8 @@ vos_db_init_ex(const char *db_path, const char *db_name, bool force_create, bool
 	vos_db.db_coh = DAOS_HDL_INVAL;
 
 	strncpy(vos_db.db_pub.sd_name, db_name, SYS_DB_NAME_SZ - 1);
+	// vos kv 存储相关接口，读写也是走dma_rw 接口
+	// todo: 元数据是怎么样的布局，底层数据结构是什么
 	vos_db.db_pub.sd_fetch	  = db_fetch;
 	vos_db.db_pub.sd_upsert	  = db_upsert;
 	vos_db.db_pub.sd_delete	  = db_delete;
@@ -402,6 +459,7 @@ vos_db_init_ex(const char *db_path, const char *db_name, bool force_create, bool
 	if (force_create)
 		db_unlink(&vos_db.db_pub);
 
+	// /mnt/daos0/daos_sys
 	for (create = 0; create <= 1; create++) {
 		rc = db_open_create(&vos_db.db_pub, !!create);
 		if (rc == 0) {

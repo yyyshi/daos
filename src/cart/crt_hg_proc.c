@@ -554,6 +554,7 @@ out:
 }
 
 /* NB: caller should pass in &rpc_pub->cr_input as the \param data */
+// 调用这要传入 &rpc_pub->cr_input 类型参数作为 data
 int
 crt_proc_in_common(crt_proc_t proc, crt_rpc_input_t *data)
 {
@@ -619,6 +620,9 @@ crt_proc_in_common(crt_proc_t proc, crt_rpc_input_t *data)
 		 *
 		 * XXXX: Keep assertion here to avoid silent logic change.
 		 */
+		// todo: crt_proc_in_common 的调用属于mercury 内部的框架
+		// 1. HG_Forward 里 crt_proc_in_common 会被调用
+		// 2. 当收到一个rpc 请求，如果用户调用 HG_Get_input，crt_proc_in_common 也会被调用
 		D_ASSERT(proc_op != CRT_PROC_DECODE);
 	}
 

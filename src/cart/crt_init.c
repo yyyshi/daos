@@ -554,6 +554,7 @@ prov_settings_apply(bool primary, crt_provider_t prov, crt_init_options_t *opt)
 		crt_provider_set_sep(prov, primary, false);
 	}
 
+	// todo: 配置 ofi_verbs + rxm
 	if (prov == CRT_PROV_OFI_VERBS_RXM ||
 	    prov == CRT_PROV_OFI_TCP_RXM) {
 		/* Use shared receive queues to avoid large mem consumption */
@@ -819,6 +820,7 @@ crt_init_opt(crt_group_id_t grpid, uint32_t flags, crt_init_options_t *opt)
 			}
 		}
 
+		// todo: crt init
 		rc = crt_hg_init();
 		if (rc != 0) {
 			D_ERROR("crt_hg_init() failed, "DF_RC"\n", DP_RC(rc));

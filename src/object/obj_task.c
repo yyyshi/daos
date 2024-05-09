@@ -219,6 +219,7 @@ dc_obj_fetch_task_create(daos_handle_t oh, daos_handle_t th, uint64_t api_flags,
 
 	args = dc_task_get_args(*task);
 	args->oh		= oh;
+	// 透传用户传递的tx hdl
 	args->th		= th;
 	args->flags		= api_flags;
 	args->dkey		= dkey;
@@ -254,6 +255,7 @@ dc_obj_update_task_create(daos_handle_t oh, daos_handle_t th, uint64_t flags,
 	// 把客户端的参数传到args 里，触发 task
 	args = dc_task_get_args(*task);
 	args->oh	= oh;
+	// 使用用户传递的tx hdl 透传
 	args->th	= th;
 	args->flags	= flags;
 	args->dkey	= dkey;

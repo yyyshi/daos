@@ -498,6 +498,7 @@ crt_rpc_priv_set_ep(struct crt_rpc_priv *rpc_priv, crt_endpoint_t *tgt_ep)
 		rpc_priv->crp_pub.cr_ep.ep_grp = tgt_ep->ep_grp;
 	}
 
+	// 将group rank target 信息填充到rpc priv 中的pub 中
 	rpc_priv->crp_pub.cr_ep.ep_tag = tgt_ep->ep_tag;
 	rpc_priv->crp_pub.cr_ep.ep_rank = tgt_ep->ep_rank;
 	rpc_priv->crp_have_ep = 1;
@@ -531,6 +532,7 @@ crt_req_create_internal(crt_context_t crt_ctx, crt_endpoint_t *tgt_ep,
 
 	D_ASSERT(crt_ctx != CRT_CONTEXT_NULL && req != NULL);
 
+	// rpc priv 是在这里创建的
 	rc = crt_rpc_priv_alloc(opc, &rpc_priv, forward);
 	if (rc != 0) {
 		D_ERROR("crt_rpc_priv_alloc(%#x) failed, " DF_RC "\n",
@@ -546,6 +548,7 @@ crt_req_create_internal(crt_context_t crt_ctx, crt_endpoint_t *tgt_ep,
 		if (rc != 0)
 			D_GOTO(out, rc);
 
+		// 设置 group rank target 信息到rpc priv
 		crt_rpc_priv_set_ep(rpc_priv, tgt_ep);
 
 		rpc_priv->crp_grp_priv = grp_priv;
@@ -553,6 +556,7 @@ crt_req_create_internal(crt_context_t crt_ctx, crt_endpoint_t *tgt_ep,
 
 	crt_rpc_priv_init(rpc_priv, crt_ctx, false /* srv_flag */);
 
+	// rpc priv 的pub 信息和req 是一样的
 	*req = &rpc_priv->crp_pub;
 out:
 	return rc;
@@ -563,6 +567,7 @@ crt_req_create(crt_context_t crt_ctx, crt_endpoint_t *tgt_ep, crt_opcode_t opc,
 	       crt_rpc_t **req)
 {
 	int rc = 0;
+	// todo: grp priv 和rpc priv 的关系是啥
 	struct crt_grp_priv *grp_priv = NULL;
 	struct crt_rpc_priv	*rpc_priv;
 
@@ -580,6 +585,8 @@ crt_req_create(crt_context_t crt_ctx, crt_endpoint_t *tgt_ep, crt_opcode_t opc,
 			D_GOTO(out, rc);
 	}
 
+	// 通过group rank target 信息构建rpc priv。
+	// 将req 和rpc priv 的pub 关联（req == rpc priv的 pub）
 	rc = crt_req_create_internal(crt_ctx, tgt_ep, opc, false /* forward */,
 				     req);
 	if (rc != 0) {
@@ -966,6 +973,7 @@ crt_req_uri_lookup(struct crt_rpc_priv *rpc_priv)
 	grp = tgt_ep->ep_grp;
 
 	/* Client handling */
+	// 客户端才进去执行
 	if (!crt_is_service()) {
 		d_rank_t lookup_rank;
 
@@ -998,6 +1006,7 @@ crt_req_uri_lookup(struct crt_rpc_priv *rpc_priv)
 	}
 
 	/* Send request to tag=0 to get uri for ep_tag */
+	// 发起一个uri 查询
 	rc = crt_issue_uri_lookup(ctx, grp, tgt_ep->ep_rank, 0,
 				  tgt_ep->ep_rank, tgt_ep->ep_tag, rpc_priv);
 out:
@@ -1059,6 +1068,7 @@ exit:
 }
 
 /* Fill rpc_priv->crp_hg_addr field based on local cache contents */
+// 根据本地缓存填充 rpc_priv->crp_hg_addr 参数
 static void
 crt_lc_hg_addr_fill(struct crt_rpc_priv *rpc_priv)
 {
@@ -1222,6 +1232,17 @@ crt_req_hg_addr_lookup(struct crt_rpc_priv *rpc_priv)
 
 	crt_ctx = rpc_priv->crp_pub.cr_ctx;
 
+	// todo: 这个函数是怎么查到的地址，这个地址是描述什么的？是app 的虚拟地址和对端的物理地址的关系吗
+	// 这里查询不到的话就会创建一个地址并返回
+	// todo: 依赖什么创建地址呢，总要有一个唯一的标识符吧，根据 hg class 可以获取到地址信息吗
+	// HG_Create(hg_context_t *context, hg_addr_t addr, hg_id_t id, hg_handle_t *handle);
+	// hg class 创建时候其实是需要传入 addr 信息的，是这个时候保存起来，供后面查询的吗？
+	// todo: 那这个地址最初是从哪里来的？
+	// todo: 这个地址和group，rank，target描述的信息有什么区别
+	// todo: 这个地址和每次读写io 请求需要的内存region 是什么关系
+	// --> HG_Core_addr_lookup2 --> hg_core_addr_lookup --> NA_Addr_lookup --> na_ofi_addr_lookup  --> na_ofi_addr_key_lookup
+	// hg_address 都是通过这个路径创建出来的，然后缓存在本地供查询
+	// todo: 这个地址和某次io 网卡需要直接读取的内存有什么关系
 	hg_ret = HG_Addr_lookup2(crt_ctx->cc_hg_ctx.chc_hgcla,
 				 rpc_priv->crp_tgt_uri, &hg_addr);
 	if (hg_ret != HG_SUCCESS) {
@@ -1230,6 +1251,8 @@ crt_req_hg_addr_lookup(struct crt_rpc_priv *rpc_priv)
 		D_GOTO(out, rc = crt_hgret_2_der(hg_ret));
 	}
 
+	// 本地是有一个地址的缓存表的
+	// 使用rpc priv 中pub 里填充的group rank target 信息
 	rc = crt_grp_lc_addr_insert(rpc_priv->crp_grp_priv, crt_ctx,
 				    rpc_priv->crp_pub.cr_ep.ep_rank,
 				    rpc_priv->crp_pub.cr_ep.ep_tag,
@@ -1257,6 +1280,8 @@ crt_req_send_immediately(struct crt_rpc_priv *rpc_priv)
 
 	req = &rpc_priv->crp_pub;
 	ctx = req->cr_ctx;
+	// todo: 这里会调用 HG_Create
+	// 创建req 需要有效的 crp_hg_addr
 	rc = crt_hg_req_create(&ctx->cc_hg_ctx, rpc_priv);
 	if (rc != 0) {
 		D_ERROR("crt_hg_req_create failed, rc: %d, opc: %#x.\n",
@@ -1266,6 +1291,7 @@ crt_req_send_immediately(struct crt_rpc_priv *rpc_priv)
 	D_ASSERT(rpc_priv->crp_hg_hdl != NULL);
 
 	/* Errors reported in the callback */
+	// 报错会在回调函数里体现
 	crt_hg_req_send(rpc_priv);
 out:
 	return rc;
@@ -1279,12 +1305,14 @@ crt_req_send_internal(struct crt_rpc_priv *rpc_priv)
 	int		rc = 0;
 
 	req = &rpc_priv->crp_pub;
+	// todo: 这里是个什么流程，uri 是保存的什么
 	switch (rpc_priv->crp_state) {
 	case RPC_STATE_QUEUED:
 		rpc_priv->crp_state = RPC_STATE_INITED;
 	case RPC_STATE_INITED:
 		/* lookup local cache  */
 		rpc_priv->crp_hg_addr = NULL;
+		// 这个就是用来保存rdma 地址的表么
 		rc = crt_req_ep_lc_lookup(rpc_priv, &uri_exists);
 		if (rc != 0) {
 			RPC_ERROR(rpc_priv,
@@ -1293,19 +1321,25 @@ crt_req_send_internal(struct crt_rpc_priv *rpc_priv)
 			D_GOTO(out, rc);
 		}
 
+		// todo: 如果地址不为空，直接发送crt rpc
 		if (rpc_priv->crp_hg_addr != NULL) {
 			/* send the RPC if the local cache has the HG_Addr */
 			rc = crt_req_send_immediately(rpc_priv);
 		} else if (uri_exists == true) {
+			// todo: 内部调用 HG_Addr_lookup2 查找address
+			// 这个查询是去哪里查询，这里只能查询到base uri
 			/* send addr lookup req */
+			// 这个函数就是查询上边那个  rpc_priv->crp_hg_addr
 			rc = crt_req_hg_addr_lookup(rpc_priv);
 			if (rc == 0)
+				// 如果查到了，还是直接发送crt rpc，又进入到了这里
 				rc = crt_req_send_immediately(rpc_priv);
 			else
 				D_ERROR("crt_req_hg_addr_lookup() failed, "
 					"rc %d, opc: %#x.\n", rc, req->cr_opc);
 		} else {
 			/* base_addr == NULL, send uri lookup req */
+			// todo: 如果地址为空，发送查询uri 的请求
 			rpc_priv->crp_state = RPC_STATE_URI_LOOKUP;
 			rc = crt_req_uri_lookup(rpc_priv);
 			if (rc != 0)
@@ -1348,9 +1382,15 @@ out:
 	return rc;
 }
 
+// todo: 里面有hg_forward
+// todo: 大数据参数是指多大，有规格吗
+// todo: 在传输数据很小的场景时的短消息机制和大块数据的传输机制分别是什么样子的
+// 单项传输和双向传输
+// daos 在配置文件中绑定cpu，绑定pmem，绑定nvme。那么做rdma 的内存是怎么管理的
 int
 crt_req_send(crt_rpc_t *req, crt_cb_t complete_cb, void *arg)
 {
+	// 先创建的rpc priv
 	struct crt_rpc_priv	*rpc_priv = NULL;
 	bool			 locked = false;
 	int			 rc = 0;
@@ -1373,6 +1413,7 @@ crt_req_send(crt_rpc_t *req, crt_cb_t complete_cb, void *arg)
 
 	D_ASSERT(req->cr_ctx != NULL);
 
+	// req 其实就是rpc priv 里的pub，这里是根据req 拿到rpc priv
 	rpc_priv = container_of(req, struct crt_rpc_priv, crp_pub);
 	/* Take a reference to ensure rpc_priv is valid for duration of this
 	 * function.  Referenced dropped at end of this function.
@@ -1380,6 +1421,7 @@ crt_req_send(crt_rpc_t *req, crt_cb_t complete_cb, void *arg)
 	RPC_ADDREF(rpc_priv);
 
 	rpc_priv->crp_complete_cb = complete_cb;
+	// task 在这里
 	rpc_priv->crp_arg = arg;
 
 	if (rpc_priv->crp_coll) {
@@ -1403,8 +1445,10 @@ crt_req_send(crt_rpc_t *req, crt_cb_t complete_cb, void *arg)
 	locked = true;
 
 	rc = crt_context_req_track(rpc_priv);
+	// 如果不需要等待，直接执行这个rpc
 	if (rc == CRT_REQ_TRACK_IN_INFLIGHQ) {
 		/* tracked in crt_ep_inflight::epi_req_q */
+		// 到这里已经转换成了rpc priv 参数类型
 		rc = crt_req_send_internal(rpc_priv);
 		if (rc != 0) {
 			RPC_ERROR(rpc_priv,

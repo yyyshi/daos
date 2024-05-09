@@ -252,6 +252,7 @@ crt_context_provider_create(crt_context_t *crt_ctx, crt_provider_t provider, boo
 	ctx->cc_primary = primary;
 	ctx->cc_idx = ctx_idx;
 
+	// todo: 这里会调用hg_ 的注册函数。这里会创建hg_ctx
 	rc = crt_hg_ctx_init(&ctx->cc_hg_ctx, provider, ctx_idx, primary);
 
 	if (rc != 0) {
@@ -1228,6 +1229,7 @@ crt_context_req_track(struct crt_rpc_priv *rpc_priv)
 	rpc_priv->crp_epi = epi;
 	RPC_ADDREF(rpc_priv);
 
+	// todo: 类似限流
 	if (crt_gdata.cg_credit_ep_ctx != 0 &&
 	    (epi->epi_req_num - epi->epi_reply_num) >= crt_gdata.cg_credit_ep_ctx) {
 		if (rpc_priv->crp_opc_info->coi_queue_front) {

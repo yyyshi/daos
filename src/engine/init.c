@@ -703,6 +703,7 @@ server_init(int argc, char *argv[])
 
 	/* initialize the network layer */
 	ctx_nr = dss_ctx_nr_get();
+	// crt 的初始化，client 和server 都要调用
 	rc = crt_init_opt(daos_sysname,
 			  CRT_FLAG_BIT_SERVER,
 			  daos_crt_init_opt_get(true, ctx_nr));
@@ -788,7 +789,8 @@ server_init(int argc, char *argv[])
 
 	server_init_state_wait(DSS_INIT_STATE_SET_UP);
 
-	rc = crt_register_event_cb(dss_crt_event_cb, NULL);
+	// crt 注册
+	rc = crt_register_event_cb(s, NULL);
 	if (rc)
 		D_GOTO(exit_init_state, rc);
 
@@ -1070,6 +1072,7 @@ parse(int argc, char **argv)
 	return 0;
 }
 
+// engine 的main
 int
 main(int argc, char **argv)
 {
@@ -1102,6 +1105,7 @@ main(int argc, char **argv)
 	d_signal_register();
 
 	/** server initialization */
+	// 里面有hg_init
 	rc = server_init(argc, argv);
 	if (rc)
 		exit(EXIT_FAILURE);
