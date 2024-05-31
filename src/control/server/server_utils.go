@@ -64,6 +64,7 @@ type ifLookupFn func(string) (netInterface, error)
 
 // resolveFirstAddr is a helper function to resolve a hostname to a TCP address.
 // If the hostname resolves to multiple addresses, the first one is returned.
+// 用来解析hostnmae 为tcp 地址，如果解析出了多个地址，返回第一个
 func resolveFirstAddr(addr string, lookup ipLookupFn) (*net.TCPAddr, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -107,13 +108,19 @@ func getBdevCfgsFromSrvCfg(cfg *config.Server) storage.TierConfigs {
 	return bdevCfgs
 }
 
+// 获取conf 配置的access list，在engine 里叫做 replica
+// todo: 为啥名字不统一呢
 func cfgGetReplicas(cfg *config.Server, lookup ipLookupFn) ([]*net.TCPAddr, error) {
 	var dbReplicas []*net.TCPAddr
+	// 遍历conf 文件里配置的accesslist（accesslist 是类似zk 的高可用列表，用来提供raft 相关的服务功能）
+	// daos_agent.yml 里面的accesslist 和daos_server.yml 里的应该保持一致才行
 	for _, ap := range cfg.AccessPoints {
+		// 地址解析
 		apAddr, err := resolveFirstAddr(ap, lookup)
 		if err != nil {
 			return nil, config.FaultConfigBadAccessPoints
 		}
+		// 解析完了append
 		dbReplicas = append(dbReplicas, apAddr)
 	}
 
@@ -121,6 +128,7 @@ func cfgGetReplicas(cfg *config.Server, lookup ipLookupFn) ([]*net.TCPAddr, erro
 }
 
 func cfgGetRaftDir(cfg *config.Server) string {
+	// 这个地址是可配的，通过 control_metadata 选项设置，不设置的话就是默认的control_raft
 	raftDirName := "control_raft"
 	if cfg.Metadata.Path != "" {
 		return filepath.Join(cfg.Metadata.Directory(), raftDirName)
@@ -134,6 +142,8 @@ func cfgGetRaftDir(cfg *config.Server) string {
 		return ""
 	}
 
+	// 在scm 的挂载点构建control_raft 目录
+	// /挂载点/control_raft/，比如 /mnt/s0/control_raft 为engine 0 的，engien 1有他自己的
 	return filepath.Join(cfg.Engines[0].Storage.Tiers.ScmConfigs()[0].Scm.MountPoint, raftDirName)
 }
 
@@ -263,6 +273,7 @@ func prepBdevStorage(srv *server, iommuEnabled bool) error {
 		return nil
 	}
 
+	// 配置文件中的bdev
 	bdevCfgs := getBdevCfgsFromSrvCfg(srv.cfg)
 
 	// Perform these checks only if non-emulated NVMe is used and user is unprivileged.
@@ -279,6 +290,7 @@ func prepBdevStorage(srv *server, iommuEnabled bool) error {
 	// specified in engine config BdevList parameters as the PCIAllowList and the server
 	// config BdevExclude parameter as the PCIBlockList.
 
+	// 构建bdev prepare req，准备发送给控制器
 	prepReq := storage.BdevPrepareRequest{
 		TargetUser:   srv.runningUser.Username,
 		PCIAllowList: strings.Join(bdevCfgs.NVMeBdevs().Devices(), storage.BdevPciAddrSep),
@@ -348,6 +360,7 @@ func prepBdevStorage(srv *server, iommuEnabled bool) error {
 	//
 	// TODO: should be passing root context into prepare request to
 	//       facilitate cancellation.
+	// 发送prepare req 给nvme 控制器
 	if _, err := srv.ctlSvc.NvmePrepare(prepReq); err != nil {
 		srv.log.Errorf("automatic NVMe prepare failed: %s", err)
 	}
@@ -619,18 +632,22 @@ func registerEngineEventCallbacks(srv *server, engine *EngineInstance, allStarte
 	})
 }
 
+// sysdb 为 raft 包下的Database 结构体类型
 func configureFirstEngine(ctx context.Context, engine *EngineInstance, sysdb *raft.Database, join systemJoinFn) {
 	if !sysdb.IsReplica() {
 		return
 	}
 
 	// Start the system db after instance 0's SCM is ready.
+	// todo: 什么时候scm 算ready 了
 	var onceStorageReady sync.Once
 	engine.OnStorageReady(func(_ context.Context) (err error) {
 		onceStorageReady.Do(func() {
 			// NB: We use the outer context rather than
 			// the closure context in order to avoid
 			// tying the db to the instance.
+			// sysdb 为raft 包下的Database struct 类型结构
+			// sysdb 已经在 configureFirstEngine 函数中创建好，在此处开始启动sysdb
 			err = errors.Wrap(sysdb.Start(ctx),
 				"failed to start system db",
 			)

@@ -90,11 +90,13 @@ func createAioFile(log logging.Logger, path string, req *storage.BdevFormatReque
 	return
 }
 
+// 生成/mnt/daos/s0/daos_nvme.conf 配置文件
 func writeConfigFile(log logging.Logger, buf *bytes.Buffer, req *storage.BdevWriteConfigRequest) error {
 	if buf.Len() == 0 {
 		return errors.New("generated file is unexpectedly empty")
 	}
 
+	// 新建daos_nvme.conf
 	f, err := os.Create(req.ConfigOutputPath)
 	if err != nil {
 		return errors.Wrap(err, "create")
@@ -106,10 +108,12 @@ func writeConfigFile(log logging.Logger, buf *bytes.Buffer, req *storage.BdevWri
 		}
 	}()
 
+	// nvme 信息写入，信息来自buf
 	if _, err := buf.WriteTo(f); err != nil {
 		return errors.Wrap(err, "write")
 	}
 
+	// 修改owener
 	return errors.Wrapf(os.Chown(req.ConfigOutputPath, req.OwnerUID, req.OwnerGID),
 		"failed to set ownership of %q to %d.%d", req.ConfigOutputPath,
 		req.OwnerUID, req.OwnerGID)
@@ -130,6 +134,7 @@ func writeJsonConfig(log logging.Logger, req *storage.BdevWriteConfigRequest) er
 		return errors.New("no output config directory set in request")
 	}
 	hasBdevs := false
+	// 处理写conf 的req
 	for _, tierProp := range req.TierProps {
 		if tierProp.Class != storage.ClassNvme || tierProp.DeviceList.Len() > 0 {
 			hasBdevs = true
@@ -141,11 +146,14 @@ func writeJsonConfig(log logging.Logger, req *storage.BdevWriteConfigRequest) er
 		return nil
 	}
 
+	// 根据req 新建spdk conf
+	// todo: 这个req 是在哪构建，从哪里发过来的
 	nsc, err := newSpdkConfig(log, req)
 	if err != nil {
 		return err
 	}
 
+	// 描述nvme 设备的json 信息
 	buf, err := json.MarshalIndent(nsc, "", "  ")
 	if err != nil {
 		return err

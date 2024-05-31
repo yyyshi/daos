@@ -26,6 +26,7 @@ type (
 
 	// PoolDatabase contains a set of maps for looking up DAOS Pool
 	// Service instances and methods for managing the pool membership.
+	// 包含pool 相关的map
 	PoolDatabase struct {
 		Ranks  PoolRankMap
 		Uuids  PoolUuidMap

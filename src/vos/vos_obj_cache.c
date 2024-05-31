@@ -302,6 +302,7 @@ cache_object(struct daos_lru_cache *occ, struct vos_object **objp)
 // 内部调用的是 vos_oi_find 和 vos_oi_find_alloc
 // 在 vos_fetch_begin 和 vos_update_end 里面会调用
 // 有两级：内存的lru 和pmem 的oi table tree
+// obj_p 里面有df，是 obj 在pmem 中的地址
 int
 vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	     daos_unit_oid_t oid, daos_epoch_range_t *epr, daos_epoch_t bound,
@@ -309,6 +310,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	     struct vos_ts_set *ts_set)
 {
 	struct vos_object	*obj;
+	// 通过link 可以获取到对应的vos_object
 	struct daos_llink	*lret;
 	struct obj_lru_key	 lkey;
 	int			 rc = 0;
@@ -344,6 +346,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	/* Create the key for obj cache */
 	// 构建用于去cache 里查询的key
 	lkey.olk_cont = cont;
+	// todo: oid 在cache 里可能没有，但是入参肯定有吧，入参是怎么构建的呢？
 	lkey.olk_oid = oid;
 
 	// 先从lru cache 里查询，如果没查到就insert 进去
@@ -359,7 +362,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		D_GOTO(failed_2, rc);
 	} else {
 		/** Object is in cache */
-		// lru 中查到了
+		// lru 中查到了或者是没查到，但是新创建了一个并成功 insert 进去了
 		// cache hit里面有object 在pmem 上的地址，通过 goto check_object 返回
 		obj = container_of(lret, struct vos_object, obj_llink);
 	}
@@ -380,7 +383,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 			goto out; /* Ok to delete */
 	}
 
-	// 如果获取到了object 在pmem 中的地址，直接go check_object，否则可能还需要去oi table 中查询df
+	// 1. cache hit 时将获取到了object 在pmem 中的地址，直接go check_object
 	if (obj->obj_df) {
 		D_DEBUG(DB_TRACE, "looking up object ilog");
 		if (create || intent == DAOS_INTENT_PUNCH)
@@ -393,18 +396,20 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		goto check_object;
 	}
 
+	// 2. cache miss（实际上会将miss 的insert 进去）对新添加到lru 中的obj 的处理方式
+	// 去oi table 中查询，oi table 数据结构是b+ 树
 	 /* newly cached object */
 	D_DEBUG(DB_TRACE, "%s Got empty obj "DF_UOID" epr="DF_X64"-"DF_X64"\n",
 		create ? "find/create" : "find", DP_UOID(oid), epr->epr_lo,
 		epr->epr_hi);
 
 	obj->obj_sync_epoch = 0;
-	// 如果是fetch 操作，并且cache 中没查到df，那么去oi table 的btree 中查询df
+	// 如果是fetch 操作，并且cache 中没查到df，那么去oi table 的btree 中查询df，没查到就报错返回
 	if (!create) {
-		// 查询oi table，查询object 的pmem 中的地址
+		// 查询oi table，查询object 在pmem 中的地址
 		// 传入cont 和oid 去该container 下的b+ 树中查询object 元数据信息
-		// todo: object 的元数据信息都包括哪些内容，这里貌似只是一个object 在pmem上的地址
 		// 这个地址对应的其实就是object 的元数据信息，因为pmem 本来就是存储元数据和小容量数据的
+		// df 为查询命中的出参，如果没查到就报错
 		rc = vos_oi_find(cont, oid, &obj->obj_df, ts_set);
 		if (rc == -DER_NONEXIST) {
 			D_DEBUG(DB_TRACE, "non exist oid "DF_UOID"\n",
@@ -415,11 +420,13 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 
 		// 如果是update 操作，先去oi table 中查询，查到了返回
 		// 没查到则将在oi table 中创建并返回
+		// df 为新创建的出参
 		rc = vos_oi_find_alloc(cont, oid, epr->epr_hi, false,
 				       &obj->obj_df, ts_set);
 		D_ASSERT(rc || obj->obj_df);
 	}
 
+	// 以上两种查询oi table b+ 树的函数都是为了获取到obj_df
 	if (rc != 0)
 		goto failed;
 
@@ -430,7 +437,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		D_GOTO(failed, rc = -DER_NONEXIST);
 	}
 
-	// 如果获取到了有效的df，那么会走到这里
+	// 如果获取到了有效的df，那么会处理ilog 相关的操作
 check_object:
 	if (obj->obj_discard && (create || (flags & VOS_OBJ_DISCARD) != 0)) {
 		/** Cleanup before assert so unit test that triggers doesn't corrupt the state */
@@ -443,7 +450,7 @@ check_object:
 	if ((flags & VOS_OBJ_DISCARD) || intent == DAOS_INTENT_KILL || intent == DAOS_INTENT_PUNCH)
 		goto out;
 
-	// 如果是fetch 操作
+	// 1. 如果是fetch 操作
 	if (!create) {
 		// todo: 先 ilog fetch，这返回的是什么信息
 		// 使用的epoch 信息：epr->epr_hi, bound
@@ -483,7 +490,7 @@ check_object:
 	/** If it's a conditional update, we need to preserve the -DER_NONEXIST
 	 *  for the caller.
 	 */
-	// todo: 如果是update 操作 & 是条件更新
+	// 2. todo: 如果是update 操作 & 是条件更新
 	if (ts_set && ts_set->ts_flags & VOS_COND_UPDATE_OP_MASK)
 		cond_mask = VOS_ILOG_COND_UPDATE;
 	// todo: ilog 更新
@@ -529,7 +536,7 @@ out:
 
 	if (obj == &obj_local) {
 		/** Ok, it's successful, go ahead and cache the object. */
-		// 更新lru cache
+		// 3. 更新lru cache
 		rc = cache_object(occ, &obj);
 		if (rc != 0)
 			goto failed_2;

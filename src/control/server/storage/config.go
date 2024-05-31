@@ -114,6 +114,7 @@ const (
 	ClassFile Class = "file"
 )
 
+// engine 的bdev 的配置参数信息
 type TierConfig struct {
 	Tier  int        `yaml:"-"`
 	Class Class      `yaml:"class"`
@@ -455,6 +456,7 @@ func (tcs TierConfigs) AssignBdevTierRoles(extMetadataPath string) error {
 		return nil // MD-on-SSD not enabled.
 	}
 
+	// scm 的配置信息
 	scs := tcs.ScmConfigs()
 
 	if len(scs) != 1 || scs[0].Tier != 0 {
@@ -468,6 +470,7 @@ func (tcs TierConfigs) AssignBdevTierRoles(extMetadataPath string) error {
 		return nil
 	}
 
+	// bdev 的配置信息
 	bcs := tcs.BdevConfigs()
 
 	tiersWithoutRoles := make([]int, 0, len(bcs))
@@ -915,11 +918,14 @@ func (bdr *BdevRoles) String() string {
 }
 
 // BdevConfig represents a Block Device (NVMe, etc.) configuration entry.
+// engine 中 nvme相关的配置 
 type BdevConfig struct {
+	// bdev list
 	DeviceList    *BdevDeviceList `yaml:"bdev_list,omitempty"`
 	DeviceCount   int             `yaml:"bdev_number,omitempty"`
 	FileSize      int             `yaml:"bdev_size,omitempty"`
 	BusidRange    *BdevBusRange   `yaml:"bdev_busid_range,omitempty"`
+	// role
 	DeviceRoles   BdevRoles       `yaml:"bdev_roles,omitempty"`
 	NumaNodeIndex uint            `yaml:"-"`
 }
@@ -1071,6 +1077,7 @@ type SpdkRpcServer struct {
 	SockAddr string `yaml:"sock_addr,omitempty" json:"sock_addr"`
 }
 
+// bdev 的配置参数
 type Config struct {
 	ControlMetadata  ControlMetadata `yaml:"-"` // inherited from server
 	EngineIdx        uint            `yaml:"-"`
@@ -1136,6 +1143,7 @@ func (c *Config) Validate() error {
 		}
 		nvmeConfigRoot = c.Tiers.ScmConfigs()[0].Scm.MountPoint
 	}
+	// /mnt/daos/s0/daos_nvme.conf 文件
 	c.ConfigOutputPath = filepath.Join(nvmeConfigRoot, BdevOutConfName)
 
 	return nil

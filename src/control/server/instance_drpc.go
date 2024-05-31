@@ -49,12 +49,16 @@ func (ei *EngineInstance) getDrpcClient() (drpc.DomainSocketClient, error) {
 
 // NotifyDrpcReady receives a ready message from the running Engine
 // instance.
+// 从daos engine 接收到ready 的msg
 func (ei *EngineInstance) NotifyDrpcReady(msg *srvpb.NotifyReadyReq) {
 	ei.log.Debugf("%s instance %d drpc ready: %v", build.DataPlaneName, ei.Index(), msg)
 
 	// activate the dRPC client connection to this engine
 	ei.setDrpcClient(drpc.NewClientConnection(msg.DrpcListenerSock))
 
+	// 这里会导致 awaitDrpcReady 函数返回，此函数返回后 waitReady 函数将停止阻塞
+	// 有msg 到来时，表示daos_server 和engine 之间的drpc 已经通了
+	// 之后 daos_server 将发送 MethodSetUp 类型的drpc 来让engine 做初始化
 	go func() {
 		ei.drpcReady <- msg
 	}()
@@ -63,7 +67,9 @@ func (ei *EngineInstance) NotifyDrpcReady(msg *srvpb.NotifyReadyReq) {
 // awaitDrpcReady returns a channel which receives a ready message
 // when the started Engine instance indicates that it is
 // ready to receive dRPC messages.
+// daos_server 将会等待此函数的返回结果
 func (ei *EngineInstance) awaitDrpcReady() chan *srvpb.NotifyReadyReq {
+	// server 阻塞等待engine drpc 就绪
 	return ei.drpcReady
 }
 

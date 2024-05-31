@@ -15,6 +15,7 @@ struct smd_device {
 	uint32_t		sd_tgts[SMD_MAX_TGT_CNT];
 };
 
+// 添加设备到target 上
 int
 smd_dev_add_tgt(uuid_t dev_id, uint32_t tgt_id, enum smd_dev_type st)
 {
@@ -170,6 +171,7 @@ smd_dev_get_info(struct d_uuid *id, struct smd_dev_info **dev_info)
 	struct smd_device	 dev;
 	int			 rc;
 
+	// 设备表
 	rc = smd_db_fetch(TABLE_DEV, id, sizeof(*id), &dev, sizeof(dev));
 	if (rc) {
 		DL_CDEBUG(rc != -DER_NONEXIST, DLOG_ERR, DB_MGMT, rc,

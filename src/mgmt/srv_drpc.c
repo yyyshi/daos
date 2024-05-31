@@ -29,6 +29,7 @@ pack_daos_response(Mgmt__DaosResp *daos_resp, Drpc__Response *drpc_resp)
 	uint8_t	*body;
 	size_t	 len;
 
+	// 回复drpc 请求
 	len = mgmt__daos_resp__get_packed_size(daos_resp);
 	D_ALLOC(body, len);
 	if (body == NULL) {
@@ -2409,6 +2410,7 @@ pack_resp:
 	ctl__dev_replace_req__free_unpacked(req, &alloc.alloc);
 }
 
+// daos_server 发起的drpc 请求
 void
 ds_mgmt_drpc_set_up(Drpc__Call *drpc_req, Drpc__Response *drpc_resp)
 {
@@ -2417,6 +2419,7 @@ ds_mgmt_drpc_set_up(Drpc__Call *drpc_req, Drpc__Response *drpc_resp)
 
 	D_INFO("Received request to setup engine\n");
 
+	// 来自daos_server 的cmd，engine 通过执行各自的setup 函数启动所有模块
 	rc = dss_module_setup_all();
 	if (rc != 0) {
 		D_ERROR("Module setup failed: %d\n", rc);
@@ -2428,6 +2431,7 @@ ds_mgmt_drpc_set_up(Drpc__Call *drpc_req, Drpc__Response *drpc_resp)
 	dss_init_state_set(DSS_INIT_STATE_SET_UP);
 err:
 	resp.status = rc;
+	// 回复daos_server drpc 请求
 	pack_daos_response(&resp, drpc_resp);
 }
 

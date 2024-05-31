@@ -27,7 +27,9 @@
  * Parameters for vos_cont_df btree
  */
 struct cont_df_args {
+	// cont df 信息
 	struct vos_cont_df	*ca_cont_df;
+	// vos pool 信息
 	struct vos_pool		*ca_pool;
 };
 
@@ -85,6 +87,7 @@ cont_df_rec_alloc(struct btr_instance *tins, d_iov_t *key_iov,
 
 	D_DEBUG(DB_DF, "Allocating container uuid=" DF_UUID "\n",
 		DP_UUID(ukey->uuid));
+	// 申请cont 的df
 	offset = umem_zalloc(&tins->ti_umm, sizeof(struct vos_cont_df));
 	if (UMOFF_IS_NULL(offset))
 		return -DER_NOSPACE;
@@ -92,6 +95,7 @@ cont_df_rec_alloc(struct btr_instance *tins, d_iov_t *key_iov,
 	cont_df = umem_off2ptr(&tins->ti_umm, offset);
 	uuid_copy(cont_df->cd_id, ukey->uuid);
 
+	// 创建obj idx tree
 	rc = dbtree_create_inplace_ex(VOS_BTR_OBJ_TABLE, 0, VOS_OBJ_ORDER,
 				      &pool->vp_uma, &cont_df->cd_obj_root,
 				      DAOS_HDL_INVAL, pool, &hdl);
@@ -134,13 +138,18 @@ cont_df_rec_update(struct btr_instance *tins, struct btr_record *rec,
 	return 0;
 }
 
+// cont tree 的操作接口
 static btr_ops_t vct_ops = {
 	.to_rec_msize	= cont_df_rec_msize,
 	.to_hkey_size	= cont_df_hkey_size,
 	.to_hkey_gen	= cont_df_hkey_gen,
+	// 创建btree
 	.to_rec_alloc	= cont_df_rec_alloc,
+	// 回收btree
 	.to_rec_free	= cont_df_rec_free,
+	// 查询btree
 	.to_rec_fetch	= cont_df_rec_fetch,
+	// 更新btree
 	.to_rec_update  = cont_df_rec_update,
 };
 
@@ -293,6 +302,7 @@ vos_cont_create(daos_handle_t poh, uuid_t co_uuid)
 	uuid_copy(ukey.uuid, co_uuid);
 	args.ca_pool = vpool;
 
+	// todo: 查找cont 的df 信息
 	rc = cont_df_lookup(vpool, &ukey, &args);
 	if (!rc) {
 		/* Check if attempt to reuse the same container uuid */
@@ -359,8 +369,9 @@ vos_cont_open(daos_handle_t poh, uuid_t co_uuid, daos_handle_t *coh)
 		D_GOTO(exit, rc);
 	}
 
-	// 按pool 查询cont 的df
+	// 按pool 查询cont 的df，由args 返回，类型为 cont_df_args 类型
 	rc = cont_df_lookup(pool, &ukey, &args);
+	// 没查到，报错返回
 	if (rc) {
 		D_DEBUG(DB_TRACE, DF_UUID" container does not exist\n",
 			DP_UUID(co_uuid));
@@ -374,6 +385,7 @@ vos_cont_open(daos_handle_t poh, uuid_t co_uuid, daos_handle_t *coh)
 
 	uuid_copy(cont->vc_id, co_uuid);
 	cont->vc_pool	 = pool;
+	// 查到的cont 的df
 	cont->vc_cont_df = args.ca_cont_df;
 	cont->vc_ts_idx = &cont->vc_cont_df->cd_ts_idx;
 	cont->vc_dtx_active_hdl = DAOS_HDL_INVAL;
@@ -392,7 +404,8 @@ vos_cont_open(daos_handle_t poh, uuid_t co_uuid, daos_handle_t *coh)
 	/* Cache this btr object ID in container handle */
 	// 根据地址 &cont->vc_cont_df->cd_obj_root 创建object idx 的索引b+ 树
 	// vc_btr_hdl 存储oi table
-	// 创建object 的btree，得到 cont->vc_btr_hdl
+	// 打开object 的btree，得到 cont->vc_btr_hdl
+	// 用查到的df 的root 信息，原地打开btree
 	rc = dbtree_open_inplace_ex(&cont->vc_cont_df->cd_obj_root,
 				    &pool->vp_uma, vos_cont2hdl(cont),
 				    cont->vc_pool, &cont->vc_btr_hdl);

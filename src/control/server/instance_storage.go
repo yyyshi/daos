@@ -75,6 +75,15 @@ func createPublishFormatRequiredFunc(publish func(*events.RASEvent), hostname st
 	}
 }
 
+/*
+root@server03:/mnt/daos/s0# ls
+control_raft  daos_nvme.conf  daos_sys  lost+found  NEWBORNS  superblock  ZOMBIES
+root@server03:/mnt/daos/s0#
+root@server03:/mnt/daos/s0# pwd
+/mnt/daos/s0
+每个engine 会生成一个这样的目录结构
+// lost+found 是Linux 下ext-x 文件系统在比如系统意外掉电后为了做数据恢复生成的文件夹
+*/
 // awaitStorageReady blocks until instance has storage available and ready to be used.
 func (ei *EngineInstance) awaitStorageReady(ctx context.Context) error {
 	idx := ei.Index()
@@ -85,6 +94,7 @@ func (ei *EngineInstance) awaitStorageReady(ctx context.Context) error {
 
 	ei.log.Infof("Checking %s instance %d storage ...", build.DataPlaneName, idx)
 
+	// 根据元数据检查是否需要格式化
 	needsMetaFormat, err := ei.storage.ControlMetadataNeedsFormat()
 	if err != nil {
 		ei.log.Errorf("failed to check control metadata storage formatting: %s", err)

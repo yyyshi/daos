@@ -142,6 +142,7 @@ load_bitmap_entry(daos_handle_t ih, d_iov_t *key, d_iov_t *val, void *arg)
 	return rc;
 }
 
+// 从2棵元数据树中加载vea 的space 信息
 int
 load_space_info(struct vea_space_info *vsi)
 {
@@ -158,7 +159,9 @@ load_space_info(struct vea_space_info *vsi)
 	uma.uma_id = vsi->vsi_umem->umm_id;
 	uma.uma_pool = vsi->vsi_umem->umm_pool;
 
+	// 因为要从树中加载数据，先打开2棵元数据树
 	D_ASSERT(daos_handle_is_inval(vsi->vsi_md_free_btr));
+	// vsi_md 是根据传入的md 来的，是通过pool_df 获取的vea_df
 	rc = dbtree_open_inplace(&vsi->vsi_md->vsd_free_tree, &uma,
 				 &vsi->vsi_md_free_btr);
 	if (rc != 0)
@@ -170,6 +173,7 @@ load_space_info(struct vea_space_info *vsi)
 	if (rc != 0)
 		goto error;
 
+	// 打开元数据树后，遍历两颗元数据树
 	/* Build up in-memory compound free extent index */
 	rc = dbtree_iterate(vsi->vsi_md_free_btr, DAOS_INTENT_DEFAULT, false,
 			    load_free_entry, (void *)vsi);

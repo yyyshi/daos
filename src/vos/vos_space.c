@@ -47,14 +47,17 @@ get_frag_overhead(daos_size_t tot_size, int media, bool small_pool)
 void
 vos_space_sys_init(struct vos_pool *pool)
 {
+	// 先获取scm 和nvme 的设备资源空间
 	daos_size_t	scm_tot = pool->vp_pool_df->pd_scm_sz;
 	daos_size_t	nvme_tot = pool->vp_pool_df->pd_nvme_sz;
 
+	// 一些额外资源预留
 	POOL_SCM_SYS(pool) =
 		get_frag_overhead(scm_tot, DAOS_MEDIA_SCM, pool->vp_small);
 	POOL_NVME_SYS(pool) =
 		get_frag_overhead(nvme_tot, DAOS_MEDIA_NVME, pool->vp_small);
 
+	// gc 和agg 预留资源
 	gc_reserve_space(&pool->vp_space_sys[0]);
 	agg_reserve_space(&pool->vp_space_sys[0]);
 
@@ -80,6 +83,7 @@ vos_space_sys_init(struct vos_pool *pool)
 int
 vos_space_sys_set(struct vos_pool *pool, daos_size_t *space_sys)
 {
+	// scm 和nvme 设备的总空间
 	daos_size_t	scm_tot = pool->vp_pool_df->pd_scm_sz;
 	daos_size_t	nvme_tot = pool->vp_pool_df->pd_nvme_sz;
 	daos_size_t	old_sys[DAOS_MEDIA_MAX];
@@ -88,14 +92,17 @@ vos_space_sys_set(struct vos_pool *pool, daos_size_t *space_sys)
 	old_sys[DAOS_MEDIA_SCM]		= POOL_SCM_SYS(pool);
 	old_sys[DAOS_MEDIA_NVME]	= POOL_NVME_SYS(pool);
 
+	// 初始化资源信息
 	vos_space_sys_init(pool);
 	if (POOL_SCM_SYS(pool) + space_sys[DAOS_MEDIA_SCM] > scm_tot)
 		goto error;
 
+	// todo: 这个是在哪初始化的
 	if (pool->vp_vea_info &&
 	    (POOL_NVME_SYS(pool) + space_sys[DAOS_MEDIA_NVME]) > nvme_tot)
 		goto error;
 
+	// 设置池的可用资源
 	POOL_SCM_SYS(pool)	+= space_sys[DAOS_MEDIA_SCM];
 	POOL_NVME_SYS(pool)	+= space_sys[DAOS_MEDIA_NVME];
 	return 0;

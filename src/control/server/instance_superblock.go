@@ -26,10 +26,12 @@ const (
 )
 
 // Superblock is the per-Instance superblock
+// mnt/daos/s0 或者/mnt/daos/s1 下的superblock 文件中存储的数据（每个engine 有自己各自的目录）
 type Superblock struct {
 	Version         uint8
 	UUID            string
 	System          string
+	// 保存了 rank list
 	Rank            *ranklist.Rank
 	URI             string
 	ValidRank       bool
@@ -52,6 +54,7 @@ func (sb *Superblock) Unmarshal(raw []byte) error {
 	return yaml.Unmarshal(raw, sb)
 }
 
+// /mnt/daos/s0/superblock 文件
 func (ei *EngineInstance) superblockPath() string {
 	storagePath := ei.storage.ControlMetadataEnginePath()
 	return filepath.Join(ei.fsRoot, storagePath, "superblock")
@@ -111,6 +114,7 @@ func (ei *EngineInstance) NeedsSuperblock() (bool, error) {
 }
 
 // createSuperblock creates instance superblock if needed.
+// 创建suprtblock，在 /mnt/daos/s0/ 下，/mnt/daos/s1/ 下也有，即每个engine 有自己单独的superblock 文件
 func (ei *EngineInstance) createSuperblock() error {
 	if ei.IsStarted() {
 		return errors.Errorf("can't create superblock: instance %d already started", ei.Index())
@@ -158,6 +162,7 @@ func (ei *EngineInstance) createSuperblock() error {
 
 // WriteSuperblock writes the instance's superblock
 // to storage.
+// 写superblock 文件
 func (ei *EngineInstance) WriteSuperblock() error {
 	ei.log.Debugf("instance %d: writing superblock at %s", ei.Index(), ei.superblockPath())
 	return WriteSuperblock(ei.superblockPath(), ei.getSuperblock())
@@ -165,6 +170,7 @@ func (ei *EngineInstance) WriteSuperblock() error {
 
 // ReadSuperblock reads the instance's superblock
 // from storage.
+// 读superblock 文件
 func (ei *EngineInstance) ReadSuperblock() error {
 	if err := ei.MountMetadata(); err != nil {
 		return errors.Wrap(err, "failed to mount control metadata device")
@@ -181,6 +187,7 @@ func (ei *EngineInstance) ReadSuperblock() error {
 }
 
 // RemoveSuperblock removes a superblock from storage.
+// 移除superblock
 func (ei *EngineInstance) RemoveSuperblock() error {
 	ei.setSuperblock(nil)
 
@@ -189,17 +196,22 @@ func (ei *EngineInstance) RemoveSuperblock() error {
 }
 
 // WriteSuperblock writes a Superblock to storage.
+// 写superblock 的更内部实现
+// 数据结构定义： type Superblock struct {
 func WriteSuperblock(sbPath string, sb *Superblock) error {
+	// 将Superblock 数据结构先编码成json 字符串
 	data, err := sb.Marshal()
 	if err != nil {
 		return err
 	}
 
+	// 写入json 字符串
 	return errors.Wrapf(common.WriteFileAtomic(sbPath, data, 0600),
 		"Failed to write Superblock to %s", sbPath)
 }
 
 // ReadSuperblock reads a Superblock from storage.
+// 读superblock 的内部实现，指定读取的文件路径
 func ReadSuperblock(sbPath string) (*Superblock, error) {
 	data, err := ioutil.ReadFile(sbPath)
 	if err != nil {
@@ -207,6 +219,7 @@ func ReadSuperblock(sbPath string) (*Superblock, error) {
 	}
 
 	sb := &Superblock{}
+	// 将json 字符串解码成结构体
 	if err := sb.Unmarshal(data); err != nil {
 		return nil, err
 	}

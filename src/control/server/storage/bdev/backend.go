@@ -29,6 +29,7 @@ const (
 	spdkHugepagePattern = `spdk_pid([0-9]+)map`
 )
 
+// golang 层对spdk 的功能封装（包括对spdk setup.sh 脚本的封装和spdk c 语言部分功能的封装）
 type (
 	spdkWrapper struct {
 		spdk.Env
@@ -37,7 +38,12 @@ type (
 
 	spdkBackend struct {
 		log     logging.Logger
+		//     ^
+		//    /| \
+		// 就在 |  这头上
+		// 这个是对spdk c 语言api 的封装： func (n *NvmeImpl) Discover
 		binding *spdkWrapper
+		// setup 脚本
 		script  *spdkSetupScript
 	}
 
@@ -194,6 +200,7 @@ func logNUMAStats(log logging.Logger) {
 func (sb *spdkBackend) prepare(req storage.BdevPrepareRequest, vmdDetect vmdDetectFn, hpClean hpCleanFn) (*storage.BdevPrepareResponse, error) {
 	resp := &storage.BdevPrepareResponse{}
 
+	// 是否是清除大页内存的req
 	if req.CleanHugepagesOnly {
 		// Remove hugepages that were created by a no-longer-active SPDK process. Note that
 		// when running prepare, it's unlikely that any SPDK processes are active as this
@@ -216,6 +223,7 @@ func (sb *spdkBackend) prepare(req storage.BdevPrepareRequest, vmdDetect vmdDete
 	resp.VMDPrepared = req.EnableVMD
 
 	// Before preparing, reset device bindings.
+	// 先解绑设备
 	if req.EnableVMD {
 		// Unbind devices to speed up VMD re-binding as per
 		// https://github.com/spdk/spdk/commit/b0aba3fcd5aceceea530a702922153bc75664978.
@@ -231,10 +239,12 @@ func (sb *spdkBackend) prepare(req storage.BdevPrepareRequest, vmdDetect vmdDete
 		}
 	}
 
+	// 再prepare == 绑定设备到用户态
 	return resp, errors.Wrap(sb.script.Prepare(&req), "binding devices to userspace drivers")
 }
 
 // reset receives function pointers for external interfaces.
+// 执行spdk setup 脚本的reset 命令
 func (sb *spdkBackend) reset(req storage.BdevPrepareRequest, vmdDetect vmdDetectFn) (*storage.BdevPrepareResponse, error) {
 	resp := &storage.BdevPrepareResponse{}
 
@@ -244,6 +254,7 @@ func (sb *spdkBackend) reset(req storage.BdevPrepareRequest, vmdDetect vmdDetect
 	}
 	resp.VMDPrepared = req.EnableVMD
 
+	// 执行sb 的脚本 == ./spdk_setup reset
 	return resp, errors.Wrap(sb.script.Reset(&req), "unbinding nvme devices from userspace drivers")
 }
 
@@ -344,11 +355,15 @@ func (sb *spdkBackend) Scan(req storage.BdevScanRequest) (*storage.BdevScanRespo
 	}
 	defer restoreAfterInit()
 
+	// 发现的设备
+	// func (n *NvmeImpl) Discover spdk 的c 语言封装类
+	// struct ret_t *nvme_discover(void)
 	foundDevs, err := sb.binding.Discover(sb.log)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to discover nvme")
 	}
 
+	// foundDevs 为查到的collect 设备
 	outDevs, err := groomDiscoveredBdevs(needDevs, foundDevs, req.VMDEnabled)
 	if err != nil {
 		return nil, err
@@ -484,6 +499,7 @@ func (sb *spdkBackend) formatNvme(req *storage.BdevFormatRequest) (*storage.Bdev
 	defer restoreAfterInit()
 
 	sb.log.Debugf("calling spdk bindings format")
+	// 执行spdk wrapper 的格式化函数
 	results, err := sb.binding.Format(sb.log)
 	if err != nil {
 		return nil, errors.Wrapf(err, "spdk format %s", needDevs)

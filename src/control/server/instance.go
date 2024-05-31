@@ -185,12 +185,15 @@ func (ei *EngineInstance) determineRank(ctx context.Context, ready *srvpb.Notify
 	}
 
 	r := ranklist.NilRank
+	// 从superblock 中获取到的rank
 	if superblock.Rank != nil {
 		r = *superblock.Rank
 	}
 
+	// join 到system
 	resp, err := ei.joinSystem(ctx, &control.SystemJoinReq{
 		UUID:        superblock.UUID,
+		// 赋值给resp
 		Rank:        r,
 		URI:         ready.GetUri(),
 		NumContexts: ready.GetNctxs(),
@@ -206,12 +209,15 @@ func (ei *EngineInstance) determineRank(ctx context.Context, ready *srvpb.Notify
 	case system.MemberStateAdminExcluded, system.MemberStateExcluded:
 		return ranklist.NilRank, resp.LocalJoin, 0, errors.Errorf("rank %d excluded", resp.Rank)
 	}
+	// 在Rank.go 中，类型为 uint32
 	r = ranklist.Rank(resp.Rank)
 
 	// TODO: Check to see if ready.Uri != superblock.URI, which might
 	// need to trigger some kind of update?
 
+	// 更新superblock 的信息（todo: 没有发现有改动啊？）
 	if !superblock.ValidRank {
+		// todo: 下面这两行代码有啥区别吗？
 		superblock.Rank = new(ranklist.Rank)
 		*superblock.Rank = r
 		superblock.ValidRank = true
@@ -254,7 +260,9 @@ func (ei *EngineInstance) updateFaultDomainInSuperblock() error {
 
 // handleReady determines the instance rank and sends a SetRank dRPC request
 // to the Engine.
+// 向daos engine 发送drpc 命令，engine 收到cmd 后执行各个模块的setup 函数
 func (ei *EngineInstance) handleReady(ctx context.Context, ready *srvpb.NotifyReadyReq) error {
+	// todo: updateFaultDomainInSuperblock 和 determineRank 都有可能会去写superblock
 	if err := ei.updateFaultDomainInSuperblock(); err != nil {
 		ei.log.Error(err.Error()) // nonfatal
 	}
@@ -270,14 +278,18 @@ func (ei *EngineInstance) handleReady(ctx context.Context, ready *srvpb.NotifyRe
 		return nil
 	}
 
+	// 正常engine 都是通过 server 拉起来的，也可以通过dmg 命令手动启停某个engine
+	// ./dmg  system  stop --ranks=0
 	return ei.SetupRank(ctx, r, mapVersion)
 }
 
+// daos_server 让engine 启动，这是dprc ready 后daos_server 让engine 做的第一件事
 func (ei *EngineInstance) SetupRank(ctx context.Context, rank ranklist.Rank, map_version uint32) error {
 	if err := ei.callSetRank(ctx, rank, map_version); err != nil {
 		return errors.Wrap(err, "SetRank failed")
 	}
 
+	// engine 启动modules
 	if err := ei.callSetUp(ctx); err != nil {
 		return errors.Wrap(err, "SetUp failed")
 	}
@@ -347,6 +359,7 @@ func (ei *EngineInstance) GetTargetCount() int {
 }
 
 func (ei *EngineInstance) callSetUp(ctx context.Context) error {
+	// drpc 启动
 	dresp, err := ei.callDrpc(ctx, drpc.MethodSetUp, nil)
 	if err != nil {
 		return err

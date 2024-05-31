@@ -66,6 +66,7 @@ func run(log logging.Logger, env []string, cmdStr string, args ...string) (strin
 	return string(out), nil
 }
 
+// spdk 的setup.sh 脚本的wrapper 结构体
 type spdkSetupScript struct {
 	log        logging.Logger
 	scriptPath string
@@ -101,6 +102,8 @@ func (s *spdkSetupScript) run(args ...string) error {
 // by passing in an allow list of PCI addresses.
 //
 // NOTE: will make the controller disappear from /dev until reset() called.
+// 执行setup 脚本来申请大页内存，并且将设备从kernl 解绑并重新绑定到用户态
+// 如果未设置allow_list 参数，那么所有的pci 设备将会被全部从内核解绑，否则指定的allow_list 设备们将被从内核解绑
 func (s *spdkSetupScript) Prepare(req *storage.BdevPrepareRequest) error {
 	// Always use min number of hugepages otherwise devices cannot be accessed.
 	nrHugepages := req.HugepageCount
@@ -112,6 +115,7 @@ func (s *spdkSetupScript) Prepare(req *storage.BdevPrepareRequest) error {
 		"PATH":          os.Getenv("PATH"),
 		pciBlockListEnv: req.PCIBlockList,
 		targetUserEnv:   req.TargetUser,
+		// 如果不指定，默认为全部设备
 		pciAllowListEnv: req.PCIAllowList,
 		nrHugepagesEnv:  fmt.Sprintf("%d", nrHugepages),
 		hugeNodeEnv:     req.HugeNodes,

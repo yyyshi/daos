@@ -14,6 +14,10 @@
 #define V_TRACE(...) D_DEBUG(__VA_ARGS__)
 #endif
 
+/*
+ev tree 是R 树的一种，叫做 Extent-Validity（扩展有效性） tree。用于存储和查询版本化的数组索引。
+kv store 用的是b+ 树
+*/
 /** Get the length of the extent from durable format */
 static inline uint64_t
 evt_len_read(const struct evt_rect_df *rin)

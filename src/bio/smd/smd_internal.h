@@ -23,10 +23,12 @@
 #define TABLE_DEV		"device"
 #define SMD_DEV_NAME_MAX	16
 
+// 两个二维数组
 extern char TABLE_TGTS[SMD_DEV_TYPE_MAX][SMD_DEV_NAME_MAX];
 
 extern char TABLE_POOLS[SMD_DEV_TYPE_MAX][SMD_DEV_NAME_MAX];
 
+// todo: smd 的target 是什么意思
 #define SMD_MAX_TGT_CNT		64
 
 /** callback parameter for smd_db_traverse */

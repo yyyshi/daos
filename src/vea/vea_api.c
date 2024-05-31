@@ -304,6 +304,7 @@ vea_load(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 	 void *metrics, struct vea_space_info **vsip)
 {
 	struct umem_attr uma;
+	// 构造vsi == vsip
 	struct vea_space_info *vsi;
 	int rc;
 
@@ -324,7 +325,9 @@ vea_load(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 
 	vsi->vsi_umem = umem;
 	vsi->vsi_txd = txd;
+	// 设置元数据，后续打开树，要根据元数据来完成
 	vsi->vsi_md = md;
+	// 四棵树
 	vsi->vsi_md_free_btr = DAOS_HDL_INVAL;
 	vsi->vsi_md_bitmap_btr = DAOS_HDL_INVAL;
 	vsi->vsi_free_btr = DAOS_HDL_INVAL;
@@ -336,6 +339,9 @@ vea_load(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 	vsi->vsi_unmap_ctxt = *unmap_ctxt;
 	vsi->vsi_metrics = metrics;
 
+	// todo: 创建四棵树（内存dram 中），并初始化四棵树
+	// 根据md 构建class tree
+	// todo: class 是什么含义
 	rc = create_free_class(&vsi->vsi_class, md);
 	if (rc)
 		goto error;
@@ -343,6 +349,7 @@ vea_load(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 	memset(&uma, 0, sizeof(uma));
 	uma.uma_id = UMEM_CLASS_VMEM;
 	/* Create in-memory free extent tree */
+	// free extent 的树，后面申请预留资源信息都是些在这个树上
 	rc = dbtree_create(DBTREE_CLASS_IFV, BTR_FEAT_DIRECT_KEY, VEA_TREE_ODR, &uma, NULL,
 			   &vsi->vsi_free_btr);
 	if (rc != 0)
@@ -361,6 +368,8 @@ vea_load(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 		goto error;
 
 	/* Load free space tracking info from SCM */
+	// todo: 那些tree 对应的是哪些文件
+	// 从scm 加载vea 信息
 	rc = load_space_info(vsi);
 	if (rc)
 		goto error;
@@ -477,6 +486,7 @@ retry:
 
 	/* Reserve from the largest extent or a small extent */
 	// 对应上面的 3 （从大块free extent 或者小的free extent 上预留）
+	// resrvd 是此次预留的space
 	rc = reserve_single(vsi, blk_cnt, resrvd);
 	if (rc != 0)
 		goto error;
@@ -506,7 +516,7 @@ done:
 			    &resrvd->vre_hint_seq);
 	}
 
-	// 将本次预留出来的extent，放到预留列表的尾部
+	// 将本次预留出来的extent，即将 resrvd->vre_link 放到预留 resrvd_list 列表的尾部
 	d_list_add_tail(&resrvd->vre_link, resrvd_list);
 
 	return 0;

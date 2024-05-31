@@ -129,6 +129,7 @@ type DaosData struct {
 
 // SpdkConfig is used to indicate which devices are to be used by SPDK and the
 // desired behavior of SPDK subsystems.
+// 对应/mnt/daos/s0/daos_nvme.conf json文件
 type SpdkConfig struct {
 	DaosData   *DaosData        `json:"daos_data"`
 	Subsystems []*SpdkSubsystem `json:"subsystems"`
@@ -137,6 +138,7 @@ type SpdkConfig struct {
 func defaultSpdkConfig() *SpdkConfig {
 	bdevSubsystemConfigs := []*SpdkSubsystemConfig{
 		{
+			// json 文件daos_nvme.conf 中的bdev_set_options 部分的信息
 			Method: storage.ConfBdevSetOptions,
 			Params: SetOptionsParams{
 				BdevIoPoolSize:  humanize.KiByte * 64,
@@ -144,6 +146,7 @@ func defaultSpdkConfig() *SpdkConfig {
 			},
 		},
 		{
+			// json 文件daos_nvme.conf 中的bdev_nvme_set_options 部分信息
 			Method: storage.ConfBdevNvmeSetOptions,
 			Params: NvmeSetOptionsParams{
 				RetryCount:               4,
@@ -152,11 +155,13 @@ func defaultSpdkConfig() *SpdkConfig {
 			},
 		},
 		{
+			// hotplug 部分信息
 			Method: storage.ConfBdevNvmeSetHotplug,
 			Params: NvmeSetHotplugParams{},
 		},
 	}
 
+	// 向上组合到上层bdev 这一层标签
 	subsystems := []*SpdkSubsystem{
 		{
 			Name:    "bdev",
@@ -164,10 +169,13 @@ func defaultSpdkConfig() *SpdkConfig {
 		},
 	}
 
+	// 再向上组合，到daos_data 这一层标签
 	daosData := &DaosData{
 		Configs: make([]*DaosConfig, 0),
 	}
 
+	// 构建spdk 的整体json 配置信息
+	// todo: 还缺少 bdev_nvme_attach_controller 这一部分的信息
 	return &SpdkConfig{
 		DaosData:   daosData,
 		Subsystems: subsystems,
@@ -214,6 +222,7 @@ func getSpdkConfigMethods(req *storage.BdevWriteConfigRequest) (sscs []*SpdkSubs
 
 		switch tier.Class {
 		case storage.ClassNvme:
+			// daos_nvme.conf 中对应的nvme 设备
 			f = getNvmeAttachMethod
 		case storage.ClassFile:
 			f = getAioFileCreateMethod
@@ -255,6 +264,7 @@ func (sc *SpdkConfig) WithBdevConfigs(log logging.Logger, req *storage.BdevWrite
 			continue
 		}
 
+		// daos_nvme.conf 中的设备
 		ss.Configs = append(ss.Configs, getSpdkConfigMethods(req)...)
 
 		return sc
@@ -290,6 +300,7 @@ func accelPropSet(req *storage.BdevWriteConfigRequest, data *DaosData) {
 }
 
 // Add SPDK JSON-RPC server settings to DAOS config data.
+// 将spdk 的server 设置添加到daos conf中
 func rpcSrvSet(req *storage.BdevWriteConfigRequest, data *DaosData) {
 	props := req.SpdkRpcSrvProps
 	// Add config if RPC server options have been selected.
@@ -302,6 +313,7 @@ func rpcSrvSet(req *storage.BdevWriteConfigRequest, data *DaosData) {
 }
 
 func newSpdkConfig(log logging.Logger, req *storage.BdevWriteConfigRequest) (*SpdkConfig, error) {
+	// 默认的spdk conf
 	sc := defaultSpdkConfig()
 
 	if req.VMDEnabled {
@@ -339,5 +351,7 @@ func newSpdkConfig(log logging.Logger, req *storage.BdevWriteConfigRequest) (*Sp
 	accelPropSet(req, sc.DaosData)
 	rpcSrvSet(req, sc.DaosData)
 
+	// 在此之前，daos_nvme.conf 中出了nvme 的信息，都设置好了
+	// 填充 bdev_nvme_attach_controller 信息到daos_nvme.conf 文件中
 	return sc.WithBdevConfigs(log, req), nil
 }

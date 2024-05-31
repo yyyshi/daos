@@ -592,6 +592,8 @@ iterate_biov(struct bio_desc *biod,
 			// 如果是bulk 数据，那么 cb_fn == bulk_map_one，否则cb_fn == dma_map_one，或者copy_one
 			// 实际上就是在处理所有的biov，iov 是存储在sgl list 中的，而这里biod 的bd_sgls 是sgl list 的一个数组
 			// 本质是rdma vs inline 传输方式
+			// biov 也是从biod 的sgl 里面获取的
+			// 此时biov 里面已经存在了后面dma_map_one 需要的off 信息，也是后面spdk_blob_io_write 需要的off 信息
 			rc = cb_fn(biod, biov, data);
 			if (rc)
 				break;
@@ -915,6 +917,7 @@ dma_map_one(struct bio_desc *biod, struct bio_iov *biov, void *arg)
 	// 现在要根据biov 数据的大小，申请相应的资源
 	// spdk_blob_io_write 时用到的off，是和当前off 有关联的
 	// off 在此根据biov 被初始化
+	// biov 里是有已经在vea 模块通过 vea_reserve 时申请好的off，转换一下就行了
 	dma_biov2pg(biov, &off, &end, &pg_cnt, &pg_off);
 
 	/*
@@ -1485,6 +1488,7 @@ dump_dma_info(struct bio_dma_buffer *bdb)
 }
 
 // todo: map 是指做什么映射 ？
+// arg 是bulk 数据的参数，非rdma 的arg 为NULL
 static int
 iod_map_iovs(struct bio_desc *biod, void *arg)
 {
@@ -1569,6 +1573,8 @@ retry:
 
 	HG_Forward 函数的回调函数是通过 HG_Register() 来设置的，cb是通过执行HG_Trigger 函数来执行的。HG_Forward函数是非阻塞的。
 	*/
+	// bulk_map_one 函数里面还有可能会执行 dma_map_one
+	// 如果arg 为NULL，执行函数dma_map_one，不为NULL表示当前数据需要通过rdma 来传输，执行函数 bulk_map_one
 	rc = iterate_biov(biod, arg ? bulk_map_one : dma_map_one, arg);
 	if (rc) {
 		/*

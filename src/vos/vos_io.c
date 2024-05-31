@@ -1625,7 +1625,7 @@ vos_fetch_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 	D_ASSERT(rc == 0);
 
 	// fetch 操作
-	// 先会去内存 lru 缓存中查询，miss 后再会去查询pmem 中的oi table（是b+ 树结构）
+	// 1. 先会去内存 lru 缓存中查询 2. miss 后再会去查询pmem 中的oi table（是b+ 树结构）
 	// 查到了返回df，没查到返回错误码
 	// 使用的epoch 信息：&ioc->ic_epr, ioc->ic_bound
 	rc = vos_obj_hold(vos_obj_cache_current(ioc->ic_cont->vc_pool->vp_sysdb),
@@ -2141,6 +2141,8 @@ vos_reserve_blocks(struct vos_container *cont, d_list_t *rsrvd_nvme,
 	uint32_t		 blk_cnt;
 	int			 rc;
 
+	// 设备信息是跟池绑定的
+	// todo: 这个信息是在哪里初始化的
 	vsi = vos_cont2pool(cont)->vp_vea_info;
 	D_ASSERT(vsi);
 
@@ -2306,6 +2308,7 @@ vos_reserve_single(struct vos_io_context *ioc, uint16_t media,
 		}
 	}
 done:
+	// reserve_space 获取到了 off, 这里设置off 到 biov 中，后面spdk_blob_io_write 会调用
 	// 这里是设置bio address，根据预留media 的off
 	bio_addr_set(&biov.bi_addr, media, off);
 	bio_iov_set_len(&biov, size);
@@ -2369,6 +2372,9 @@ done:
 }
 
 // 设置bio address
+// 只有写的场景才会进行资源预留
+// todo: vea 模块reserve 的offset 是哪个设备的位置信息，同时对应到spdk_blob_io_write 接口中哪个blob 呢？
+// 他们之间的映射关系是什么样子的
 static int
 akey_update_begin(struct vos_io_context *ioc)
 {
@@ -3033,20 +3039,22 @@ vos_obj_fetch_ex(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 		 uint64_t flags, daos_key_t *dkey, unsigned int iod_nr,
 		 daos_iod_t *iods, d_sg_list_t *sgls, struct dtx_handle *dth)
 {
+	// todo: dth 这个是怎么用的，+ 原理
 	daos_handle_t	ioh;
+	// fetch 包括正常fetch 和fetch size
 	bool		size_fetch = (sgls == NULL);
 	uint32_t	fetch_flags = size_fetch ? VOS_OF_FETCH_SIZE_ONLY : 0;
 	uint32_t	vos_flags = flags | fetch_flags;
 	int		rc;
 
 	// 查询这个pool 下这个oid 的这个epoch
-	// todo: 需要指定的参数很多啊
 	/*
 	47929e77-60e2-4467-8547-16b3cbfa35e3 为pool uuid。配置了4个target
 	root@ubuntu:/mnt/daos0/47929e77-60e2-4467-8547-16b3cbfa35e3# ls
 	rdb-pool  vos-0  vos-1  vos-2  vos-3
 	root@ubuntu:/mnt/daos0/47929e77-60e2-4467-8547-16b3cbfa35e3#
 	*/
+	// oid 不一定存在，内部会在oi table 也miss 的时候创建一个并存入
 	rc = vos_fetch_begin(coh, oid, epoch, dkey, iod_nr, iods,
 			     vos_flags, NULL, &ioh, dth);
 	if (rc) {
@@ -3055,7 +3063,9 @@ vos_obj_fetch_ex(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 		return rc;
 	}
 
+	// 如果不是fetch size 操作，清空一下sgl 并拷贝数据进去
 	if (!size_fetch) {
+		// 根据返回的io hdl 获取vos io ctx
 		struct vos_io_context *ioc = vos_ioh2ioc(ioh);
 		int i, j;
 
@@ -3070,6 +3080,7 @@ vos_obj_fetch_ex(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 			}
 		}
 
+		// 实际的数据保存在ioc 中，这里是从ioc 里面读数据写到sgls 中
 		// 和update 一样，也是走copy 函数，内部也还是走dma_rw 函数
 		rc = vos_obj_copy(ioc, sgls, iod_nr);
 		if (rc)
@@ -3077,6 +3088,7 @@ vos_obj_fetch_ex(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 				DP_UOID(oid), DP_RC(rc));
 	}
 
+	// 显示释放资源
 	rc = vos_fetch_end(ioh, NULL, rc);
 	return rc;
 }

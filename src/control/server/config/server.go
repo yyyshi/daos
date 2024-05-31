@@ -554,6 +554,7 @@ func (cfg *Server) CalcMemForRamdiskSize(log logging.Logger, hpSizeKiB int, ramd
 		return 0, errors.New("no engines in config")
 	}
 
+	// 计算最小的内存量
 	return storage.CalcMemForRamdiskSize(log, ramdiskSize, memHuge, memSys,
 		cfg.Engines[0].TargetCount, len(cfg.Engines))
 }
@@ -625,6 +626,7 @@ func (cfg *Server) SetRamdiskSize(log logging.Logger, mi *common.MemInfo) error 
 }
 
 // Validate asserts that config meets minimum requirements.
+// 检查配置文件daos_server.yml 的合法性
 func (cfg *Server) Validate(log logging.Logger) (err error) {
 	msg := "validating config file"
 	if cfg.Path != "" {
@@ -687,6 +689,7 @@ func (cfg *Server) Validate(log logging.Logger) (err error) {
 		return nil
 	}
 
+	// 检查access point
 	switch {
 	case len(cfg.AccessPoints) < 1:
 		return FaultConfigBadAccessPoints
@@ -697,6 +700,7 @@ func (cfg *Server) Validate(log logging.Logger) (err error) {
 			"in the event of an access point failure.")
 	}
 
+	// 检查网络相关配置
 	switch {
 	case cfg.Fabric.Provider == "":
 		return FaultConfigNoProvider
@@ -706,9 +710,12 @@ func (cfg *Server) Validate(log logging.Logger) (err error) {
 		return FaultConfigBadTelemetryPort
 	}
 
+	// 检查engine 的配置
 	for idx, ec := range cfg.Engines {
+		// control_metadata 配置参数：在md-on-ssd 模式下用来存储control层元数据的path
 		ec.Storage.ControlMetadata = cfg.Metadata
 		ec.Storage.EngineIdx = uint(idx)
+		// 旧式格式转化为新式
 		ec.ConvertLegacyStorage(log, idx)
 		ec.Fabric.Update(cfg.Fabric)
 

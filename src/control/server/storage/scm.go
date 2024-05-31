@@ -452,6 +452,7 @@ func (f *ScmAdminForwarder) Unmount(req ScmMountRequest) (*MountResponse, error)
 }
 
 // Format forwards a request request to format SCM.
+// scm 格式化
 func (f *ScmAdminForwarder) Format(req ScmFormatRequest) (*ScmFormatResponse, error) {
 	req.Forwarded = true
 

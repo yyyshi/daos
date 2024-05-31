@@ -128,8 +128,10 @@ struct vea_free_class {
 	// 保存小块 free extnet 的tree
 	daos_handle_t		vfc_size_btr;
 	/* Size threshold for large extent */
+	// 大块extent 的阈值，决定是存储在btree 中还是heap 中
 	uint32_t		vfc_large_thresh;
 	/* Bitmap LRU list for different bitmap allocation class*/
+	// todo: 不同的class 是什么意思
 	d_list_t		vfc_bitmap_lru[VEA_MAX_BITMAP_CLASS];
 	/* Empty bitmap list for different allocation class */
 	d_list_t		vfc_bitmap_empty[VEA_MAX_BITMAP_CLASS];
@@ -172,6 +174,7 @@ struct vea_metrics {
 #define MAX_FLUSH_FRAGS	256
 
 /* In-memory compound index */
+// todo: vsi_free_btr 是持久内存中的btree 吧，不是dram
 struct vea_space_info {
 	/* Instance for the pmemobj pool on SCM */
 	struct umem_instance		*vsi_umem;
@@ -184,13 +187,20 @@ struct vea_space_info {
 	struct umem_tx_stage_data	*vsi_txd;
 	/* Free space information stored on SCM */
 	struct vea_space_df		*vsi_md;
+	// todo: 什么叫元数据，什么叫非元数据
+	// 1. 持久的俩tree
+	// 1-1 元数据持久tree
 	/* Open handles for the persistent free extent tree */
 	daos_handle_t			 vsi_md_free_btr;
+	// 1-2 元数据bitmap tree
 	/* Open handles for the persistent bitmap tree */
 	daos_handle_t			 vsi_md_bitmap_btr;
 	/* Free extent tree sorted by offset, for all free extents. */
+	// 2. 非持久的俩tree
+	// 2-1 存储offset 的tree
 	daos_handle_t			 vsi_free_btr;
 	/* Bitmap tree, for small allocation */
+	// 2-2 todo: 这个tree 又是干啥的
 	daos_handle_t			 vsi_bitmap_btr;
 	/* Hint context for bitmap chunk allocation */
 	struct vea_hint_context		*vsi_bitmap_hint_context;

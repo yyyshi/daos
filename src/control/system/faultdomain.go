@@ -28,6 +28,7 @@ const (
 )
 
 // FaultDomain represents a multi-layer fault domain.
+// 分层的多级故障域
 type FaultDomain struct {
 	Domains []string // Hierarchical sequence of fault domain levels
 }

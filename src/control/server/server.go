@@ -148,16 +148,23 @@ func (srv *server) logDuration(msg string, start time.Time) {
 
 // CreateDatabaseConfig creates a new database configuration.
 func CreateDatabaseConfig(cfg *config.Server) (*raft.DatabaseConfig, error) {
+	// 获取replica 信息（其实就是daos_server.yml 里 accesslist 解析后的列表）
+	// 所以假设一个daos 集群有四个server，那么daos_control.yml 里的hostlist 需要配置四个ip
+	// daos_server.yml 里面accesslist 配置三个ip。那么accesslist 中的就是replica，剩下的那个不是replica（即既不是leader，也不是非leader，根本就不参与raft 功能）
 	dbReplicas, err := cfgGetReplicas(cfg, net.LookupIP)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to retrieve replicas from config")
 	}
 
+	// 根据scm 挂载点，生成control_raft 目录
+	// /mnt/s0/control_raft
 	raftDir := cfgGetRaftDir(cfg)
 	if raftDir == "" {
 		return nil, errors.New("raft directory not available (missing SCM or control metadata in config?)")
 	}
 
+	// 构建db 里的conf 中的Replica 信息
+	// 传入raft 的dir 地址
 	return &raft.DatabaseConfig{
 		Replicas:   dbReplicas,
 		RaftDir:    raftDir,
@@ -166,7 +173,9 @@ func CreateDatabaseConfig(cfg *config.Server) (*raft.DatabaseConfig, error) {
 }
 
 // newManagementDatabase creates a new instance of the raft-backed management database.
+// 创建一个基于raft 的db 实例
 func newManagementDatabase(log logging.Logger, cfg *config.Server) (*raft.Database, error) {
+	// 获取raft db的配置信息
 	dbCfg, err := CreateDatabaseConfig(cfg)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to create database config")
@@ -174,11 +183,14 @@ func newManagementDatabase(log logging.Logger, cfg *config.Server) (*raft.Databa
 
 	// If this daos_server instance ends up being the MS leader,
 	// this will record the DAOS system membership.
+	// 根据conf 创建一个db 并返回
+	// 调用raft 包中的public 函数，返回一个raft 包下的Database struct 类型的实例
 	return raft.NewDatabase(log, dbCfg)
 }
 
 // createServices builds scaffolding for rpc and event services.
 func (srv *server) createServices(ctx context.Context) (err error) {
+	// 先创建system db 的结构体实例
 	srv.sysdb, err = newManagementDatabase(srv.log, srv.cfg)
 	if err != nil {
 		return
@@ -199,6 +211,7 @@ func (srv *server) createServices(ctx context.Context) (err error) {
 	srv.evtForwarder = control.NewEventForwarder(rpcClient, srv.cfg.AccessPoints)
 	srv.evtLogger = control.NewEventLogger(srv.log)
 
+	// nvme 的控制器服务，prepare 和scan 请求都会通过这个控制器服务来完成
 	srv.ctlSvc = NewControlService(srv.log, srv.harness, srv.cfg, srv.pubSub,
 		hwprov.DefaultFabricScanner(srv.log))
 	srv.mgmtSvc = newMgmtSvc(srv.harness, srv.membership, srv.sysdb, rpcClient, srv.pubSub)
@@ -255,6 +268,7 @@ func (srv *server) setCoreDumpFilter() error {
 func (srv *server) initNetwork() error {
 	defer srv.logDuration(track("time to init network"))
 
+	// server conf 里配置的port
 	ctlAddr, err := getControlAddr(ctlAddrParams{
 		port:           srv.cfg.ControlPort,
 		replicaAddrSrc: srv.sysdb,
@@ -264,6 +278,7 @@ func (srv *server) initNetwork() error {
 		return err
 	}
 
+	// 创建listener
 	listener, err := createListener(ctlAddr, net.Listen)
 	if err != nil {
 		return err
@@ -274,8 +289,10 @@ func (srv *server) initNetwork() error {
 	return nil
 }
 
+// 创建引擎
 func (srv *server) createEngine(ctx context.Context, idx int, cfg *engine.Config) (*EngineInstance, error) {
 	// Closure to join an engine instance to a system using control API.
+	// 闭包：添加engine 到system
 	joinFn := func(ctxIn context.Context, req *control.SystemJoinReq) (*control.SystemJoinResp, error) {
 		req.SetHostList(srv.cfg.AccessPoints)
 		req.SetSystem(srv.cfg.SystemName)
@@ -284,9 +301,13 @@ func (srv *server) createEngine(ctx context.Context, idx int, cfg *engine.Config
 		return control.SystemJoin(ctxIn, srv.mgmtSvc.rpcClient, req)
 	}
 
+	// 创建新engine，创建成功后执行闭包函数 joinFn
+	// server 启动engine 是通过runner 来进行，这里新建了一个runner
 	engine := NewEngineInstance(srv.log, storage.DefaultProvider(srv.log, idx, &cfg.Storage), joinFn,
 		engine.NewRunner(srv.log, cfg)).WithHostFaultDomain(srv.harness.faultDomain)
+	// 如果idx 为0，创建control_raft 下的daos_system.db
 	if idx == 0 {
+		// sysdb 结构体实例已经在 createServices 函数中初始化
 		configureFirstEngine(ctx, engine, srv.sysdb, joinFn)
 	}
 
@@ -304,7 +325,10 @@ func (srv *server) addEngines(ctx context.Context) error {
 		return err
 	}
 
+	// todo: prepare 和scan
+
 	// Allocate hugepages and rebind NVMe devices to userspace drivers.
+	// 申请大页，重新绑定nvme 到用户空间
 	if err := prepBdevStorage(srv, iommuEnabled); err != nil {
 		return err
 	}
@@ -322,16 +346,21 @@ func (srv *server) addEngines(ctx context.Context) error {
 
 	nrEngineBdevsIdx := -1
 	nrEngineBdevs := -1
+	// 根据配置文件，依次创建engine
 	for i, c := range srv.cfg.Engines {
+		// i 是0 时会创建db
+		// engine 里有个runner，runner 的start 函数是server 通过命令行启动engine的
 		engine, err := srv.createEngine(ctx, i, c)
 		if err != nil {
 			return errors.Wrap(err, "creating engine instances")
 		}
 
+		// todo: 为新创建的engine 分配bdev
 		if err := setEngineBdevs(engine, nvmeScanResp, &nrEngineBdevsIdx, &nrEngineBdevs); err != nil {
 			return errors.Wrap(err, "setting engine bdevs")
 		}
 
+		// 注册事件，关注engine 的启动消息
 		registerEngineEventCallbacks(srv, engine, &allStarted)
 
 		if err := srv.harness.AddInstance(engine); err != nil {
@@ -341,6 +370,7 @@ func (srv *server) addEngines(ctx context.Context) error {
 		allStarted.Add(1)
 	}
 
+	// 等待所有的engine 都启动
 	go func() {
 		srv.log.Debug("waiting for engines to start...")
 		allStarted.Wait()
@@ -435,6 +465,7 @@ func (srv *server) registerEvents() {
 	})
 }
 
+// 从下面大Start 过来的
 func (srv *server) start(ctx context.Context) error {
 	defer srv.logDuration(track("time server was listening"))
 
@@ -446,6 +477,8 @@ func (srv *server) start(ctx context.Context) error {
 	// noop on release builds
 	control.StartPProf(srv.log)
 
+	// daos_server 的监听，使用的是server conf 里配置的port
+	// todo: drpc 那么server 和engine 不是各自都需要一个端口吗？conf 里只有一个
 	srv.log.Infof("%s v%s (pid %d) listening on %s", build.ControlPlaneName,
 		build.DaosVersion, os.Getpid(), srv.ctlAddr)
 
@@ -467,6 +500,7 @@ func (srv *server) start(ctx context.Context) error {
 		}
 	}()
 
+	// loop
 	srv.mgmtSvc.startAsyncLoops(ctx)
 
 	if srv.cfg.AutoFormat {
@@ -476,6 +510,8 @@ func (srv *server) start(ctx context.Context) error {
 		}
 	}
 
+	// engine 启动！！！
+	// harness 是负责管理engine instance 的
 	return errors.Wrapf(srv.harness.Start(ctx, srv.sysdb, srv.cfg),
 		"%s harness exited", build.ControlPlaneName)
 }
@@ -522,6 +558,7 @@ func lookupIF(name string) (netInterface, error) {
 }
 
 // Start is the entry point for a daos_server instance.
+// 调用：start.go func (cmd *startCmd) Execute
 func Start(log logging.Logger, cfg *config.Server) error {
 	if err := common.CheckDupeProcess(); err != nil {
 		return err
@@ -544,6 +581,7 @@ func Start(log logging.Logger, cfg *config.Server) error {
 
 	scanner := hwprov.DefaultFabricScanner(log)
 
+	// 扫描fabric
 	fis, err := scanner.Scan(ctx, cfg.Fabric.Provider)
 	if err != nil {
 		return errors.Wrap(err, "scan fabric")
@@ -558,14 +596,15 @@ func Start(log logging.Logger, cfg *config.Server) error {
 		return err
 	}
 
-	// todo: 容错域
+	// 容错域
+	// todo: 跟放置策略和数据恢复有啥关系
 	faultDomain, err := getFaultDomain(cfg)
 	if err != nil {
 		return err
 	}
 	log.Debugf("fault domain: %s", faultDomain.String())
 
-	// todo: 容错域信息传递到server
+	// 根据容错域和配置信息新建server
 	srv, err := newServer(log, cfg, faultDomain)
 	if err != nil {
 		return err
@@ -580,14 +619,20 @@ func Start(log logging.Logger, cfg *config.Server) error {
 		return err
 	}
 
+	// 创建server 的服务
+	// 包括创建srv 的Database 类型实例，但还没创建daos_system.db 文件（在addEngines 函数里完成）
+	// 包括发送给nvme 设备 prepare / scan 请求的控制器服务
 	if err := srv.createServices(ctx); err != nil {
 		return err
 	}
 
+	// 初始化网络
 	if err := srv.initNetwork(); err != nil {
 		return err
 	}
 
+	// 创建conf 中配置的所有engine，并执行join 操作
+	// todo: 这里engine 都干了啥
 	if err := srv.addEngines(ctx); err != nil {
 		return err
 	}
@@ -596,8 +641,10 @@ func Start(log logging.Logger, cfg *config.Server) error {
 		return err
 	}
 
+	// 事件注册
 	srv.registerEvents()
 
+	// 处理daos_server 进程接收信号
 	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM)
 	go func() {
@@ -606,5 +653,6 @@ func Start(log logging.Logger, cfg *config.Server) error {
 		shutdown()
 	}()
 
+	// 调用小start 启动server，包括server 通过命令行启动engine
 	return srv.start(ctx)
 }

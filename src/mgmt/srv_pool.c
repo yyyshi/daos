@@ -96,10 +96,11 @@ ds_mgmt_tgt_pool_create_ranks(uuid_t pool_uuid, char *tgt_dev, d_rank_list_t *ra
 
 	/* Collective RPC to all of targets of the pool */
 	topo = crt_tree_topo(CRT_TREE_KNOMIAL, 4);
-	// 构造创建rank 的corpc 请求
+	// 构造创建targets 的corpc 请求，每个engine 都要创建自己的target，所以这个请求要发送给所有的target
 	// 构造创建target 的rpc 请求，处理函数为 ds_mgmt_hdlr_tgt_create
 	opc = DAOS_RPC_OPCODE(MGMT_TGT_CREATE, DAOS_MGMT_MODULE,
 			      DAOS_MGMT_VERSION);
+	// 此corpc 将创建targets 的请求发送给指定的rank list
 	rc = crt_corpc_req_create(dss_get_module_info()->dmi_ctx, NULL,
 				  rank_list, opc, NULL, NULL,
 				  CRT_RPC_FLAG_FILTER_INVERT, topo, &tc_req);
@@ -170,6 +171,7 @@ ds_mgmt_pool_svc_create(uuid_t pool_uuid, int ntargets, const char *group, d_ran
 				       prop, svc_list);
 }
 
+// 这里的targets 其实是ranks
 int
 ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_list_t *targets,
 		    size_t scm_size, size_t nvme_size, daos_prop_t *prop, d_rank_list_t **svcp,
@@ -180,12 +182,14 @@ ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_l
 	int				rc;
 	int				rc_cleanup;
 
+	// todo: 跟blob 是什么关系，是创建池时指定的容量按比例计算出来的
 	D_DEBUG(DB_MGMT, DF_UUID ": meta blob size %ld", DP_UUID(pool_uuid), meta_blob_size);
 
 	/* Sanity check targets versus cart's current primary group members.
 	 * If any targets not in PG, flag error before MGMT_TGT_ corpcs fail.
 	 */
 	// 对比targets 和primary group，对于targets 中不在 primary group 中的rank，标记为error
+	// todo: primary group 等原理
 	rc = crt_group_ranks_get(NULL, &pg_ranks);
 	D_ASSERTF(rc == 0, ""DF_RC"\n", DP_RC(rc));
 
@@ -232,8 +236,10 @@ ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_l
 		D_GOTO(out, rc);
 	}
 
+	// engine 对应的targets 都创建成功了
 	D_INFO(DF_UUID": creating targets on ranks succeeded\n", DP_UUID(pool_uuid));
 
+	// 创建pool srv
 	rc = ds_mgmt_pool_svc_create(pool_uuid, targets->rl_nr, group, targets, prop, svcp,
 				     domains_nr, domains);
 	if (rc) {
@@ -253,6 +259,7 @@ ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_l
 			D_DEBUG(DB_MGMT, DF_UUID": cleaned up failed create targets\n",
 				DP_UUID(pool_uuid));
 	} else {
+		// 创建pool srv 成功
 		D_INFO(DF_UUID": creating svc succeeded\n", DP_UUID(pool_uuid));
 	}
 

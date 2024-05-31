@@ -270,6 +270,7 @@ vos_ilog_fetch_internal(struct umem_instance *umm, daos_handle_t coh, uint32_t i
 	int			 rc;
 
 	vos_ilog_desc_cbs_init(&cbs, coh);
+	// 查询ilog。info 为入参 + 出参
 	rc = ilog_fetch(umm, ilog, &cbs, intent, has_cond, &info->ii_entries);
 	if (rc == -DER_NONEXIST)
 		goto init;
@@ -297,6 +298,7 @@ init:
 		info->ii_uncommitted = parent->ii_uncommitted;
 	}
 
+	// 解析ilog
 	if (rc == 0)
 		rc = vos_parse_ilog(info, epr, bound, &punch);
 
@@ -374,6 +376,7 @@ int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 		     struct vos_ilog_info *parent, struct vos_ilog_info *info,
 		     uint32_t cond, struct vos_ts_set *ts_set)
 {
+	// ilog 的更新是要事务保证的
 	struct dtx_handle	*dth = vos_dth_get(cont->vc_pool->vp_sysdb);
 	daos_epoch_range_t	 max_epr = *epr;
 	struct ilog_desc_cbs	 cbs;
@@ -395,6 +398,7 @@ int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 	has_cond = cond == VOS_ILOG_COND_UPDATE || cond == VOS_ILOG_COND_INSERT;
 
 	/** Do a fetch first.  The log may already exist */
+	// todo: update 之前先fetch 一下，日志可能已经存在了
 	rc = vos_ilog_fetch(vos_cont2umm(cont), vos_cont2hdl(cont), DAOS_INTENT_UPDATE,
 			    ilog, epr->epr_hi, bound, has_cond, NULL, parent, info);
 	/** For now, if the state isn't settled, just retry with later timestamp. The state
@@ -410,6 +414,7 @@ int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 		goto done;
 	}
 
+	// ilog 已经存在了，直接goto gone
 	rc = vos_ilog_update_check(info, &max_epr);
 	if (rc == 0) {
 		if (cond == VOS_ILOG_COND_INSERT)
@@ -430,12 +435,15 @@ update:
 	}
 
 	vos_ilog_desc_cbs_init(&cbs, vos_cont2hdl(cont));
+	// 更新之前先要打开ilog
+	// todo: fetch 之前不需要吗，只是update 前要open 一下？
 	rc = ilog_open(vos_cont2umm(cont), ilog, &cbs, &loh);
 	if (rc != 0) {
 		D_ERROR("Could not open incarnation log: "DF_RC"\n", DP_RC(rc));
 		return rc;
 	}
 
+	// ilog 还没存在，需要update
 	rc = ilog_update(loh, &max_epr, epr->epr_hi, dtx_is_valid_handle(dth) ?
 			 dth->dth_op_seq : VOS_SUB_OP_MAX, false);
 
@@ -455,6 +463,7 @@ done:
 	return rc;
 }
 
+// todo: puch 操作
 int
 vos_ilog_punch_(struct vos_container *cont, struct ilog_df *ilog,
 		const daos_epoch_range_t *epr, daos_epoch_t bound,

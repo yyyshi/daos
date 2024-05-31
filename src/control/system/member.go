@@ -176,6 +176,7 @@ func MemberStates2Mask(desiredStates ...MemberState) (MemberState, bool) {
 
 // Member refers to a data-plane instance that is a member of this DAOS
 // system running on host with the control-plane listening at "Addr".
+// Member 的信息
 type Member struct {
 	Rank           ranklist.Rank `json:"rank"`
 	Incarnation    uint64        `json:"incarnation"`

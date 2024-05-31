@@ -19,19 +19,24 @@ import (
 
 type (
 	// MemberRankMap provides a map of Rank->*system.Member.
+	// 保存rank 到system.Member 的映射
 	MemberRankMap map[ranklist.Rank]*system.Member
 	// MemberUuidMap provides a map of UUID->*system.Member.
+	// 保存uuid 到system.Member 的映射
 	MemberUuidMap map[uuid.UUID]*system.Member
 	// MemberAddrMap provides a map of string->[]*system.Member.
+	// 保存字符串到system.Member 的映射
 	MemberAddrMap map[string][]*system.Member
 
 	// MemberDatabase contains a set of maps for looking
 	// up members and provides methods for managing the
 	// membership.
+	// todo: member 的概念是啥： type Member struct
 	MemberDatabase struct {
 		Ranks        MemberRankMap
 		Uuids        MemberUuidMap
 		Addrs        MemberAddrMap
+		// 错误域tree
 		FaultDomains *system.FaultDomainTree
 	}
 )

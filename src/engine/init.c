@@ -31,6 +31,8 @@
 
 #define MAX_MODULE_OPTIONS	64
 #if BUILD_PIPELINE
+
+// 加载的列表在这里
 #define MODULE_LIST	"vos,rdb,rsvc,security,mgmt,dtx,pool,cont,obj,rebuild,pipeline"
 #else
 #define MODULE_LIST	"vos,rdb,rsvc,security,mgmt,dtx,pool,cont,obj,rebuild"
@@ -157,6 +159,7 @@ register_dbtree_classes(void)
 {
 	int rc;
 
+	// 注册多种类型的tree
 	rc = dbtree_class_register(DBTREE_CLASS_KV, 0 /* feats */,
 				   &dbtree_kv_ops);
 	if (rc != 0) {
@@ -217,13 +220,19 @@ modules_load(void)
 	char		*run;
 	int		 rc = 0;
 
+	// 加载好的模块信息拷贝给sep
 	D_STRNDUP(sep, modules, MAX_MODULE_OPTIONS + 1);
 	if (sep == NULL)
 		return -DER_NOMEM;
 	run = sep;
 
+	// 按字符 ， 将sep切割，每次返回切出来的第一个
 	mod = strsep(&run, ",");
+	// todo: 这里只看到这么几个模块，为啥日志显示那么多
+	// ValidateLogSubsystems 子模块
 	while (mod != NULL) {
+		// 这几个需要换名
+		// todo: 为啥换名
 		if (strcmp(mod, "object") == 0)
 			mod = "obj";
 		else if (strcmp(mod, "po") == 0)
@@ -236,12 +245,14 @@ modules_load(void)
 		else if (strcmp(mod, "vos") == 0)
 			mod = "vos_srv";
 
+		// 加载模块
 		rc = dss_module_load(mod);
 		if (rc != 0) {
 			D_ERROR("Failed to load module %s: %d\n", mod, rc);
 			break;
 		}
 
+		// 再切
 		mod = strsep(&run, ",");
 	}
 
@@ -654,6 +665,7 @@ server_init(int argc, char *argv[])
 	 * Begin the HLC recovery as early as possible. Do not read the HLC
 	 * before the hlc_recovery_end call below.
 	 */
+	// hlc 时钟begin
 	bound = hlc_recovery_begin();
 
 	gethostname(dss_hostname, DSS_HOSTNAME_MAX_LEN);
@@ -672,6 +684,7 @@ server_init(int argc, char *argv[])
 	if (rc != 0)
 		goto exit_debug_init;
 
+	// metrics 初始化
 	rc = dss_engine_metrics_init();
 	if (rc != 0)
 		D_WARN("Unable to initialize engine metrics, " DF_RC "\n",
@@ -679,23 +692,28 @@ server_init(int argc, char *argv[])
 
 	metrics = &dss_engine_metrics;
 	/** Report timestamp when engine was started */
+	// engine 启动时报告时间戳
 	d_tm_record_timestamp(metrics->started_time);
 
+	// 初始化drpc
 	rc = drpc_init();
 	if (rc != 0) {
 		D_ERROR("Failed to initialize dRPC: "DF_RC"\n", DP_RC(rc));
 		goto exit_metrics_init;
 	}
 
+	// 注册一些要用到的dbtree 的类型
 	rc = register_dbtree_classes();
 	if (rc != 0)
 		D_GOTO(exit_drpc_fini, rc);
 
+	// abt 库的初始化
 	rc = abt_init(argc, argv);
 	if (rc != 0)
 		goto exit_drpc_fini;
 
 	/* initialize the modular interface */
+	// daos server 模块初始化
 	rc = dss_module_init();
 	if (rc)
 		goto exit_abt_init;
@@ -712,6 +730,7 @@ server_init(int argc, char *argv[])
 	D_INFO("Network successfully initialized\n");
 
 	if (dss_mod_facs & DSS_FAC_LOAD_CLI) {
+		// daos 客户端库
 		rc = daos_init();
 		if (rc) {
 			D_ERROR("daos_init (client) failed, rc: "DF_RC"\n",
@@ -736,15 +755,20 @@ server_init(int argc, char *argv[])
 	/* server-side uses D_HTYPE_PTR handle */
 	d_hhash_set_ptrtype(daos_ht.dht_hhash);
 
+	// todo: iv 到底是个什么玩意
+	// 构造iv topo 树
 	ds_iv_init();
 
 	/* load modules. Split load and init so first call to dlopen()
 	 * is from the engine to avoid DAOS-4557
 	 */
+	// 所有模块加载
 	rc = modules_load();
 	if (rc)
 		/* Some modules may have been loaded successfully. */
 		D_GOTO(exit_mod_loaded, rc);
+	// 日志：Module vos,rdb,rsvc,security,mgmt,dtx,pool,cont,obj,rebuild successfully loaded
+	// 全局变量，保存所有模块名字
 	D_INFO("Module %s successfully loaded\n", modules);
 
 	/*
@@ -752,10 +776,13 @@ server_init(int argc, char *argv[])
 	 * vos_mod_init) invoked by the dss_module_init_all call below can read
 	 * the HLC.
 	 */
+	// hlc 时钟end
 	hlc_recovery_end(bound);
+	// todo: epoch
 	dss_set_start_epoch();
 
 	/* init nvme */
+	// bio nvme 初始化
 	rc = bio_nvme_init(dss_nvme_conf, dss_numa_node, dss_nvme_mem_size,
 			   dss_nvme_hugepage_size, dss_tgt_nr, dss_nvme_bypass_health_check);
 	if (rc)
@@ -769,6 +796,7 @@ server_init(int argc, char *argv[])
 	D_INFO("Module %s successfully initialized\n", modules);
 
 	/* initialize service */
+	// daos server 服务模块初始化
 	rc = dss_srv_init();
 	if (rc)
 		D_GOTO(exit_mod_loaded, rc);
@@ -781,6 +809,8 @@ server_init(int argc, char *argv[])
 		goto exit_srv_init;
 	}
 
+	// engine 以上内容都执行完后，给server 上报ready 信息，告诉server自己已经就绪了
+	// daos_server 在收到就绪notify 消息后会继续下发 MethodSetUp-ds_mgmt_drpc_set_up 类型drpc 请求给engine
 	rc = drpc_notify_ready();
 	if (rc != 0) {
 		D_ERROR("Failed to notify daos_server: "DF_RC"\n", DP_RC(rc));
@@ -991,6 +1021,7 @@ parse(int argc, char **argv)
 	int	c;
 
 	/* load all of modules by default */
+	// 加载默认的模块们
 	sprintf(modules, "%s", MODULE_LIST);
 	while ((c = getopt_long(argc, argv, "c:d:f:g:hi:m:n:p:r:H:t:s:x:I:bT:",
 				opts, NULL)) != -1) {
@@ -1001,6 +1032,7 @@ parse(int argc, char **argv)
 				usage(argv[0], stderr);
 				break;
 			}
+			// 加载的模块
 			snprintf(modules, sizeof(modules), "%s", optarg);
 			break;
 		case 'c':
@@ -1073,6 +1105,7 @@ parse(int argc, char **argv)
 }
 
 // engine 的main
+// 从 exec.go 的 func (r *Runner) run 中进入
 int
 main(int argc, char **argv)
 {
@@ -1101,11 +1134,12 @@ main(int argc, char **argv)
 	}
 
 	/* register our own handler for faults and abort()/assert() */
+	// 自定义的信号处理函数
 	d_signal_stack_enable(true);
 	d_signal_register();
 
 	/** server initialization */
-	// 里面有hg_init
+	// engine 初始化
 	rc = server_init(argc, argv);
 	if (rc)
 		exit(EXIT_FAILURE);
@@ -1116,6 +1150,7 @@ main(int argc, char **argv)
 	sigaddset(&set, SIGTERM);
 	sigaddset(&set, SIGUSR1);
 	sigaddset(&set, SIGUSR2);
+	// loop 直到收到shutdown 信号
 	while (1) {
 		rc = sigwait(&set, &sig);
 		if (rc) {
@@ -1176,6 +1211,7 @@ main(int argc, char **argv)
 			fprintf(abt_infos, ")\n");
 		}
 
+		// 导出dump 信息：  killall -SIGUSR1 /opt/daos/bin/daos_engine
 		/* use this engine main thread's context to dump Argobots
 		 * internal infos and ULTs stacks without internal synchro
 		 */

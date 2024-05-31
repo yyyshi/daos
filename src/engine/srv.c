@@ -406,6 +406,7 @@ dss_srv_handler(void *arg)
 
 	/* initialize xstream-local storage */
 	// 初始化tls（thread local storage） 相关
+	// tgt id 为 -1 表示系统vos target
 	dtc = dss_tls_init(dx->dx_tag, dx->dx_xs_id, dx->dx_tgt_id);
 	if (dtc == NULL) {
 		D_ERROR("failed to initialize TLS\n");
@@ -415,6 +416,7 @@ dss_srv_handler(void *arg)
 	dmi = dss_get_module_info();
 	D_ASSERT(dmi != NULL);
 	dmi->dmi_xs_id	= dx->dx_xs_id;
+	// target id
 	dmi->dmi_tgt_id	= dx->dx_tgt_id;
 	dmi->dmi_ctx_id	= -1;
 	D_INIT_LIST_HEAD(&dmi->dmi_dtx_batched_cont_open_list);
@@ -734,6 +736,7 @@ dss_mem_total_free_track(void *arg, daos_size_t bytes)
  * \retval	= 0 if starting succeeds.
  * \retval	negative errno if starting fails.
  */
+// todo: sys xs 和sys target
 static int
 dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 {
@@ -795,9 +798,11 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 	 * Generate name for each xstreams so that they can be easily identified
 	 * and monitored independently (e.g. via ps(1))
 	 */
+	// 根据xs id 获取target id
 	dx->dx_tgt_id = dss_xs2tgt(xs_id);
 	if (xs_id < dss_sys_xs_nr) {
 		/** system xtreams are named daos_sys_$num */
+		// sys 类型的xs 的名字
 		snprintf(dx->dx_name, DSS_XS_NAME_LEN, DSS_SYS_XS_NAME_FMT,
 			 xs_id);
 	} else if (dx->dx_main_xs) {
@@ -1357,6 +1362,7 @@ dss_sys_db_init()
 
 db_init:
 	// /mnt/daos0/daos_sys/sys_db
+	// 这个是给smd 模块用的，vos db 是个全局的变量
 	rc = vos_db_init(bio_nvme_configured(SMD_DEV_TYPE_META) ? sys_db_path : dss_storage_path);
 	if (rc)
 		goto out;
@@ -1411,6 +1417,7 @@ dss_srv_init(void)
 	xstream_data.xd_init_step = XD_INIT_ULT_BARRIER;
 
 	/* register xstream-local storage key */
+	// 每个线程独有的数据的key
 	rc = pthread_key_create(&dss_tls_key, NULL);
 	if (rc) {
 		rc = dss_abterr2der(rc);
@@ -1428,6 +1435,9 @@ dss_srv_init(void)
 	xstream_data.xd_init_step = XD_INIT_TLS_INIT;
 
 	// 创建 /mnt/daos0/daos_sys/sys_db 等
+	// todo: 这个是通过raft 来保证副本一致性的吗？
+	// todo: 这个和control_raft 下面的 daos_system.db 各自都是负责存储什么信息的
+	// 现在这个是给vos 模块用的，是用的c 的raft 库，control_raft 是用的golang 的raft 库
 	rc = dss_sys_db_init();
 	if (rc != 0) {
 		D_ERROR("Failed to initialize local DB: "DF_RC"\n", DP_RC(rc));
@@ -1435,6 +1445,7 @@ dss_srv_init(void)
 	}
 	xstream_data.xd_init_step = XD_INIT_SYS_DB;
 
+	// 注册 rdma 相关的操作
 	bio_register_bulk_ops(crt_bulk_create, crt_bulk_free);
 
 	/* start xstreams */
@@ -1452,6 +1463,7 @@ dss_srv_init(void)
 	D_ASSERT(rc == 0);
 
 	/* start up drpc listener */
+	// todo: server 那边是怎么初始化的
 	rc = drpc_listener_init();
 	if (rc != 0) {
 		D_ERROR("Failed to start dRPC listener: "DF_RC"\n", DP_RC(rc));

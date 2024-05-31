@@ -75,6 +75,7 @@ struct bio_iov {
 	// buff 的长度
 	size_t		 bi_data_len;
 	// 这里的bi address 和上面的bi buff 是什么区别。bi buff 是地址，bi address 里存的是off
+	// 这个就是vea_reserve 中预留的块的off 信息，后面spdk_blob_io_write 就是用这个转换后的off 信息
 	bio_addr_t	 bi_addr;
 
 	/** can be used to fetch more than actual address. Useful if more
@@ -96,6 +97,7 @@ struct bio_sglist {
 /** Max number of vos targets per engine */
 #define			 BIO_MAX_VOS_TGT_CNT	96
 /* System xstream target ID */
+// todo: 系统target id 不是-1 吗
 #define			 BIO_SYS_TGT_ID		1024
 /* for standalone VOS */
 #define			 BIO_STANDALONE_TGT_ID	-1
@@ -141,7 +143,7 @@ bio_addr_set(bio_addr_t *addr, uint16_t type, uint64_t off)
 	addr->ba_type = type;
 	// 对于scm 来说，是内存实际地址
 	// 对于nvme 来说，是spdk blob 的offset，最后调用spdk_blob_io_write 接口时候是用的这个offset
-	// todo: 那么这个off 是从哪里来的呢
+	// todo: 那么这个off 是从哪里来的呢: 预留资源的时候设置的
 	addr->ba_off = umem_off2offset(off);
 }
 

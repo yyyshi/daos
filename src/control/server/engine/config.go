@@ -111,8 +111,10 @@ func cleanEnvVars(in, allowed []string) (out []string) {
 }
 
 // Config encapsulates an I/O Engine's configuration.
+// engine 的参数
 type Config struct {
 	Modules           string         `yaml:"modules,omitempty" cmdLongFlag:"--modules" cmdShortFlag:"-m"`
+	// target 格式
 	TargetCount       int            `yaml:"targets,omitempty" cmdLongFlag:"--targets,nonzero" cmdShortFlag:"-t,nonzero"`
 	HelperStreamCount int            `yaml:"nr_xs_helpers" cmdLongFlag:"--xshelpernr" cmdShortFlag:"-x"`
 	ServiceThreadCore int            `yaml:"first_core" cmdLongFlag:"--firstcore,nonzero" cmdShortFlag:"-f,nonzero"`
@@ -120,6 +122,7 @@ type Config struct {
 	SocketDir         string         `yaml:"-" cmdLongFlag:"--socket_dir" cmdShortFlag:"-d"`
 	LogMask           string         `yaml:"log_mask,omitempty" cmdEnv:"D_LOG_MASK"`
 	LogFile           string         `yaml:"log_file,omitempty" cmdEnv:"D_LOG_FILE"`
+	// 最初都是存储在这里，后面会转存到 TierConfig 里
 	LegacyStorage     LegacyStorage  `yaml:",inline,omitempty"`
 	Storage           storage.Config `yaml:",inline,omitempty"`
 	Fabric            FabricConfig   `yaml:",inline"`

@@ -85,6 +85,7 @@ dss_module_load(const char *modname)
 
 	/* load the dynamic library */
 	sprintf(name, "lib%s.so", modname);
+	// 加载动态库
 	handle = dlopen(name, RTLD_LAZY | RTLD_GLOBAL);
 	if (handle == NULL) {
 		D_ERROR("cannot load %s: %s\n", name, dlerror());
@@ -124,6 +125,7 @@ dss_module_load(const char *modname)
 	 * tracking list
 	 */
 	D_MUTEX_LOCK(&loaded_mod_list_lock);
+	// 加载成功的mod
 	d_list_add_tail(&lmod->lm_lk, &loaded_mod_list);
 	dss_modules[smod->sm_mod_id] = smod;
 	D_MUTEX_UNLOCK(&loaded_mod_list_lock);
@@ -251,6 +253,7 @@ dss_module_init_all(uint64_t *mod_facs)
 
 	/* lookup the module from the loaded module list */
 	D_MUTEX_LOCK(&loaded_mod_list_lock);
+	// 实现加载好的模块列表
 	d_list_for_each_entry_safe(lmod, tmp, &loaded_mod_list, lm_lk) {
 		if (rc != 0) {
 			dss_module_unload_internal(lmod);
@@ -259,6 +262,7 @@ dss_module_init_all(uint64_t *mod_facs)
 			continue;
 		}
 		fac = 0;
+		// 初始化mod
 		rc = dss_module_init_one(lmod, &fac);
 		*mod_facs |= fac;
 	}
@@ -298,11 +302,15 @@ dss_module_setup_all(void)
 	int			rc = 0;
 
 	D_MUTEX_LOCK(&loaded_mod_list_lock);
+	// 实现加载好的模块
 	d_list_for_each_entry(mod, &loaded_mod_list, lm_lk) {
 		struct dss_module *m = mod->lm_dss_mod;
 
 		if (m->sm_setup == NULL)
 			continue;
+		// 对所有模块，执行他们的setup 函数
+		// 比如 ds_mgmt_setup
+		// 比如srv.c 下的 setup
 		rc = m->sm_setup();
 		if (rc != 0) {
 			D_ERROR("failed to set up module %s: %d\n", m->sm_name,

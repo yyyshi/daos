@@ -849,6 +849,7 @@ vos_self_nvme_fini(void)
 }
 
 /* Storage path, NVMe config & numa node used by standalone VOS */
+// 每个engine 的配置的bdev 设备的列表
 #define VOS_NVME_CONF		"daos_nvme.conf"
 #define VOS_NVME_NUMA_NODE	DAOS_NVME_NUMANODE_NONE
 #define VOS_NVME_MEM_SIZE	1024
@@ -862,6 +863,7 @@ vos_self_nvme_init(const char *vos_path)
 	int	 rc, fd;
 
 	D_ASSERT(vos_path != NULL);
+	// bdev 对应的配置文件
 	D_ASPRINTF(nvme_conf, "%s/%s", vos_path, VOS_NVME_CONF);
 	if (nvme_conf == NULL)
 		return -DER_NOMEM;
@@ -880,11 +882,15 @@ vos_self_nvme_init(const char *vos_path)
 		goto out;
 
 	/* Only use hugepages if NVME SSD configuration existed. */
+	// 仅在nvme 配置文件存在的时候才启用大页
+	// 只读模式打开，即daos_nvme.conf 早就创建好了
 	fd = open(nvme_conf, O_RDONLY, 0600);
 	if (fd < 0) {
+		// open 失败
 		rc = bio_nvme_init(NULL, VOS_NVME_NUMA_NODE, 0, 0,
 				   VOS_NVME_NR_TARGET, true);
 	} else {
+		// open 成功
 		rc = bio_nvme_init(nvme_conf, VOS_NVME_NUMA_NODE,
 				   VOS_NVME_MEM_SIZE, VOS_NVME_HUGEPAGE_SIZE,
 				   VOS_NVME_NR_TARGET, true);

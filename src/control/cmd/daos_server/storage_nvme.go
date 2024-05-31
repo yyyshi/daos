@@ -242,6 +242,7 @@ func (cmd *prepareNVMeCmd) Execute(_ []string) error {
 
 	cmd.Debugf("executing prepare drives command: %+v", cmd)
 
+	// prepare 时候会设置pcie allow list
 	req := storage.BdevPrepareRequest{
 		HugepageCount: cmd.NrHugepages,
 		TargetUser:    cmd.TargetUser,

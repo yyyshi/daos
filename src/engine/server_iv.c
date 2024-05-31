@@ -895,6 +895,7 @@ ds_iv_init()
 {
 	D_INIT_LIST_HEAD(&ds_iv_ns_list);
 	D_INIT_LIST_HEAD(&ds_iv_class_list);
+	// todo: 再研究下这些tree
 	ds_iv_ns_tree_topo = crt_tree_topo(CRT_TREE_KNOMIAL, 4);
 }
 

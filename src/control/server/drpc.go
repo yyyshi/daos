@@ -22,6 +22,7 @@ import (
 )
 
 func getDrpcServerSocketPath(sockDir string) string {
+	// drpc server这边
 	return filepath.Join(sockDir, "daos_server.sock")
 }
 
@@ -80,6 +81,7 @@ func drpcServerSetup(ctx context.Context, req *drpcServerSetupReq) error {
 		return err
 	}
 
+	// /var/run/下的socket 文件
 	sockPath := getDrpcServerSocketPath(req.sockDir)
 
 	// Server socket file to be readable and writable by user. daos_server should receive

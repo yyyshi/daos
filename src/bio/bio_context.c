@@ -202,6 +202,7 @@ blob_msg_create(void *msg_arg)
 {
 	struct blob_msg_arg *arg = msg_arg;
 
+	// 在指定的spdk bs 下创建blob
 	spdk_bs_create_blob_ext(arg->bma_bs, &arg->bma_opts, blob_create_cb,
 				msg_arg);
 }
@@ -299,9 +300,12 @@ bio_xs_blobstore_by_devid(struct bio_xs_context *xs_ctxt, uuid_t dev_uuid)
  * Case3: WAL on dedicated blobstore, meta and data share the same blobstore.
  * Case4: WAL, meta and data are on dedicated blobstore respectively.
  */
+// 几种不同的设备使用组合
 struct bio_xs_blobstore *
 bio_xs_context2xs_blobstore(struct bio_xs_context *xs_ctxt, enum smd_dev_type st)
 {
+	// 这里是从 xs_ctxt 里根据type 获取对应的xs bs
+	// todo: 那么这些bs 是在什么时候创建的呢
 	struct bio_xs_blobstore *bxb = NULL;
 
 	if (st != SMD_DEV_TYPE_DATA)
@@ -474,6 +478,7 @@ bio_blob_create(uuid_t uuid, struct bio_xs_context *xs_ctxt, uint64_t blob_sz,
 {
 	struct blob_msg_arg		 bma = { 0 };
 	struct blob_cp_arg		*ba = &bma.bma_cp_arg;
+	// todo: 搞这么多blobstore 吗？
 	struct bio_xs_blobstore		*bxb;
 	struct bio_blobstore		*bbs;
 	uint64_t			 cluster_sz;
@@ -481,10 +486,13 @@ bio_blob_create(uuid_t uuid, struct bio_xs_context *xs_ctxt, uint64_t blob_sz,
 	int				 rc;
 
 	D_ASSERT(xs_ctxt != NULL);
+	// xs ctx 获取bio xs bs
 	bxb = bio_xs_context2xs_blobstore(xs_ctxt, st);
 	D_ASSERT(bxb != NULL);
 
+	// bio 模块的blobstore 类型
 	bbs = bxb->bxb_blobstore;
+	// bbs 的bb_bs 类型是spdk_blob_store
 	cluster_sz = bbs->bb_bs != NULL ?
 		spdk_bs_get_cluster_size(bbs->bb_bs) : 0;
 
@@ -507,24 +515,32 @@ bio_blob_create(uuid_t uuid, struct bio_xs_context *xs_ctxt, uint64_t blob_sz,
 	 * Query per-server metadata to make sure the blob for this pool:target
 	 * hasn't been created yet.
 	 */
+
+	// 到在这里的时候，spdk bs 对应的blob 是已经创建好的了，这里将通过smd 模块查询对应的blob
+	// 根据uuid 和targetid 获取blobid
+	// 这里正常应该查不到才对，如果查到了，报错
 	if (bio_nvme_configured(SMD_DEV_TYPE_META)) {
 		if (flags & BIO_MC_FL_RDB)
 			rc = smd_rdb_get_blob(uuid, xs_ctxt->bxc_tgt_id, st, &blob_id1);
 		else
 			rc = smd_pool_get_blob(uuid, xs_ctxt->bxc_tgt_id, st, &blob_id1);
 	} else {
+		// 没配置bdev_roles 的话走这里
 		rc = smd_pool_get_blob(uuid, xs_ctxt->bxc_tgt_id, st, &blob_id1);
 	}
 
+	// 查到了，报错退出
 	if (rc == 0) {
 		D_ERROR("Duplicated blob for xs:%p pool:"DF_UUID"\n", xs_ctxt, DP_UUID(uuid));
 		return -DER_EXIST;
 	}
 
+	// 没查到，创建
 	rc = blob_cp_arg_init(ba);
 	if (rc != 0)
 		return rc;
 
+	// 维护xs 对bs 的独占访问
 	rc = bio_bs_hold(bbs);
 	if (rc) {
 		blob_cp_arg_fini(ba);
@@ -533,21 +549,27 @@ bio_blob_create(uuid_t uuid, struct bio_xs_context *xs_ctxt, uint64_t blob_sz,
 
 	ba->bca_inflights = 1;
 	bma.bma_bs = bbs->bb_bs;
+	// 通过send msg 的方式来通信，让bbs 所属的线程创建blob
 	spdk_thread_send_msg(owner_thread(bbs), blob_msg_create, &bma);
 
 	/* Wait for blob creation done */
+	// 等待blob 创建成功
 	blob_wait_completion(xs_ctxt, ba);
 	rc = ba->bca_rc;
 
 	if (rc != 0) {
+		// 创建blob 失败
 		D_ERROR("Create blob failed for xs:%p pool:"DF_UUID" rc:%d\n",
 			xs_ctxt, DP_UUID(uuid), rc);
 	} else {
+		// blob 创建成功
 		D_ASSERT(ba->bca_id != 0);
 		D_DEBUG(DB_MGMT, "Successfully created blobID "DF_U64" for xs:"
 			"%p pool:"DF_UUID" blob size:"DF_U64" clusters\n",
 			ba->bca_id, xs_ctxt, DP_UUID(uuid),
 			bma.bma_opts.num_clusters);
+		// 将新创建的blob 分配给target
+		// 进入哪个分支与 bdev_roles 配置参数有关
 		if (bio_nvme_configured(SMD_DEV_TYPE_META)) {
 			if (flags & BIO_MC_FL_RDB)
 				rc = smd_rdb_add_tgt(uuid, xs_ctxt->bxc_tgt_id, ba->bca_id, st,
@@ -556,9 +578,11 @@ bio_blob_create(uuid_t uuid, struct bio_xs_context *xs_ctxt, uint64_t blob_sz,
 				rc = smd_pool_add_tgt(uuid, xs_ctxt->bxc_tgt_id, ba->bca_id, st,
 						      blob_sz);
 		} else {
+			// 没配置bdev_roles 的走这里
 			rc = smd_pool_add_tgt(uuid, xs_ctxt->bxc_tgt_id, ba->bca_id, st, blob_sz);
 		}
 
+		// 分配blob 到target 失败
 		if (rc != 0) {
 			D_ERROR("Failed to assign pool blob:"DF_U64" to pool: "
 				""DF_UUID":%d. %d\n", ba->bca_id, DP_UUID(uuid),
@@ -569,6 +593,7 @@ bio_blob_create(uuid_t uuid, struct bio_xs_context *xs_ctxt, uint64_t blob_sz,
 					""DF_U64" for xs:%p pool:"DF_UUID"\n",
 					ba->bca_id, xs_ctxt, DP_UUID(uuid));
 		} else {
+			// 分配blob 到target 成功
 			D_DEBUG(DB_MGMT, "Successfully assign blob:"DF_U64" "
 				"to pool:"DF_UUID":%d\n", ba->bca_id,
 				DP_UUID(uuid), xs_ctxt->bxc_tgt_id);
@@ -576,6 +601,7 @@ bio_blob_create(uuid_t uuid, struct bio_xs_context *xs_ctxt, uint64_t blob_sz,
 		}
 	}
 
+	// 解除当前xs 对bs 的独占访问
 	bio_bs_unhold(bbs);
 	blob_cp_arg_fini(ba);
 	return rc;
@@ -599,6 +625,7 @@ __bio_ioctxt_open(struct bio_io_context **pctxt, struct bio_xs_context *xs_ctxt,
 	ctxt->bic_xs_ctxt = xs_ctxt;
 	uuid_copy(ctxt->bic_pool_id, uuid);
 
+	// 获取xs_ctx 里已有的bs
 	bxb = bio_xs_context2xs_blobstore(xs_ctxt, st);
 	D_ASSERT(bxb != NULL);
 	rc = bio_bs_hold(bxb->bxb_blobstore);
@@ -607,6 +634,7 @@ __bio_ioctxt_open(struct bio_io_context **pctxt, struct bio_xs_context *xs_ctxt,
 		return rc;
 	}
 
+	// 放到bio ctx 里，同一个xs 会复用一个bs
 	ctxt->bic_xs_blobstore = bxb;
 	// 打开创建好的blob，后面的resize 读写blob 等操作都需要先open
 	rc = bio_blob_open(ctxt, false, flags, st, open_blobid);
@@ -650,14 +678,17 @@ int bio_mc_create(struct bio_xs_context *xs_ctxt, uuid_t pool_id, uint64_t meta_
 	spdk_blob_id		 meta_blobid = SPDK_BLOBID_INVALID;
 	// mc 里面存储三种（data/meta/wal）设备的bio ctx 信息
 	struct bio_meta_context *mc = NULL;
+	// 设备元数据的信息，包含blob id等
 	struct meta_fmt_info	*fi = NULL;
 	// 三种设备对应的bs 数组
+	// xs 的blobstore
 	struct bio_xs_blobstore *bxb;
 
 	D_ASSERT(xs_ctxt != NULL);
 	if (data_sz > 0 && bio_nvme_configured(SMD_DEV_TYPE_DATA)) {
 		D_ASSERT(!(flags & BIO_MC_FL_RDB));
 		// 创建data 的blob。一个池只创建最多三个blob 吗？data/meta/wal
+		// 每个bs 对应一个blob
 		rc = bio_blob_create(pool_id, xs_ctxt, data_sz, SMD_DEV_TYPE_DATA, flags,
 				     &data_blobid);
 		if (rc)
@@ -708,12 +739,14 @@ int bio_mc_create(struct bio_xs_context *xs_ctxt, uuid_t pool_id, uint64_t meta_
 	}
 
 	D_ASSERT(meta_blobid != SPDK_BLOBID_INVALID);
+	// create 的时候创建的blob，open 的时候根据id 打开对应的blob
 	rc = __bio_ioctxt_open(&mc->mc_meta, xs_ctxt, pool_id, flags, SMD_DEV_TYPE_META,
 			       meta_blobid);
 	if (rc)
 		goto delete_wal;
 
 	D_ASSERT(wal_blobid != SPDK_BLOBID_INVALID);
+	// 打开wal 的blob
 	rc = __bio_ioctxt_open(&mc->mc_wal, xs_ctxt, pool_id, flags, SMD_DEV_TYPE_WAL,
 			       wal_blobid);
 	if (rc)
@@ -814,18 +847,32 @@ bio_blob_open(struct bio_io_context *ctxt, bool async, enum bio_mc_flags flags,
 		return -DER_NOMEM;
 	ba = &bma->bma_cp_arg;
 
+	// todo: 这种场景，blob 从哪来
 	if (open_blobid == SPDK_BLOBID_INVALID) {
 		/*
 		 * Query per-server metadata to get blobID for this pool:target
 		 */
+		// bdev_roles 可以设置meta 角色的设备列表
 		if (bio_nvme_configured(SMD_DEV_TYPE_META)) {
+			// vos_pool_open 中都设置了这个flag
 			if (flags & BIO_MC_FL_RDB)
+				// todo: 是每个target 有一个bs，每个bs 再根据data，meta，wal 设备情况创建对应个数的blob？
+				// todo: target 和rank 以及xs 之间的对应关系又是什么样子？
+				// todo: 从rdb 中获取有效的blob（也就是说这些blob 已经创建好存储在rdb 中了么？）
+				/*
+				smd 是bio 中一个重要的子组件，由存储在scm 上的pmdk memobj池组成，用于跟踪每个daos。
+				持久元数据包括：1. nvme ssd 到xs 映射关系（配置的本地nvme list 分配给不同的xs 以避免争用），还存储了设备的状态，normal 或者faulty
+				2. nvme 池table：nvme ssd，daoserver xs，spdk blob id 的映射（vos pool 中的blob id 到xs 的映射）。blob大小也和spdk blob id 一起存储
+				，以便在nvme 设备热插拔的情况下支持在新设备上创建新的blob。当daos 启动后，这些table 信息从持久内存加载，用于初始化table，以及加载任何以前的bs 和blob
+				// todo 设备：在代码里对应的是什么玩意
+				*/
 				rc = smd_rdb_get_blob(ctxt->bic_pool_id, xs_ctxt->bxc_tgt_id,
 						      st, &blob_id);
 			else
 				rc = smd_pool_get_blob(ctxt->bic_pool_id, xs_ctxt->bxc_tgt_id,
 						       st, &blob_id);
 		} else {
+			// 没配置bdev_roles 的走这里
 			rc = smd_pool_get_blob(ctxt->bic_pool_id, xs_ctxt->bxc_tgt_id, st,
 					       &blob_id);
 		}
@@ -946,6 +993,7 @@ int bio_mc_open(struct bio_xs_context *xs_ctxt, uuid_t pool_id,
 	if (bio_mc == NULL)
 		return -DER_NOMEM;
 
+	// 1. open meta 设备
 	rc = __bio_ioctxt_open(&bio_mc->mc_meta, xs_ctxt, pool_id, flags, SMD_DEV_TYPE_META,
 			       SPDK_BLOBID_INVALID);
 	if (rc)
@@ -957,6 +1005,7 @@ int bio_mc_open(struct bio_xs_context *xs_ctxt, uuid_t pool_id,
 
 
 	D_ASSERT(bio_mc->mc_meta_hdr.mh_wal_blobid != SPDK_BLOBID_INVALID);
+	// 2. open wal 设备
 	rc = __bio_ioctxt_open(&bio_mc->mc_wal, xs_ctxt, pool_id, flags, SMD_DEV_TYPE_WAL,
 			       bio_mc->mc_meta_hdr.mh_wal_blobid);
 	if (rc)
@@ -966,9 +1015,11 @@ int bio_mc_open(struct bio_xs_context *xs_ctxt, uuid_t pool_id,
 	if (rc)
 		goto close_wal_ioctxt;
 
+	// 获取创建好的blob id，打开对应的blob
 	data_blobid = bio_mc->mc_meta_hdr.mh_data_blobid;
 	if (data_blobid != SPDK_BLOBID_INVALID) {
 		D_ASSERT(!(flags & BIO_MC_FL_RDB));
+		// 3. open data 设备
 		rc = __bio_ioctxt_open(&bio_mc->mc_data, xs_ctxt, pool_id, flags,
 				       SMD_DEV_TYPE_DATA, data_blobid);
 		if (rc)

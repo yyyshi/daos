@@ -363,7 +363,6 @@ dss_xstream_has_nvme(struct dss_xstream *dx)
 	// 调用位置搜：设置是否为main xs 的唯一的地方
 	if (dx->dx_main_xs != 0)
 		return true;
-	// todo: daos 配置文件中的nvme 设备是怎么传输给spdk 的
 	// 不是main xs，但满足 meta 类型role 在配置文件中配置 && 当前是第一个xs。也返回true
 	// 一共有三种类型的role（data/meta/wal）
 	if (bio_nvme_configured(SMD_DEV_TYPE_META) && dx->dx_xs_id == 0)

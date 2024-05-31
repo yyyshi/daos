@@ -47,6 +47,7 @@ const (
 	ConfBdevNvmeSetOptions       = "bdev_nvme_set_options"
 	ConfBdevNvmeSetHotplug       = "bdev_nvme_set_hotplug"
 	ConfBdevAioCreate            = "bdev_aio_create"
+	// 对应到daos_nvme.conf 中的设备的 method
 	ConfBdevNvmeAttachController = C.NVME_CONF_ATTACH_CONTROLLER
 	ConfVmdEnable                = C.NVME_CONF_ENABLE_VMD
 	ConfSetHotplugBusidRange     = C.NVME_CONF_SET_HOTPLUG_RANGE

@@ -68,6 +68,7 @@ func (d *DomainSocketServer) Listen(ctx context.Context) {
 	}()
 
 	for {
+		// server 等待engine 的连接
 		conn, err := d.listener.Accept()
 		if err != nil {
 			// If we're shutting down anyhow, don't print connection errors.
@@ -77,10 +78,12 @@ func (d *DomainSocketServer) Listen(ctx context.Context) {
 			return
 		}
 
+		// todo: session 相关的功能实现
 		c := NewSession(conn, d.service)
 		d.sessionsMutex.Lock()
 		d.sessions[conn] = c
 		d.sessionsMutex.Unlock()
+		// 将drpc 请求交给对应的模块完成处理并返回
 		go d.listenSession(ctx, c)
 	}
 }
@@ -93,6 +96,7 @@ func (d *DomainSocketServer) Start(ctx context.Context) error {
 	}
 
 	addr := &net.UnixAddr{Name: d.sockFile, Net: "unixpacket"}
+	// 根据指定的path 的socket，创建监听
 	lis, err := net.ListenUnix("unixpacket", addr)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to listen on unix socket %s", d.sockFile)
@@ -101,10 +105,12 @@ func (d *DomainSocketServer) Start(ctx context.Context) error {
 
 	// The only writer should be the I/O Engines which should be running as the same user as
 	// daos_server process.
+	// 允许daos_engine 修改当前socket
 	if err := os.Chmod(d.sockFile, d.sockFileMode); err != nil {
 		return errors.Wrapf(err, "Unable to set permissions on %s", d.sockFile)
 	}
 
+	// 监听drpc。使用方法请参考drpc api
 	go d.Listen(ctx)
 	return nil
 }
@@ -152,6 +158,7 @@ func (s *Session) ProcessIncomingMessage(ctx context.Context) error {
 		return err
 	}
 
+	// 处理drpc 请求
 	response, err := s.mod.ProcessMessage(ctx, s, buffer[:bytesRead])
 	if err != nil {
 		// The only way we hit here is if we fail to marshal the module's

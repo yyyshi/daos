@@ -261,6 +261,7 @@ func (p *Provider) CheckFormat(req storage.ScmFormatRequest) (*storage.ScmFormat
 }
 
 // Format attempts to fulfill the specified SCM format request.
+// scm 的格式化
 func (p *Provider) Format(req storage.ScmFormatRequest) (*storage.ScmFormatResponse, error) {
 	check, err := p.CheckFormat(req)
 	if err != nil {
@@ -272,10 +273,12 @@ func (p *Provider) Format(req storage.ScmFormatRequest) (*storage.ScmFormatRespo
 		}
 	}
 
+	// 清除挂载点
 	if err := p.mounter.ClearMountpoint(req.Mountpoint); err != nil {
 		return nil, errors.Wrap(err, "failed to clear existing mount")
 	}
 
+	// 创建挂载路径
 	if err := p.mounter.MakeMountPath(req.Mountpoint, req.OwnerUID, req.OwnerGID); err != nil {
 		return nil, errors.Wrap(err, "failed to create mount path")
 	}
@@ -283,6 +286,7 @@ func (p *Provider) Format(req storage.ScmFormatRequest) (*storage.ScmFormatRespo
 	switch {
 	case req.Ramdisk != nil:
 		return p.formatRamdisk(req)
+	// 带scm 的class 是dcpm
 	case req.Dcpm != nil:
 		return p.formatDcpm(req)
 	default:
@@ -380,6 +384,7 @@ func (p *Provider) formatDcpm(req storage.ScmFormatRequest) (*storage.ScmFormatR
 	opts = append(opts, getDistroArgs()...)
 
 	p.log.Debugf("running mkfs.%s %s", dcpmFsType, req.Dcpm.Device)
+	// 创建文件系统
 	if err := p.sys.Mkfs(system.MkfsReq{
 		Filesystem: dcpmFsType,
 		Device:     req.Dcpm.Device,
@@ -389,6 +394,7 @@ func (p *Provider) formatDcpm(req storage.ScmFormatRequest) (*storage.ScmFormatR
 		return nil, errors.Wrapf(err, "failed to format %s", req.Dcpm.Device)
 	}
 
+	// 挂载文件系统
 	res, err := p.mountDcpm(req.Dcpm.Device, req.Mountpoint)
 	if err != nil {
 		return nil, err

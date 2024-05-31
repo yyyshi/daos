@@ -66,6 +66,7 @@ rdb_create(const char *path, const uuid_t uuid, uint64_t caller_term, size_t siz
 		goto out;
 	ABT_thread_yield();
 
+	// todo: vos pool 和dmg 创建的pool 是什么关系
 	/* Create and open the metadata container. */
 	rc = vos_cont_create(pool, (unsigned char *)uuid);
 	if (rc != 0)
@@ -307,6 +308,7 @@ rdb_open_internal(daos_handle_t pool, daos_handle_t mc, const uuid_t uuid, uint6
 	if (SCM_FREE(&vps) > SCM_SYS(&vps)) {
 		rdb_extra_sys[DAOS_MEDIA_SCM] =
 			     ((SCM_FREE(&vps) - SCM_SYS(&vps)) * 52) / 100;
+		// 设置vea 的相关设备空间信息，预留资源的时候会用到
 		rc = vos_pool_space_sys_set(db->d_pool, &rdb_extra_sys[0]);
 		if (rc != 0) {
 			D_ERROR(DF_DB": failed to reserve more vos pool SCM "

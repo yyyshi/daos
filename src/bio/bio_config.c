@@ -482,6 +482,7 @@ check_name_from_bdev_subsys(struct json_config_ctx *ctx)
 {
 	struct config_entry	 cfg = {};
 	struct spdk_json_val	*key, *value;
+	// 保存所有bdev 的name 的列表
 	char			*name;
 	int			 rc = 0;
 	int			 roles = 0;
@@ -514,20 +515,44 @@ check_name_from_bdev_subsys(struct json_config_ctx *ctx)
 	while (key != NULL) {
 		value = json_value(key);
 		if (spdk_json_strequal(key, "name")) {
+			// 获取name 的值，类似：Nvme_server03_0_1_0
 			value = json_value(key);
 			if (!value || value->len > BDEV_NAME_MAX_LEN) {
 				D_ERROR("Invalid json value\n");
 				D_GOTO(free_name, rc = -DER_INVAL);
 			}
+
+			// 追加到name
 			memcpy(name, value->start, value->len);
 			name[value->len] = '\0';
 
 			D_DEBUG(DB_MGMT, "check bdev name: %s\n", name);
+			// 根据name 转化为role
+			/*
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server03_0_1_0",
+				"traddr": "0000:65:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			},
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server03_1_1_0",
+				"traddr": "0000:66:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			},
+
+			*/
 			rc = bdev_name2roles(name);
 			if (rc < 0) {
 				D_ERROR("bdev_name contains invalid roles: %s\n", name);
 				D_GOTO(free_name, rc);
 			}
+			// 统计role 二进制信息，并返回
 			roles |= rc;
 		}
 		key = spdk_json_next(key);
@@ -594,6 +619,7 @@ check_md_on_ssd_status(struct json_config_ctx *ctx, struct spdk_json_val *bdev_s
 	int	rc;
 	int	roles = 0;
 
+	// 解码
 	rc = decode_subsystem_configs(bdev_ss, ctx);
 	if (rc != 0)
 		return rc;
@@ -666,6 +692,7 @@ bio_add_allowed_alloc(const char *nvme_conf, struct spdk_env_opts *opts, int *ro
 		D_GOTO(out, rc);
 
 	/* Capture subsystems array */
+	// 获取所有子系统
 	rc = spdk_json_find_array(ctx->values, "subsystems", NULL, &ctx->subsystems);
 	if (rc < 0) {
 		D_ERROR("Failed to find subsystems key: %s\n", strerror(-rc));
@@ -673,6 +700,7 @@ bio_add_allowed_alloc(const char *nvme_conf, struct spdk_env_opts *opts, int *ro
 	}
 
 	/* Get first subsystem */
+	// 获取第一个子系统
 	ctx->subsystems_it = spdk_json_array_first(ctx->subsystems);
 	if (ctx->subsystems_it == NULL) {
 		D_ERROR("Empty subsystems section\n");
@@ -688,6 +716,7 @@ bio_add_allowed_alloc(const char *nvme_conf, struct spdk_env_opts *opts, int *ro
 			D_GOTO(out, rc = -DER_INVAL);
 		}
 
+		// 找到subsystem 的bdev
 		if (spdk_json_strequal(ctx->subsystem_name, "bdev"))
 			bdev_ss = ctx->subsystems_it;
 
@@ -707,6 +736,7 @@ bio_add_allowed_alloc(const char *nvme_conf, struct spdk_env_opts *opts, int *ro
 	if (rc < 0)
 		goto out;
 
+	// 检查bdev subsystem
 	rc = check_md_on_ssd_status(ctx, bdev_ss);
 	if (rc < 0)
 		goto out;

@@ -70,9 +70,13 @@ func newSrvModule(log logging.Logger, sysdb poolResolver, engines []Engine, even
 }
 
 // HandleCall is the handler for calls to the srvModule.
+// 接收srvModule 的处理函数
+// 调用：func (r *ModuleService) ProcessMessage(
+// 来自engine 的drpc 消息
 func (mod *srvModule) HandleCall(_ context.Context, session *drpc.Session, method drpc.Method, req []byte) ([]byte, error) {
 	switch method {
 	case drpc.MethodNotifyReady:
+		// engine 就绪消息
 		return nil, mod.handleNotifyReady(req)
 	case drpc.MethodBIOError:
 		return nil, mod.handleBioErr(req)
@@ -145,6 +149,7 @@ func (mod *srvModule) handlePoolFindByLabel(reqb []byte) ([]byte, error) {
 	return proto.Marshal(resp)
 }
 
+// 处理来自engine 的ready msg
 func (mod *srvModule) handleNotifyReady(reqb []byte) error {
 	req := &srvpb.NotifyReadyReq{}
 	if err := proto.Unmarshal(reqb, req); err != nil {
@@ -160,6 +165,7 @@ func (mod *srvModule) handleNotifyReady(reqb []byte) error {
 		return errors.Wrap(err, "check NotifyReady request socket path")
 	}
 
+	// engine 发送自己ready 状态给daos_server，将打破server 的阻塞
 	mod.engines[req.InstanceIdx].NotifyDrpcReady(req)
 
 	return nil

@@ -176,6 +176,7 @@ extent_free_class_add(struct vea_space_info *vsi, struct vea_extent_entry *entry
 
 	int_key = entry->vee_ext.vfe_blk_cnt;
 	/* Add to heap if it's a free extent */
+	// 大块的extent 存储在heap 中，小块的extent 存储在btree 中
 	if (int_key > vfc->vfc_large_thresh) {
 		rc = d_binheap_insert(&vfc->vfc_heap, &entry->vee_node);
 		if (rc != 0) {
@@ -584,16 +585,22 @@ compound_free_extent(struct vea_space_info *vsi, struct vea_free_extent *vfe,
 		goto accounting;
 	}
 
+	// 构建dummy，tree 里存的就是这个数据
 	memset(&dummy, 0, sizeof(dummy));
 	D_INIT_LIST_HEAD(&dummy.vee_link);
 	dummy.vee_ext = *vfe;
 
 	/* Add to in-memory free extent tree */
+	// 添加到内存的free extent tree
 	D_ASSERT(daos_handle_is_valid(vsi->vsi_free_btr));
+	// 根据vfe_blk_off 作为key 去upsert
 	d_iov_set(&key, &dummy.vee_ext.vfe_blk_off, sizeof(dummy.vee_ext.vfe_blk_off));
 	d_iov_set(&val, &dummy, sizeof(dummy));
 	d_iov_set(&val_out, NULL, 0);
 
+	// todo: dbtree 是什么设备，内存还是pmem
+	// 这个dbtree 是存储的offset
+	// dbtree 其实就是类似数据库的索引
 	rc = dbtree_upsert(vsi->vsi_free_btr, BTR_PROBE_BYPASS, DAOS_INTENT_UPDATE, &key,
 			   &val, &val_out);
 	if (rc != 0) {
@@ -605,6 +612,16 @@ compound_free_extent(struct vea_space_info *vsi, struct vea_free_extent *vfe,
 	entry = (struct vea_extent_entry *)val_out.iov_buf;
 	D_INIT_LIST_HEAD(&entry->vee_link);
 
+	// insert 到dbinheap（二叉堆） 中
+	// 大块的extent 存储在heap 中，小块的存储在btree 里
+	// todo: 为什么这么设计
+	/*
+	vea 模块维护两组元数据，一组在dram 中作为临时预留，另一组在rdma 中用于持久分配
+	vos 更新:
+	1.dram 中临时预留
+	2. rdma 将数据从client 传输到临时预留空间
+	3. 将预留空间转为持久分配，并在单个pmdk 事务中更新vos 索引中的分配地址（todo: 怎么转换的） 
+	*/
 	rc = extent_free_class_add(vsi, entry);
 
 accounting:

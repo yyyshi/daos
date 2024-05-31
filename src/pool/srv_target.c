@@ -281,6 +281,7 @@ struct pool_child_lookup_arg {
  * Called via dss_thread_collective() to create and add the ds_pool_child object
  * for one thread. This opens the matching VOS pool.
  */
+// todo: pool child 是个什么概念
 static int
 pool_child_add_one(void *varg)
 {

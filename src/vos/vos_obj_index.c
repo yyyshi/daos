@@ -73,6 +73,7 @@ oi_rec_alloc(struct btr_instance *tins, d_iov_t *key_iov,
 {
 	struct vos_container	*cont = vos_hdl2cont(tins->ti_coh);
 	struct dtx_handle	*dth = vos_dth_get(cont->vc_pool->vp_sysdb);
+	// vos obj 的df
 	struct vos_obj_df	*obj;
 	daos_unit_oid_t		*key;
 	umem_off_t		 obj_off;
@@ -196,11 +197,13 @@ oi_node_alloc(struct btr_instance *tins, int size)
 	return umem_zalloc(&tins->ti_umm, size);
 }
 
+// oi tree 的操作接口
 static btr_ops_t oi_btr_ops = {
 	.to_rec_msize		= oi_rec_msize,
 	.to_hkey_size		= oi_hkey_size,
 	.to_hkey_gen		= oi_hkey_gen,
 	.to_hkey_cmp		= oi_hkey_cmp,
+	// 创建oi tree
 	.to_rec_alloc		= oi_rec_alloc,
 	.to_rec_free		= oi_rec_free,
 	.to_rec_fetch		= oi_rec_fetch,
@@ -233,6 +236,7 @@ vos_oi_find(struct vos_container *cont, daos_unit_oid_t oid,
 		struct vos_obj_df *obj = val_iov.iov_buf;
 
 		D_ASSERT(daos_unit_obj_id_equal(obj->vo_id, oid));
+		// 获取到fetch 到的obj，里面有ilog 的df 信息
 		*obj_p = obj;
 		ilog = &obj->vo_ilog;
 	}
@@ -279,7 +283,7 @@ vos_oi_find_alloc(struct vos_container *cont, daos_unit_oid_t oid,
 	d_iov_set(&val_iov, NULL, 0);
 	d_iov_set(&key_iov, &oid, sizeof(oid));
 
-	// insert 新创建的元素到oi table。
+	// 1. 在oi table 中没找到，insert 新创建的元素到oi table。
 	// 执行 vos_cont_open 的时候创建树，即创建 cont->vc_btr_hdl
 	rc = dbtree_upsert(cont->vc_btr_hdl, BTR_PROBE_EQ, DAOS_INTENT_DEFAULT,
 			   &key_iov, &val_iov, NULL);
@@ -293,10 +297,12 @@ vos_oi_find_alloc(struct vos_container *cont, daos_unit_oid_t oid,
 
 	vos_ilog_ts_ignore(vos_cont2umm(cont), &obj->vo_ilog);
 	vos_ilog_ts_mark(ts_set, &obj->vo_ilog);
+	// 2. 如果找到了或者新增的ilog，直接open 后更新
 do_log:
 	if (!log)
 		goto skip_log;
 	vos_ilog_desc_cbs_init(&cbs, vos_cont2hdl(cont));
+	// 每次都是在更新前open，实际功能是创建ilog 的ctx，fetch 的话不需要
 	rc = ilog_open(vos_cont2umm(cont), &obj->vo_ilog, &cbs, &loh);
 	if (rc != 0)
 		return rc;

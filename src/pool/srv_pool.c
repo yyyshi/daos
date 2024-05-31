@@ -296,6 +296,7 @@ pool_svc_rdb_path_common(const uuid_t pool_uuid, const char *suffix)
 	D_ASPRINTF(name, RDB_FILE"pool%s", suffix);
 	if (name == NULL)
 		return NULL;
+	// 生成每个pool 的uuid 文件夹下的 rdb-pool 文件
 	rc = ds_mgmt_tgt_file(pool_uuid, name, NULL /* idx */, &path);
 	D_FREE(name);
 	if (rc != 0)
@@ -790,10 +791,13 @@ out:
  * redundancy factor. If the return value is 0, callers are responsible for
  * calling d_rank_list_free(*ranksp).
  */
+// rf 为冗余因子
+// todo: 这是选rank 还是选target
 static int
 select_svc_ranks(int svc_rf, const d_rank_list_t *target_addrs, int ndomains,
 		 const uint32_t *domains, d_rank_list_t **ranksp)
 {
+	// 要选多少个target
 	int			nreplicas = ds_pool_svc_rf_to_nreplicas(svc_rf);
 	int			selectable;
 	d_rank_list_t		*rnd_tgts;
@@ -802,6 +806,7 @@ select_svc_ranks(int svc_rf, const d_rank_list_t *target_addrs, int ndomains,
 	int			j;
 	int			rc;
 
+	// 先去重
 	rc = d_rank_list_dup(&rnd_tgts, target_addrs);
 	if (rc != 0)
 		return rc;
@@ -813,10 +818,14 @@ select_svc_ranks(int svc_rf, const d_rank_list_t *target_addrs, int ndomains,
 	/*daos_rank_list_shuffle(rnd_tgts);*/
 
 	/* Determine the number of selectable targets. */
+	// 参与选择的target 的数量
 	selectable = rnd_tgts->rl_nr;
 
+	// 如果要选的比可选的多，修改小一点
 	if (nreplicas > selectable)
 		nreplicas = selectable;
+	
+	// ranks 为最终要选的结果，ranks->rl_nr 为要选择的数量
 	ranks = daos_rank_list_alloc(nreplicas);
 	if (ranks == NULL)
 		D_GOTO(out, rc = -DER_NOMEM);
@@ -926,11 +935,14 @@ ds_pool_svc_dist_create(const uuid_t pool_uuid, int ntargets, const char *group,
 	D_DEBUG(DB_MD, DF_UUID": creating PS: ntargets=%d ndomains=%d svc_rf="DF_U64"\n",
 		DP_UUID(pool_uuid), ntargets, ndomains, svc_rf_entry->dpe_val);
 
+	// 选择rsvc 的ranks
 	rc = select_svc_ranks(svc_rf_entry->dpe_val, target_addrs, ndomains, domains, &ranks);
 	if (rc != 0)
 		D_GOTO(out, rc);
 
 	d_iov_set(&psid, (void *)pool_uuid, sizeof(uuid_t));
+	// 后面会使用pool 的uuid 创建后面的rdb-pool目录
+	// 请求在ranks 上启动rsvc 服务
 	rc = ds_rsvc_dist_start(DS_RSVC_CLASS_POOL, &psid, pool_uuid, ranks, RDB_NIL_TERM,
 				true /* create */, true /* bootstrap */, ds_rsvc_get_md_cap());
 	if (rc != 0)
@@ -2060,6 +2072,7 @@ start_one(uuid_t uuid, void *varg)
 
 	D_DEBUG(DB_MD, DF_UUID": starting pool\n", DP_UUID(uuid));
 
+	// todo: 这是干啥的
 	rc = ds_pool_start(uuid);
 	if (rc != 0) {
 		D_ERROR(DF_UUID": failed to start pool: %d\n", DP_UUID(uuid),
@@ -2072,6 +2085,16 @@ start_one(uuid_t uuid, void *varg)
 	 * Check if an RDB file exists, to avoid unnecessary error messages
 	 * from the ds_rsvc_start() call.
 	 */
+	// format 操作之前，mnt下什么数据都没有
+	// root@server03:/mnt/daos# ls
+	// root@server03:/mnt/daos#
+
+	// 每个engine 下每个池的uuid 目录下的rdb-pool
+	/*
+	root@server03:/mnt/daos/s0/772ac54a-25a3-43ef-a02d-e54efefab46e# ls
+	rdb-pool  vos-1   vos-11  vos-13  vos-15  vos-17  vos-19  vos-3  vos-5  vos-7  vos-9
+	vos-0     vos-10  vos-12  vos-14  vos-16  vos-18  vos-2   vos-4  vos-6  vos-8
+	*/
 	path = pool_svc_rdb_path(uuid);
 	if (path == NULL) {
 		D_ERROR(DF_UUID": failed to allocate rdb path\n",
@@ -2088,6 +2111,7 @@ start_one(uuid_t uuid, void *varg)
 	}
 
 	d_iov_set(&id, uuid, sizeof(uuid_t));
+	// todo: 他这些service 是怎么划分和分工的
 	ds_rsvc_start(DS_RSVC_CLASS_POOL, &id, uuid, RDB_NIL_TERM, false /* create */, 0 /* size */,
 		      NULL /* replicas */, NULL /* arg */);
 	return 0;
@@ -2099,6 +2123,7 @@ pool_start_all(void *arg)
 	int rc;
 
 	/* Scan the storage and start all pool services. */
+	// 启动所有的pool，会在每个engine 的每个池下面创建对应的rdb-pool 文件
 	rc = ds_mgmt_tgt_pool_iterate(start_one, NULL /* arg */);
 	if (rc != 0)
 		D_ERROR("failed to scan all pool services: "DF_RC"\n",
@@ -2113,6 +2138,7 @@ ds_pool_start_all(void)
 	int		rc;
 
 	/* Create a ULT to call ds_rsvc_start() in xstream 0. */
+	// 由主xs 启动
 	rc = dss_ult_create(pool_start_all, NULL /* arg */, DSS_XS_SYS,
 			    0 /* tgt_idx */, 0 /* stack_size */, &thread);
 	if (rc != 0) {

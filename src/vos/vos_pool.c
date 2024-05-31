@@ -365,6 +365,7 @@ vos_wal_id_cmp(struct umem_store *store, uint64_t id1, uint64_t id2)
 	return bio_wal_id_cmp(store->stor_priv, id1, id2);
 }
 
+// vos 相关的操作接口
 struct umem_store_ops vos_store_ops = {
 	.so_load	= vos_meta_load,
 	.so_read	= vos_meta_readv,
@@ -558,6 +559,7 @@ vos2mc_flags(unsigned int vos_flags)
 {
 	enum bio_mc_flags mc_flags = 0;
 
+	// vos 池都设置了这个flag
 	if (vos_flags & VOS_POF_RDB)
 		mc_flags |= BIO_MC_FL_RDB;
 
@@ -573,6 +575,7 @@ vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 	struct bio_xs_context	*xs_ctxt = vos_xsctxt_get();
 	// 和spdk 的blob store 一样，创建umem obj 之前也是先创建 umem store
 	struct umem_store	 store = { 0 };
+	// bio 元数据 ctx
 	struct bio_meta_context	*mc;
 	struct umem_pool	*pop = NULL;
 	enum bio_mc_flags	 mc_flags = vos2mc_flags(flags);
@@ -604,13 +607,14 @@ vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 		meta_sz = lstat.st_size;
 	}
 
+	// 1. spdk 相关操作
+	// 创建bio meta ctx
 	D_DEBUG(DB_MGMT, "Create BIO meta context for xs:%p pool:"DF_UUID" "
 		"meta_sz: %zu, nvme_sz: %zu wal_sz:%zu\n",
 		xs_ctxt, DP_UUID(pool_id), meta_sz, nvme_sz, wal_sz);
 
-	// todo: 创建meta context，带wal_size，这里meta 不是应该优先从 scm 申请资源吗？
-	// todo: meta 信息不是都存储在 scm 中吗？还是说有一部分存储在 nvme 中？
-	// 这里面会创建data/meta/wal 的各自的spdk_blob
+
+	// 创建data/meta/wal 的各自的spdk_blob，格式化meta/wal blob
 	rc = bio_mc_create(xs_ctxt, pool_id, meta_sz, wal_sz, nvme_sz, mc_flags);
 	if (rc != 0) {
 		D_ERROR("Failed to create BIO meta context for xs:%p pool:"DF_UUID". "DF_RC"\n",
@@ -618,7 +622,7 @@ vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 		return rc;
 	}
 
-	// wal open  --> load wal header
+	// 打开上边创建的data/meta/wal blobs，加载wal header，申请mc
 	rc = bio_mc_open(xs_ctxt, pool_id, mc_flags, &mc);
 	if (rc != 0) {
 		D_ERROR("Failed to open BIO meta context for xs:%p pool:"DF_UUID". "DF_RC"\n",
@@ -631,16 +635,19 @@ vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 		return rc;
 	}
 
+	// 元数据ctx（mc） 和umem store 关联
 	bio_meta_get_attr(mc, &store.stor_size, &store.stor_blk_size, &store.stor_hdr_blks);
 	// meta context，上边都是为了构造这个
 	store.stor_priv = mc;
 	// umem store 的注册函数
 	store.stor_ops = &vos_store_ops;
 
-	// scm 相关操作
+	// 2. scm 相关操作
 umem_create:
 	// 返回的umem_pool：pmem obj pool。
 	// pmdk 返回的pmem pool 放在 pop->up_priv  中
+	// 根据umem store 创建umem object
+	// 根据pop （pop == pmem object pool）可以获得pool 的df
 	pop = umempobj_create(path, layout, UMEMPOBJ_ENABLE_STATS, scm_sz, 0600, &store);
 	if (pop != NULL) {
 		*ph = pop;
@@ -932,6 +939,7 @@ vos_pool_create_ex(const char *path, uuid_t uuid, daos_size_t scm_sz,
 	struct umem_pool	*ph;
 	struct umem_attr	 uma = {0};
 	struct umem_instance	 umem = {0};
+	// pool 在scm 中存储的地址
 	struct vos_pool_df	*pool_df;
 	struct bio_blob_hdr	 blob_hdr;
 	daos_handle_t		 hdl;
@@ -949,7 +957,9 @@ vos_pool_create_ex(const char *path, uuid_t uuid, daos_size_t scm_sz,
 		flags |= VOS_POF_EXCL;
 
 	uuid_copy(ukey.uuid, uuid);
+	// 根据uuid 查询池
 	rc = pool_lookup(&ukey, &pool);
+	// 如果已经存在，报错
 	if (rc == 0) {
 		D_ASSERT(pool != NULL);
 		D_ERROR("Found already opened(%d) pool:%p dying(%d)\n",
@@ -958,6 +968,7 @@ vos_pool_create_ex(const char *path, uuid_t uuid, daos_size_t scm_sz,
 		return -DER_EXIST;
 	}
 
+	// 如果不存在，创建一个（正常就是应该不存在）
 	/* Path must be a file with a certain size when size argument is 0 */
 	if (!scm_sz && access(path, F_OK) == -1) {
 		D_ERROR("File not accessible (%d) when size is 0\n", errno);
@@ -973,6 +984,9 @@ vos_pool_create_ex(const char *path, uuid_t uuid, daos_size_t scm_sz,
 		return rc;
 	}
 
+	// 根据umem pool 的hdl 返回pool 的df（df 是pmem pool 的root ptr）
+	// 这个是pool 的df，cont 和obj 都有各自的df
+	// todo: cont，obj 的df 是怎么创建的？ 
 	pool_df = vos_pool_pop2df(ph);
 
 	/* If the file is fallocated separately we need the fallocated size
@@ -1062,6 +1076,9 @@ open:
 		goto close;
 
 	/* Create a VOS pool handle using ph. */
+	// 使用pool handle 创建vos pool
+	// vos pool df 可以找到 container 的df，一连串的找到object,dkey,akey,value 的信息
+	// 获取到poh
 	rc = pool_open(ph, pool_df, flags, NULL, poh);
 	ph = NULL;
 
@@ -1081,6 +1098,7 @@ vos_pool_create(const char *path, uuid_t uuid, daos_size_t scm_sz,
 	/* create vos pool with default WAL size */
 	// 使用默认的WAL size创建 vos pool，这里出现了 wal_size
 	// 会为data/meta/wal 分别创建自己的spdk blob，并写入元数据信息，比如bsid，blobid，设备 sz 等
+	// 创建成功后返回 poh
 	return vos_pool_create_ex(path, uuid, scm_sz, nvme_sz, 0, flags, poh);
 }
 
@@ -1280,6 +1298,7 @@ pool_open(void *ph, struct vos_pool_df *pool_df, unsigned int flags, void *metri
 	}
 
 	pool->vp_metrics = metrics;
+	// 如果配置了nvme 的信息，加载到vea 模块。vea 是专门为了管理blk 设备资源的
 	if (bio_nvme_configured(SMD_DEV_TYPE_DATA) && pool_df->pd_nvme_sz != 0) {
 		struct vea_unmap_context	 unmap_ctxt;
 		struct vos_pool_metrics		*vp_metrics = metrics;
@@ -1291,6 +1310,8 @@ pool_open(void *ph, struct vos_pool_df *pool_df, unsigned int flags, void *metri
 		unmap_ctxt.vnc_unmap = vos_blob_unmap_cb;
 		unmap_ctxt.vnc_data = vos_data_ioctxt(pool);
 		unmap_ctxt.vnc_ext_flush = flags & VOS_POF_EXTERNAL_FLUSH;
+		// 打开vos pool 的时候，先加载vea 的space 信息
+		// pool_df->pd_vea_df 里存储了vsi 的元数据信息
 		rc = vea_load(&pool->vp_umm, vos_txd_get(flags & VOS_POF_SYSDB),
 			      &pool_df->pd_vea_df, &unmap_ctxt, vea_metrics, &pool->vp_vea_info);
 		if (rc) {
@@ -1427,6 +1448,7 @@ out:
 int
 vos_pool_open(const char *path, uuid_t uuid, unsigned int flags, daos_handle_t *poh)
 {
+	// todo: 跟metrics 有什么关系呢
 	return vos_pool_open_metrics(path, uuid, flags, NULL, poh);
 }
 
@@ -1571,6 +1593,7 @@ vos_pool_space_sys_set(daos_handle_t poh, daos_size_t *space_sys)
 	if (space_sys == NULL)
 		return -DER_INVAL;
 
+	// 设置池的设备资源信息，用于资源管理，后续预留资源的时候会用到
 	return vos_space_sys_set(pool, space_sys);
 }
 

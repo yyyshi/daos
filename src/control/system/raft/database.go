@@ -66,15 +66,20 @@ type (
 	// should never be updated directly; updates must be
 	// applied in order to ensure that they are sent to
 	// all participating replicas.
+	// system db 里面存储信息
 	dbData struct {
 		sync.RWMutex
 		log logging.Logger
 
 		Version       uint64
+		// rank 列表
 		NextRank      ranklist.Rank
 		MapVersion    uint32
+		// member 相关的数据
 		Members       *MemberDatabase
+		// pool 相关的数据
 		Pools         *PoolDatabase
+		// system 相关的数据
 		System        *SystemDatabase
 		SchemaVersion uint
 	}
@@ -82,6 +87,7 @@ type (
 	// Database provides high-level access methods for the
 	// system data as well as structure for managing the raft
 	// service that replicates the system data.
+	// db 提供对系统数据的高level 的访问函数，维护raft 服务
 	Database struct {
 		sync.Mutex
 		log                logging.Logger
@@ -89,6 +95,7 @@ type (
 		initialized        atm.Bool
 		replicaAddr        *net.TCPAddr
 		raftTransport      raft.Transport
+		// todo: raft 的Start 函数
 		raft               syncRaft
 		raftLeaderNotifyCh chan bool
 		onLeadershipGained []onLeadershipGainedFn
@@ -98,10 +105,13 @@ type (
 		shutdownErrCh      chan error
 		poolLocks          poolLockMap
 
+		// system.db 里实际存储的数据
 		data *dbData // raft-backed system data
 	}
 
 	// DatabaseConfig defines the configuration for the system database.
+	// replica 是怎么构造的
+	// 后续isReplica 里会根据传入的地址去这个列表里面匹配，匹配到了就认为是isReplica == true
 	DatabaseConfig struct {
 		Replicas              []*net.TCPAddr
 		RaftDir               string
@@ -125,6 +135,7 @@ type (
 	}
 
 	// RaftComponents holds the components required to start a raft instance.
+	// raft 实例启动的一些组件
 	RaftComponents struct {
 		Logger        logging.Logger
 		Bootstrap     bool
@@ -167,6 +178,7 @@ func (sr *syncRaft) withReadLock(fn func(raftService) error) error {
 	return fn(svc)
 }
 
+// 获取replicas 的字符串形式
 func (cfg *DatabaseConfig) stringReplicas(excludeAddrs ...*net.TCPAddr) (replicas []string) {
 	isExcluded := func(addr *net.TCPAddr) bool {
 		for _, e := range excludeAddrs {
@@ -211,6 +223,7 @@ func (cfg *DatabaseConfig) LocalReplicaAddr() (addr *net.TCPAddr, err error) {
 }
 
 // DBFilePath returns the path to the system database file.
+// /mnt/s0/contaol_raft/daos_system.db 文件
 func (cfg *DatabaseConfig) DBFilePath() string {
 	return filepath.Join(cfg.RaftDir, sysDBFile)
 }
@@ -227,6 +240,7 @@ func DatabaseExists(cfg *DatabaseConfig) (bool, error) {
 }
 
 // NewDatabase returns a configured and initialized Database instance.
+// 根据配置创建一个raft db
 func NewDatabase(log logging.Logger, cfg *DatabaseConfig) (*Database, error) {
 	if cfg == nil {
 		cfg = &DatabaseConfig{}
@@ -238,6 +252,7 @@ func NewDatabase(log logging.Logger, cfg *DatabaseConfig) (*Database, error) {
 
 	repAddr, _ := cfg.LocalReplicaAddr()
 
+	// 创建db 实例
 	db := &Database{
 		log:                log,
 		cfg:                cfg,
@@ -273,7 +288,10 @@ func NewDatabase(log logging.Logger, cfg *DatabaseConfig) (*Database, error) {
 
 // isReplica returns true if the supplied address matches
 // a known replica address.
+// todo: leader 和非leader 不是应该都属于replica 吗，为啥要有个这个函数来判断是否为 replica
 func (db *Database) isReplica(ctrlAddr *net.TCPAddr) bool {
+	// 判断当前的地址，是否在conf 里的replicas 里存在
+	// todo: 看下db.cfg 的Replicas 是怎么构造的
 	for _, candidate := range db.cfg.Replicas {
 		if common.CmpTCPAddr(ctrlAddr, candidate) {
 			return true
@@ -284,16 +302,20 @@ func (db *Database) isReplica(ctrlAddr *net.TCPAddr) bool {
 }
 
 // SystemName returns the system name set in the configuration.
+// daos_server.yml 里配置的名字
 func (db *Database) SystemName() string {
 	return db.cfg.SystemName
 }
 
 // LeaderQuery returns the system leader, if known.
 func (db *Database) LeaderQuery() (leader string, replicas []string, err error) {
+	// 如果是leader，首先得是replica
+	// todo: 意思是可能存在不是replica 的节点吗？
 	if !db.IsReplica() {
 		return "", nil, &system.ErrNotReplica{db.cfg.stringReplicas()}
 	}
 
+	// 多返回值
 	return db.leaderHint(), db.cfg.stringReplicas(), nil
 }
 
@@ -386,6 +408,7 @@ func (db *Database) CheckLeader() error {
 
 // leaderHint returns a string representation of the current raft
 // leader address, if known, or an empty string otherwise.
+// 返回当前的leader 的地址的字符串
 func (db *Database) leaderHint() string {
 	var leaderHint raft.ServerAddress
 	if err := db.raft.withReadLock(func(svc raftService) error {
@@ -425,6 +448,7 @@ func (db *Database) OnRaftShutdown(fns ...onRaftShutdownFn) {
 // not, it returns early without an error. If it is, the persistent storage
 // is initialized if necessary, and the replica is started to begin the
 // process of choosing a MS leader.
+// 调用：errors.Wrap(sysdb.Start(ctx)
 func (db *Database) Start(parent context.Context) error {
 	if !db.IsReplica() {
 		return nil
@@ -437,10 +461,12 @@ func (db *Database) Start(parent context.Context) error {
 		return err
 	}
 
+	// 初始化raft 相关，会创建 control_raft 下的daos_system.db 文件
 	if err := db.initRaft(); err != nil {
 		return errors.Wrap(err, "unable to initialize raft service")
 	}
 
+	// 如果db 文件不存在将boottrap 一下
 	if err := db.bootstrapRaft(!dbExists); err != nil {
 		return errors.Wrap(err, "unable to bootstrap raft service")
 	}
@@ -1054,6 +1080,7 @@ func (db *Database) handlePoolRepsUpdate(evt *events.RASEvent) {
 	// Attempt to take the lock first, to cut down on log spam.
 	ctx := context.Background()
 	lock, err := db.TakePoolLock(ctx, poolUUID)
+	// 单个节点创建池的时候，总是报这个错误
 	if err != nil {
 		db.log.Errorf("failed to take lock for pool svc update: %s", err)
 		return

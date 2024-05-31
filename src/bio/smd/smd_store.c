@@ -26,6 +26,9 @@ smd_db_fetch(char *table, void *key, int key_size, void *val, int val_size)
 	d_iov_set(&key_iov, key, key_size);
 	d_iov_set(&val_iov, val, val_size);
 
+	// /mnt/daos/s0/daos_sys/sys.db --> db_fetch 函数
+	// 根据table 表的不同分为三种，分别是targets 表，pool 表和rdb 表。这三种信息都存储在sys.db 中
+	// todo: 还有存储设备的表 TABLE_DEV 等
 	return smd_db->sd_fetch(smd_db, table, &key_iov, &val_iov);
 }
 
@@ -38,6 +41,7 @@ smd_db_upsert(char *table, void *key, int key_size, void *val, int val_size)
 	d_iov_set(&key_iov, key, key_size);
 	d_iov_set(&val_iov, val, val_size);
 
+	// /mnt/daos/s0/daos_sys/sys.db 中的更新接口
 	return smd_db->sd_upsert(smd_db, table, &key_iov, &val_iov);
 }
 

@@ -244,6 +244,7 @@ func newOnDrpcFailureFn(log logging.Logger, db dbLeader) onDrpcFailureFn {
 // configured instances' processing loops.
 //
 // Run until harness is shutdown.
+// 在server.go 中调用，小写start 函数里: harness.Start(
 func (h *EngineHarness) Start(ctx context.Context, db dbLeader, cfg *config.Server) error {
 	if h.isStarted() {
 		return errors.New("can't start: harness already started")
@@ -259,7 +260,10 @@ func (h *EngineHarness) Start(ctx context.Context, db dbLeader, cfg *config.Serv
 	h.started.SetTrue()
 	defer h.started.SetFalse()
 
+	// 启动engine
+	// todo: 一个harness 对应几个engine
 	for _, ei := range h.Instances() {
+		// 函数：func (ei *EngineInstance) Run
 		ei.Run(ctx)
 	}
 

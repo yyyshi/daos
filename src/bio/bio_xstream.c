@@ -75,10 +75,11 @@ struct bio_nvme_data {
 	d_list_t		 bd_bdevs;
 	uint64_t		 bd_scan_age;
 	/* Path to input SPDK JSON NVMe config file */
-	// 输入的spdk json nvme 文件
+	// 输入的spdk json nvme 文件，在 /mnt/doas/s0/daos_nvme.conf
 	char			*bd_nvme_conf;
 	/* When using SPDK primary mode, specifies memory allocation in MB */
 	int			 bd_mem_size;
+	// 对应daos_server.yml 里的bdev_roles 参数
 	unsigned int		 bd_nvme_roles;
 	bool			 bd_started;
 	bool			 bd_bypass_health_collect;
@@ -111,6 +112,7 @@ bio_spdk_env_init(void)
 	 * and DPDK will fail to initialize.
 	 */
 
+	// == true
 	if (bio_nvme_configured(SMD_DEV_TYPE_MAX)) {
 		rc = bio_add_allowed_alloc(nvme_glb.bd_nvme_conf, &opts, &roles);
 		if (rc != 0) {
@@ -152,6 +154,7 @@ bio_spdk_env_init(void)
 		nvme_glb.bd_enable_rpc_srv = enable_rpc_srv;
 	}
 
+	// 初始化spdk env
 	rc = spdk_env_init(&opts);
 	if (rc != 0) {
 		rc = -DER_INVAL; /* spdk_env_init() returns -1 */
@@ -261,6 +264,8 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 	D_INFO("Max async data size is set to %u bytes\n", bio_max_async_sz);
 
 	/* Hugepages disabled */
+	// 没设置大页的话就不会初始化nvme
+	// todo: 大页是给啥用的，是spdk 的rdma 吗？
 	if (mem_size == 0) {
 		D_INFO("Set per-xstream DMA buffer upper bound to %u %uMB chunks\n",
 			bio_chk_cnt_max, size_mb);
@@ -278,12 +283,14 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 	}
 
 	D_ASSERT(hugepage_size > 0);
+	// bio chunk 的个数上限，每个chunk 大小为 size_mb
 	bio_chk_cnt_max = (mem_size / tgt_nr) / size_mb;
 	if (bio_chk_cnt_max < DAOS_DMA_CHUNK_CNT_MIN) {
 		D_ERROR("%uMB hugepages are not enough for %u targets (256MB per target)\n",
 			mem_size, tgt_nr);
 		return -DER_INVAL;
 	}
+	// 每个xs 的dma buffer个数和每个的大小
 	D_INFO("Set per-xstream DMA buffer upper bound to %u %uMB chunks\n",
 	       bio_chk_cnt_max, size_mb);
 
@@ -304,6 +311,7 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 		bio_numa_node = SPDK_ENV_SOCKET_ID_ANY;
 	}
 
+	// nvme 的全局信息
 	nvme_glb.bd_mem_size = mem_size;
 	if (nvme_conf) {
 		D_STRNDUP(nvme_glb.bd_nvme_conf, nvme_conf, strlen(nvme_conf));
@@ -313,6 +321,7 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 		}
 	}
 
+	// todo: spdk 环境初始化
 	rc = bio_spdk_env_init();
 	if (rc) {
 		D_ERROR("Failed to init SPDK environment\n");
@@ -539,6 +548,7 @@ load_blobstore(struct bio_xs_context *ctxt, char *bdev_name, uuid_t *bs_uuid,
 	 * spdk_bs_unload(), or in the internal error handling code of
 	 * spdk_bs_init/load().
 	 */
+	// 在bs_dev 上关联一个新创建的spdk bs
 	rc = spdk_bdev_create_bs_dev_ext(bdev_name, bio_bdev_event_cb, NULL,
 					 &bs_dev);
 	if (rc != 0) {
@@ -644,6 +654,8 @@ lookup_dev_by_id(uuid_t dev_id)
 {
 	struct bio_bdev	*d_bdev;
 
+	// 去全局的bdev 列表中匹配
+	// todo: 这个全局的信息为啥不通过raft 来保证一致性
 	d_list_for_each_entry(d_bdev, &nvme_glb.bd_bdevs, bb_link) {
 		if (uuid_compare(d_bdev->bb_uuid, dev_id) == 0)
 			return d_bdev;
@@ -789,6 +801,10 @@ replace_bio_bdev(struct bio_bdev *old_dev, struct bio_bdev *new_dev)
 int
 bdev_name2roles(const char *name)
 {
+	// name 是多个 Nvme_server03_1_1_0 的数组
+	// todo: 要分析下这个格式什么样子的，即这个文件是怎么生成的
+	// e.g: https://www.runoob.com  '.'  结果是： .com
+	// 所以当前的结果是 dst = _0
 	const char	*dst = strrchr(name, '_');
 	char		*ptr_parse_end = NULL;
 	unsigned	 int value;
@@ -806,6 +822,7 @@ bdev_name2roles(const char *name)
 	if (value & (~NVME_ROLE_ALL))
 		return -DER_INVAL;
 
+	// name的最后一位数组就是role
 	D_INFO("bdev name:%s, bdev role:%u\n", name, value);
 	return value;
 }
@@ -1087,6 +1104,7 @@ alloc_bio_blobstore(struct bio_xs_context *ctxt, struct bio_bdev *d_bdev)
 		goto out_mutex;
 
 	bb->bb_ref = 0;
+	// 新创建bio bs，并把owner 设置为当前xs
 	bb->bb_owner_xs = ctxt;
 	bb->bb_dev = d_bdev;
 	return bb;
@@ -1178,6 +1196,7 @@ choose_device(int tgt_id, enum smd_dev_type st)
 	 * Traverse the list and return the device with the least amount of
 	 * mapped targets.
 	 */
+	// 遍历列表返回具有最少映射数量的设备（即已经被分配给taget 次数少的，一个设备可以被分配给多个target的）
 	d_list_for_each_entry(d_bdev, &nvme_glb.bd_bdevs, bb_link) {
 		/* Find the initial target count per device */
 		if (!d_bdev->bb_tgt_cnt_init) {
@@ -1197,6 +1216,7 @@ choose_device(int tgt_id, enum smd_dev_type st)
 			d_bdev->bb_tgt_cnt_init = 1;
 		}
 		/* Choose the least used one */
+		// 选择被分配次数最少的一个设备
 		if (is_role_match(d_bdev->bb_roles, dev_type2role(st)) &&
 		    d_bdev->bb_tgt_cnt < lowest_tgt_cnt) {
 			lowest_tgt_cnt = d_bdev->bb_tgt_cnt;
@@ -1228,10 +1248,12 @@ assign_roles(struct bio_bdev *d_bdev, unsigned int tgt_id)
 	bool			assigned = false;
 	int			rc;
 
+	// 遍历设备类型
 	for (st = SMD_DEV_TYPE_DATA; st < SMD_DEV_TYPE_MAX; st++) {
 		if (!is_role_match(d_bdev->bb_roles, dev_type2role(st)))
 			continue;
 
+		// 分配设备给target。分配的是biodev 的uuid
 		rc = smd_dev_add_tgt(d_bdev->bb_uuid, tgt_id, st);
 		if (rc) {
 			D_ERROR("Failed to map dev "DF_UUID" type:%u to tgt %d. "DF_RC"\n",
@@ -1256,9 +1278,12 @@ assign_roles(struct bio_bdev *d_bdev, unsigned int tgt_id)
 		 * sys tgt id.
 		 *
 		 */
+		// todo: vos target 和系统target 的区分和功能？
+		// todo: 系统target 指的是vos-rdb 吗？
 		if (tgt_id != BIO_SYS_TGT_ID)
 			d_bdev->bb_tgt_cnt++;
 
+		// 分配完成后即完成了bdev 到target 的映射
 		D_DEBUG(DB_MGMT, "Successfully mapped dev "DF_UUID"/%d/%u to tgt %d role %u\n",
 			DP_UUID(d_bdev->bb_uuid), d_bdev->bb_tgt_cnt, d_bdev->bb_roles,
 			tgt_id, dev_type2role(st));
@@ -1286,14 +1311,18 @@ assign_xs_bdev(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_type st,
 	int			 rc;
 
 	*dev_state = SMD_DEV_NORMAL;
+	// 查一下这个target 上有哪些设备
 	rc = smd_dev_get_by_tgt(tgt_id, st, &dev_info);
+	// 如果这个target 上没有设备，选择一个设备并通过 assign_roles 分配给指定的target
 	if (rc == -DER_NONEXIST) {
+		// 选一个设备分配给指定的target id
 		d_bdev = choose_device(tgt_id, st);
 		if (d_bdev == NULL) {
 			D_ERROR("Failed to choose bdev for tgt:%u type:%u\n", tgt_id, st);
 			return NULL;
 		}
 
+		// 没有设备
 		rc = assign_roles(d_bdev, tgt_id);
 		if (rc) {
 			D_ERROR("Failed to assign roles. "DF_RC"\n", DP_RC(rc));
@@ -1307,6 +1336,7 @@ assign_xs_bdev(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_type st,
 		return NULL;
 	}
 
+	// 当前target 有分配的设备，信息保存在dev_info 里
 	D_ASSERT(dev_info != NULL);
 	*dev_state = dev_info->sdi_state;
 	/*
@@ -1319,6 +1349,7 @@ assign_xs_bdev(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_type st,
 	 * We can't differentiate these two cases for now, so let's just abort
 	 * starting and ask admin to plug the device or fix the SMD manually.
 	 */
+	// 根据dev_info 里面的信息查找bio_dev
 	d_bdev = lookup_dev_by_id(dev_info->sdi_id);
 	if (d_bdev == NULL)
 		D_ERROR("Device "DF_UUID" for target %d type %d isn't plugged or the "
@@ -1332,6 +1363,7 @@ assign_xs_bdev(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_type st,
 static int
 init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_type st)
 {
+	// 创建一个新的bio dev
 	struct bio_bdev		*d_bdev;
 	struct bio_blobstore	*bbs;
 	struct spdk_blob_store	*bs;
@@ -1348,12 +1380,14 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 		return -DER_UNINIT;
 	}
 
+	// 初始化xs ctx 的 xs blobstore
 	ctxt->bxc_xs_blobstores[st] = alloc_xs_blobstore();
 	if (ctxt->bxc_xs_blobstores[st] == NULL) {
 		D_ERROR("Failed to allocate memory for xs blobstore\n");
 		return -DER_NOMEM;
 	}
 
+	// 给target 分配bdev，返回被分配的设备
 	d_bdev = assign_xs_bdev(ctxt, tgt_id, st, &dev_state);
 	if (d_bdev == NULL)
 		return -DER_NONEXIST;
@@ -1363,6 +1397,7 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 	 * If no bbs (BIO blobstore) is attached to the device, attach one and
 	 * set current xstream as bbs owner.
 	 */
+	// 如果没有bio blobstore 关联到分配的设备，关联一个并且设置当前xs 为该blobstore 的owner
 	if (d_bdev->bb_blobstore == NULL) {
 		d_bdev->bb_blobstore = alloc_bio_blobstore(ctxt, d_bdev);
 		if (d_bdev->bb_blobstore == NULL)
@@ -1404,10 +1439,12 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 			return 0;
 
 		/* Load blobstore with bstype specified for sanity check */
+		// 创建spdk blobstore
 		bs = load_blobstore(ctxt, d_bdev->bb_name, &d_bdev->bb_uuid,
 				    false, false, NULL, NULL);
 		if (bs == NULL)
 			return -DER_INVAL;
+		// 加载spdk bs 后，赋值给bio bs，bio bs 又在xs bs 里
 		bbs->bb_bs = bs;
 
 		D_DEBUG(DB_MGMT, "Loaded bs, tgt_id:%d, xs:%p dev:%s\n",
@@ -1557,6 +1594,7 @@ bio_xsctxt_free(struct bio_xs_context *ctxt)
 	D_FREE(ctxt);
 }
 
+// 每个target 会申请自己的xsctx
 int
 bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 {
@@ -1600,6 +1638,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 	 * for blobstore metadata io channel in init_bio_bdevs() call.
 	 */
 	snprintf(th_name, sizeof(th_name), "daos_spdk_%d", tgt_id);
+	// 这里创建了一个spdk 的thread
 	ctxt->bxc_thread = spdk_thread_create((const char *)th_name, NULL);
 	if (ctxt->bxc_thread == NULL) {
 		D_ERROR("failed to alloc SPDK thread\n");
@@ -1612,6 +1651,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 	 * The first started xstream will scan all bdevs and create blobstores,
 	 * it's a prerequisite for all per-xstream blobstore initialization.
 	 */
+	// 第一个启动的xs 将创建blobstore
 	if (nvme_glb.bd_init_thread == NULL) {
 		struct common_cp_arg cp_arg;
 
@@ -1639,7 +1679,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		D_DEBUG(DB_MGMT, "SPDK bdev initialized, tgt_id:%d", tgt_id);
 
 		nvme_glb.bd_init_thread = ctxt->bxc_thread;
-		// 这里会创建bs
+		// 这里会创建spdk bs
 		rc = init_bio_bdevs(ctxt);
 		if (rc != 0) {
 			D_ERROR("failed to init bio_bdevs, "DF_RC"\n",
@@ -1668,6 +1708,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 
 	d_bdev = NULL;
 	/* Initialize per-xstream blobstore context */
+	// 初始化每个xs 的blobstore
 	for (st = SMD_DEV_TYPE_DATA; st < SMD_DEV_TYPE_MAX; st++) {
 		/* No Data blobstore for sys xstream */
 		if (st == SMD_DEV_TYPE_DATA && tgt_id == BIO_SYS_TGT_ID)
@@ -1679,7 +1720,8 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		if (st != SMD_DEV_TYPE_DATA && !bio_nvme_configured(SMD_DEV_TYPE_META))
 			break;
 
-		// 这里也会创建bs
+		// 这里也会创建bs（最终会创建spdk bs），保存在ctxt 中
+		// todo: bs下面的blob 是在什么时候创建的，具体是如何管理的
 		rc = init_xs_blobstore_ctxt(ctxt, tgt_id, st);
 		if (rc)
 			goto out;

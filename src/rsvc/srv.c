@@ -76,6 +76,7 @@ alloc_init(enum ds_rsvc_class_id class, d_iov_t *id, uuid_t db_uuid,
 	D_ASSERT(svc->s_id.iov_buf != NULL);
 	D_ASSERT(svc->s_id.iov_len > 0);
 	D_ASSERT(svc->s_id.iov_buf_len >= svc->s_id.iov_len);
+	// pool 的uuid
 	uuid_copy(svc->s_db_uuid, db_uuid);
 	svc->s_state = DS_RSVC_DOWN;
 	svc->s_map_distd = ABT_THREAD_NULL;
@@ -84,6 +85,7 @@ alloc_init(enum ds_rsvc_class_id class, d_iov_t *id, uuid_t db_uuid,
 	if (rc != 0)
 		goto err_svc;
 
+	// pool_svc_locate_cb，s_db_path 对应 rdb-pool 文件
 	rc = rsvc_class(class)->sc_locate(&svc->s_id, &svc->s_db_path);
 	if (rc != 0)
 		goto err_name;
@@ -672,11 +674,13 @@ start(enum ds_rsvc_class_id class, d_iov_t *id, uuid_t db_uuid, uint64_t term, b
 	struct ds_rsvc	       *svc = NULL;
 	int			rc;
 
+	// 生成rdb-pool 文件路径。db_uuid 是crpc 传递来的pool 的uuid
 	rc = alloc_init(class, id, db_uuid, &svc);
 	if (rc != 0)
 		goto err;
 	svc->s_ref++;
 
+	// 创建或者打开pool-uuid 下的rdb-pool 文件
 	if (create)
 		rc = rdb_create(svc->s_db_path, svc->s_db_uuid, term, size, replicas, &rsvc_rdb_cbs,
 				svc, &storage);
@@ -685,6 +689,7 @@ start(enum ds_rsvc_class_id class, d_iov_t *id, uuid_t db_uuid, uint64_t term, b
 	if (rc != 0)
 		goto err_svc;
 
+	// 启动rdb
 	rc = rdb_start(storage, &svc->s_db);
 	if (rc != 0)
 		goto err_storage;
@@ -845,6 +850,7 @@ ds_rsvc_start(enum ds_rsvc_class_id class, d_iov_t *id, uuid_t db_uuid, uint64_t
 		goto out;
 	}
 
+	// srv.c 中 ds_rsvc_start
 	rc = start(class, id, db_uuid, caller_term, create, size, replicas, arg, &svc);
 	if (rc != 0)
 		goto out;
@@ -1185,6 +1191,7 @@ ds_rsvc_dist_start(enum ds_rsvc_class_id class, d_iov_t *id, const uuid_t dbid,
 	D_DEBUG(DB_MD, DF_UUID": %s DB\n",
 		DP_UUID(dbid), create ? "creating" : "starting");
 
+	// 发起crpc 启动rsvc 服务，服务端接收到会创建rdb-pool
 	rc = bcast_create(RSVC_START, ranks != NULL /* filter_invert */,
 			  (d_rank_list_t *)ranks, &rpc);
 	if (rc != 0)
@@ -1225,6 +1232,7 @@ out:
 	return rc;
 }
 
+// rsvc 服务端 crpc 处理
 static void
 ds_rsvc_start_handler(crt_rpc_t *rpc)
 {
@@ -1239,6 +1247,7 @@ ds_rsvc_start_handler(crt_rpc_t *rpc)
 		goto out;
 	}
 
+	// 使用传递来的pool 的uuid创建rdb-pool 文件
 	rc = ds_rsvc_start(in->sai_class, &in->sai_svc_id, in->sai_db_uuid, in->sai_term, create,
 			   in->sai_size, bootstrap ? in->sai_ranks : NULL, NULL /* arg */);
 	if (rc == -DER_ALREADY)

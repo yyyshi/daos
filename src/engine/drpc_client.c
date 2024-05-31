@@ -184,6 +184,7 @@ drpc_notify_ready(void)
 		D_GOTO(out_uri, rc = -DER_NOMEM);
 	srv__notify_ready_req__pack(&req, reqb);
 
+	// 由engine 发起的drpc 请求，用于回复daos_server 表示engine  ready
 	rc = dss_drpc_call(DRPC_MODULE_SRV, DRPC_METHOD_SRV_NOTIFY_READY, reqb,
 			   reqb_size, DSS_DRPC_NO_SCHED, &dresp);
 	if (rc != 0)

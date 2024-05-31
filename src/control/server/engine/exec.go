@@ -48,12 +48,15 @@ func NewRunner(log logging.Logger, config *Config) *Runner {
 	}
 }
 
+// 在函数中调用： func (r *Runner) Start
 func (r *Runner) run(parent context.Context, args, env []string, exitCh RunnerExitChan) error {
+	// 找daos_engine 二进制文件
 	binPath, err := common.FindBinary(engineBin)
 	if err != nil {
 		return errors.Wrapf(err, "can't start %s", engineBin)
 	}
 
+	// daos_server 执行类似 './daos_engine args' 参数启动engine
 	cmd := exec.Command(binPath, args...)
 	cmd.Stdout = &cmdLogger{
 		logFn:  r.log.Info,
@@ -80,6 +83,8 @@ func (r *Runner) run(parent context.Context, args, env []string, exitCh RunnerEx
 	r.log.Debugf("%s:%d env: %s", engineBin, r.Config.Index, cmd.Env)
 	r.log.Infof("Starting I/O Engine instance %d: %s", r.Config.Index, binPath)
 
+	// 执行上面的启动命令
+	// 后面将进入engine 的init.c main函数
 	if err := cmd.Start(); err != nil {
 		return errors.Wrapf(common.GetExitStatus(err),
 			"%s (instance %d) failed to start", binPath, r.Config.Index)
@@ -87,6 +92,7 @@ func (r *Runner) run(parent context.Context, args, env []string, exitCh RunnerEx
 	r.running.SetTrue()
 
 	ctx, cancel := context.WithCancel(parent)
+	// todo: 什么情况下可以直接 go，调度顺序是什么样子的
 	go func() {
 		// Block on cmd.Wait() and then cancel the inner context
 		// to signal that the process has completed.
@@ -102,6 +108,7 @@ func (r *Runner) run(parent context.Context, args, env []string, exitCh RunnerEx
 		close(exitCh)
 	}()
 
+	// todo: 什么情况下可以直接 go，调度顺序是什么样子的
 	go func() {
 		for {
 			select {
@@ -158,6 +165,8 @@ func processLogEnvs(env []string) ([]string, error) {
 }
 
 // Start asynchronously starts the Engine instance.
+// 在这里执行：func (ei *EngineInstance) start
+// 实现了 EngineRunner 接口
 func (r *Runner) Start(ctx context.Context) (RunnerExitChan, error) {
 	args, err := r.Config.CmdLineArgs()
 	if err != nil {
@@ -175,6 +184,8 @@ func (r *Runner) Start(ctx context.Context) (RunnerExitChan, error) {
 	}
 
 	exitCh := make(RunnerExitChan)
+	// daos_server 启动后，拉起engine
+	// func (r *Runner) run
 	return exitCh, r.run(ctx, args, env, exitCh)
 }
 

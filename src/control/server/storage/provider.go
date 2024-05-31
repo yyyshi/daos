@@ -616,6 +616,7 @@ func (p *Provider) WriteNvmeConfig(ctx context.Context, log logging.Logger) erro
 	engineStorage := p.engineStorage
 	p.RUnlock()
 
+	// 构造req，nvme 信息来自 engineStorage，最初来自 TierConfigs
 	req, err := BdevWriteConfigRequestFromConfig(ctx, log, engineStorage,
 		vmdEnabled, hwloc.NewProvider(log).GetTopology)
 	if err != nil {
@@ -632,6 +633,7 @@ func (p *Provider) WriteNvmeConfig(ctx context.Context, log logging.Logger) erro
 	defer p.RUnlock()
 	req.BdevCache = &p.bdevCache
 
+	// 写nvme 信息到daos_nvme.conf 中的req
 	_, err = p.bdev.WriteConfig(*req)
 
 	return err

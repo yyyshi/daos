@@ -33,7 +33,7 @@ struct vos_container;
 // cache 中存储的数据结构
 struct vos_object {
 	/** llink for daos lru cache */
-	// 关联daos lru cache 的
+	// 关联daos lru cache 的，根据一个link 就可以获取到对应的vos_object，进而获取到里面的obj_df
 	struct daos_llink		obj_llink;
 	/** Cache of incarnation log */
 	// 缓存的ilog 信息

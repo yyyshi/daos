@@ -203,7 +203,7 @@ daos_lru_ref_hold(struct daos_lru_cache *lcache, void *key,
 	if (lcache->dlc_ops->lop_print_key)
 		lcache->dlc_ops->lop_print_key(key, key_size);
 
-	// 查询
+	// 根据key 查询
 	link = d_hash_rec_find(&lcache->dlc_htable, key, key_size);
 	if (link != NULL) {
 		llink = link2llink(link);
@@ -211,7 +211,7 @@ daos_lru_ref_hold(struct daos_lru_cache *lcache, void *key,
 		/* remove busy item from LRU */
 		if (!d_list_empty(&llink->ll_qlink))
 			d_list_del_init(&llink->ll_qlink);
-		// 如果查到了，返回
+		// 1. 在lru cache 中查到了，返回
 		D_GOTO(found, rc = 0);
 	}
 
@@ -219,18 +219,19 @@ daos_lru_ref_hold(struct daos_lru_cache *lcache, void *key,
 		D_GOTO(out, rc = -DER_NONEXIST);
 
 	/* llink does not exist create one */
-	// 如果没查到，那么创建一个并insert 进去
+	// 2. 如果没查到，那么创建一个并insert 进去
 	rc = lcache->dlc_ops->lop_alloc_ref(key, key_size, create_args, &llink);
 	if (rc)
 		D_GOTO(out, rc);
 
+	// 新的item 插入到lru
 	D_DEBUG(DB_TRACE, "Inserting %p item into LRU Hash table\n", llink);
 	llink->ll_evicted = 0;
 	llink->ll_ref	  = 1; /* 1 for caller */
 	llink->ll_ops	  = lcache->dlc_ops;
 	D_INIT_LIST_HEAD(&llink->ll_qlink);
 
-	// insert 到oi table
+	// insert 到hash table
 	rc = d_hash_rec_insert(&lcache->dlc_htable, key, key_size,
 			       &llink->ll_link, true);
 	if (rc) {

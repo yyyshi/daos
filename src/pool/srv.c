@@ -72,11 +72,13 @@ fini(void)
 	return 0;
 }
 
+// srv 模块的setup
 static int
 setup(void)
 {
 	bool start = true;
 
+	// 主xs 启动所有的pool
 	d_getenv_bool("DAOS_START_POOL_SVC", &start);
 	if (start)
 		return ds_pool_start_all();
@@ -181,6 +183,7 @@ struct dss_module_metrics pool_metrics = {
 	.dmm_nr_metrics = ds_pool_metrics_count,
 };
 
+// pool 模块的setup
 struct dss_module pool_module =  {
 	.sm_name	= "pool",
 	.sm_mod_id	= DAOS_POOL_MODULE,
@@ -188,6 +191,7 @@ struct dss_module pool_module =  {
 	.sm_proto_count	= 2,
 	.sm_init	= init,
 	.sm_fini	= fini,
+	// server module 的setup 函数，会依次启动所有的pool
 	.sm_setup	= setup,
 	.sm_cleanup	= cleanup,
 	.sm_proto_fmt	= {&pool_proto_fmt_v4, &pool_proto_fmt_v5},

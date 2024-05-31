@@ -16,6 +16,7 @@
 /**
  * Common file names used by each layer to store persistent data
  */
+// 每个engine 的每个pool 都会在pmem 上创建对应的rdb-pool 文件，以及和target 个数相等的vos-targtid 文件
 #define	VOS_FILE	"vos-" /* suffixed by thread id */
 #define	DSM_META_FILE	"meta"
 #define RDB_FILE	"rdb-"

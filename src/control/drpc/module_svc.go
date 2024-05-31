@@ -17,6 +17,7 @@ import (
 
 // Module is an interface that a type must implement to provide the
 // functionality needed by the ModuleService to process dRPC requests.
+// 模块接口，各个模块会有自己的处理函数，包括 mgmt 模块，security 模块，service 模块
 type Module interface {
 	HandleCall(context.Context, *Session, Method, []byte) ([]byte, error)
 	ID() ModuleID
@@ -94,6 +95,7 @@ func marshalResponse(sequence int64, status Status, body []byte) ([]byte, error)
 // ProcessMessage is the main entry point into the ModuleService. It accepts a
 // marshaled drpc.Call instance, processes it, calls the handler in the
 // appropriate Module, and marshals the result into the body of a drpc.Response.
+// moduleService 的主入口，接收一个drpc.call 并交给对应的模块处理，并将处理结果返回
 func (r *ModuleService) ProcessMessage(ctx context.Context, session *Session, msgBytes []byte) ([]byte, error) {
 	msg := &Call{}
 
@@ -111,11 +113,14 @@ func (r *ModuleService) ProcessMessage(ctx context.Context, session *Session, ms
 	if err != nil {
 		return marshalResponse(msg.GetSequence(), Status_UNKNOWN_METHOD, nil)
 	}
+	// 给对应的模块完成drpc 请求处理
+	// 具体函数：func (mod *srvModule) HandleCall
 	respBody, err := module.HandleCall(ctx, session, method, msg.GetBody())
 	if err != nil {
 		r.log.Errorf("HandleCall for %s:%s failed: %s\n", module.ID().String(), method.String(), err)
 		return marshalResponse(msg.GetSequence(), ErrorToStatus(err), nil)
 	}
 
+	// 返回drpc 的处理结果
 	return marshalResponse(msg.GetSequence(), Status_SUCCESS, respBody)
 }

@@ -9,24 +9,33 @@
 #include <daos/dtx.h>
 #include "smd_internal.h"
 
+// 这些对应着daos_server.yml 中的 bdev_roles 参数
+// 三种表：都是按设备类型（data/meta/wal）划分的
+// target 的表
+// todo: target 也分为存储实际数据的targt，存储元数据的target 和wal 日志的target 吗？
 char TABLE_TGTS[SMD_DEV_TYPE_MAX][SMD_DEV_NAME_MAX] = {
 	"target",	/* compatible with old version */
 	"meta_target",
 	"wal_target",
 };
 
+// pool 的表
+// todo: pool 表也分为正常的表，meta 的表和wal 的表吗？
 char TABLE_POOLS[SMD_DEV_TYPE_MAX][SMD_DEV_NAME_MAX] = {
 	"pool",
 	"meta_pool",
 	"wal_pool",
 };
 
+// rdb 的表
+// todo: rdb 也分为多个表吗？
 char TABLE_RDBS[SMD_DEV_TYPE_MAX][SMD_DEV_NAME_MAX] = {
 	"rdb_data",
 	"rdb_meta",
 	"rdb_wal",
 };
 
+// todo: 一个pool 最多只能有64 个target 吗？这里的target 是指的哪种target呢？
 struct smd_pool {
 	uint64_t	sp_blob_sz;
 	uint16_t	sp_flags;
@@ -35,6 +44,7 @@ struct smd_pool {
 	uint64_t	sp_blobs[SMD_MAX_TGT_CNT];
 };
 
+// 改成二分查找是不是要好些
 static int
 smd_pool_find_tgt(struct smd_pool *pool, int tgt_id)
 {
@@ -47,9 +57,12 @@ smd_pool_find_tgt(struct smd_pool *pool, int tgt_id)
 	return -1;
 }
 
+// 将新创建的blob 分配给target
+// todo: blob_id 是哪里来的
 static int
 pool_add_tgt(uuid_t pool_id, uint32_t tgt_id, uint64_t blob_id, char *table_name, uint64_t blob_sz)
 {
+	// 这是存储在sys.db 中的信息
 	struct smd_pool	pool;
 	struct d_uuid	id;
 	int		rc;
@@ -58,8 +71,11 @@ pool_add_tgt(uuid_t pool_id, uint32_t tgt_id, uint64_t blob_id, char *table_name
 
 	smd_db_lock();
 	/* Fetch pool if it's already existing */
+	// 在sys.db 中查询pool 是否已经存在
+	// table_name 有三个（target，pool 和rdb）
 	rc = smd_db_fetch(table_name, &id, sizeof(id), &pool, sizeof(pool));
 	if (rc == 0) {
+		// 如果smd pool 已经存在，但是blob sz 不一致，报错退出
 		if (pool.sp_blob_sz != blob_sz) {
 			D_ERROR("Pool "DF_UUID" blob size mismatch. "
 				""DF_U64" != "DF_U64"\n",
@@ -69,6 +85,8 @@ pool_add_tgt(uuid_t pool_id, uint32_t tgt_id, uint64_t blob_id, char *table_name
 			goto out;
 		}
 
+		// 如果target 个数大于64个，报错退出
+		// todo: 这个target 和实际存储数据的target 有什么区别
 		if (pool.sp_tgt_cnt >= SMD_MAX_TGT_CNT) {
 			D_ERROR("Pool "DF_UUID" is assigned to too many "
 				"targets (%d)\n", DP_UUID(&id.uuid),
@@ -77,13 +95,16 @@ pool_add_tgt(uuid_t pool_id, uint32_t tgt_id, uint64_t blob_id, char *table_name
 			goto out;
 		}
 
+		// 返回targetid 在pool 中的idx
 		rc = smd_pool_find_tgt(&pool, tgt_id);
+		// 如果查到了，报错退出
 		if (rc >= 0) {
 			D_ERROR("Dup target %d, idx: %d\n", tgt_id, rc);
 			rc = -DER_EXIST;
 			goto out;
 		}
 
+		// 如果在smd pool 中没查到对应的target，加入到smd 的pool 中
 		pool.sp_tgts[pool.sp_tgt_cnt] = tgt_id;
 		pool.sp_blobs[pool.sp_tgt_cnt] = blob_id;
 		pool.sp_tgt_cnt += 1;
@@ -91,6 +112,7 @@ pool_add_tgt(uuid_t pool_id, uint32_t tgt_id, uint64_t blob_id, char *table_name
 			pool.sp_flags |= SMD_POOL_IN_CREATION;
 
 	} else if (rc == -DER_NONEXIST) {
+		// smd pool 不存在，说明是pool 中的第一个元素，添加到idx 为0 的位置
 		pool.sp_tgts[0]	 = tgt_id;
 		pool.sp_blobs[0] = blob_id;
 		pool.sp_tgt_cnt	 = 1;
@@ -105,6 +127,7 @@ pool_add_tgt(uuid_t pool_id, uint32_t tgt_id, uint64_t blob_id, char *table_name
 		goto out;
 	}
 
+	// 更新sys.db 内容
 	rc = smd_db_upsert(table_name, &id, sizeof(id), &pool, sizeof(pool));
 	if (rc) {
 		D_ERROR("Update pool "DF_UUID" failed. "DF_RC"\n",
@@ -116,17 +139,21 @@ out:
 	return rc;
 }
 
+// 将新创建的blob 分配给target
 int
 smd_pool_add_tgt(uuid_t pool_id, uint32_t tgt_id, uint64_t blob_id,
 		 enum smd_dev_type st, uint64_t blob_sz)
 {
+	// 这里查询的表是 pool 表
 	return pool_add_tgt(pool_id, tgt_id, blob_id, TABLE_POOLS[st], blob_sz);
 }
 
+// todo: 这里函数有什么不同
 int
 smd_rdb_add_tgt(uuid_t pool_id, uint32_t tgt_id, uint64_t blob_id,
 		enum smd_dev_type st, uint64_t blob_sz)
 {
+	// 这里查询的表是 rdb 表
 	return pool_add_tgt(pool_id, tgt_id, blob_id, TABLE_RDBS[st], blob_sz);
 }
 
@@ -276,6 +303,7 @@ pool_get_blob(uuid_t pool_id, uint32_t tgt_id, char *table_name, uint64_t *blob_
 	uuid_copy(id.uuid, pool_id);
 
 	smd_db_lock();
+	// 去对应表里按pool uuid 查找smd pool
 	rc = smd_db_fetch(table_name, &id, sizeof(id), &pool, sizeof(pool));
 	if (rc) {
 		DL_CDEBUG(rc != -DER_NONEXIST, DLOG_ERR, DB_MGMT, rc,
@@ -283,6 +311,7 @@ pool_get_blob(uuid_t pool_id, uint32_t tgt_id, char *table_name, uint64_t *blob_
 		goto out;
 	}
 
+	// 按target id 在 pool 里查找对应的target 对应的索引，通过返回值获取
 	rc = smd_pool_find_tgt(&pool, tgt_id);
 	if (rc < 0) {
 		D_DEBUG(DB_MGMT, "Pool "DF_UUID" target %d not found.\n",
@@ -290,6 +319,8 @@ pool_get_blob(uuid_t pool_id, uint32_t tgt_id, char *table_name, uint64_t *blob_
 		rc = -DER_NONEXIST;
 		goto out;
 	}
+	// 通过索引获取到blob id，返回
+	// todo: 这里的blob 是在什么时候创建的：在 pool_add_tgt 函数里创建的
 	*blob_id = pool.sp_blobs[rc];
 	rc = 0;
 out:
@@ -300,12 +331,14 @@ out:
 int
 smd_pool_get_blob(uuid_t pool_id, uint32_t tgt_id, enum smd_dev_type st, uint64_t *blob_id)
 {
+	// pool 的table name
 	return pool_get_blob(pool_id, tgt_id, TABLE_POOLS[st], blob_id);
 }
 
 int
 smd_rdb_get_blob(uuid_t pool_id, uint32_t tgt_id, enum smd_dev_type st, uint64_t *blob_id)
 {
+	// rdb 的table name
 	return pool_get_blob(pool_id, tgt_id, TABLE_RDBS[st], blob_id);
 }
 
@@ -385,6 +418,7 @@ smd_pool_list(d_list_t *pool_list, int *pools)
 		return 0; /* There is no NVMe, smd will not be initialized */
 
 	smd_db_lock();
+	// 遍历pool
 	rc = smd_db_traverse(TABLE_POOLS[SMD_DEV_TYPE_META], smd_pool_list_cb, &td);
 	/* No meta found, it might be PMDK case */
 	if (rc == 0 && td.td_count == 0)

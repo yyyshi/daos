@@ -163,6 +163,8 @@ func (p *Provider) MakeMountPath(path string, tgtUID, tgtGID int) error {
 	sep := string(filepath.Separator)
 	dirs := strings.Split(path, sep)[1:] // omit empty element
 
+	// todo: 配置文件配置两个/mnt/daos/s0 和/mnt/daos/s1 两个engine 的scm 挂载目录。
+	// 为啥会出现创建s1 目录失败的情况？
 	for i := range dirs {
 		ps := sep + filepath.Join(dirs[:i+1]...)
 		_, err := p.sys.Stat(ps)

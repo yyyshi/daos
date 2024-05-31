@@ -55,6 +55,8 @@ func (n *NvmeImpl) Discover(log logging.Logger) (storage.NvmeControllers, error)
 		return nil, errors.New("nil NvmeImpl")
 	}
 
+	// 执行spdk 的c 语言接口
+	// struct ret_t *nvme_discover(void)
 	ctrlrs, err := collectCtrlrs(C.nvme_discover(), "NVMe Discover(): C.nvme_discover")
 
 	pciAddrs := ctrlrPCIAddresses(ctrlrs)
@@ -67,6 +69,7 @@ func (n *NvmeImpl) Discover(log logging.Logger) (storage.NvmeControllers, error)
 //
 // Attempt wipe of each controller namespace's LBA-0.
 // Afterwards remove lockfile for each formatted device.
+// 通过spdk 来格式化nvme 设备
 func (n *NvmeImpl) Format(log logging.Logger) ([]*FormatResult, error) {
 	if n == nil {
 		return nil, errors.New("nil NvmeImpl")
@@ -243,7 +246,7 @@ func collectCtrlrs(retPtr *C.struct_ret_t, msgFail string) (storage.NvmeControll
 	return ctrlrs, nil
 }
 
-// collectFormatResults parses return struct to collect slice of
+//  parses return struct to collect slice of
 // nvme.FormatResult.
 func collectFormatResults(retPtr *C.struct_ret_t, msgFail string) ([]*FormatResult, error) {
 	defer clean(retPtr)

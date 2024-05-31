@@ -203,6 +203,7 @@ int smd_pool_get_blob(uuid_t pool_id, uint32_t tgt_id,
 int smd_rdb_get_blob(uuid_t pool_id, uint32_t tgt_id,
 		     enum smd_dev_type smd_type, uint64_t *blob_id);
 
+// todo: 这里rdb 和blob 有什么关系
 /**
  * Get size of the blob corresponding to rdb-pool file
  *

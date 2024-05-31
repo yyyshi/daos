@@ -218,6 +218,7 @@ func ConfigureComponents(log logging.Logger, dbCfg *DatabaseConfig) (*RaftCompon
 	// this use case. Our MS DB shouldn't be particularly high
 	// volume, so set this value to strike a balance between
 	// creating snapshots too frequently and not often enough.
+	// todo: 快照相关的一些参数阈值
 	raftCfg.SnapshotThreshold = 32
 	if dbCfg.RaftSnapshotThreshold > 0 {
 		raftCfg.SnapshotThreshold = dbCfg.RaftSnapshotThreshold
@@ -225,17 +226,27 @@ func ConfigureComponents(log logging.Logger, dbCfg *DatabaseConfig) (*RaftCompon
 	if dbCfg.RaftSnapshotInterval > 0 {
 		raftCfg.SnapshotInterval = dbCfg.RaftSnapshotInterval
 	}
+	// raft 一些超时时间参数
 	raftCfg.HeartbeatTimeout = 2000 * time.Millisecond
 	raftCfg.ElectionTimeout = 2000 * time.Millisecond
 	raftCfg.LeaderLeaseTimeout = 1000 * time.Millisecond
 	// Set the local ID to the address of the replica.
 	raftCfg.LocalID = raft.ServerID(repAddr.String())
 
+	// todo: snap 相关
 	snaps, err := getSnapshotStore(raftCfg.Logger, dbCfg)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init snapshot store")
 	}
 
+	// 用了另外一个支持序列化acid事务的类似leveldb 的kv 引擎
+	// 会生成这个db 文件
+	/*
+	root@server03:/mnt/daos/s0/control_raft# ls
+	daos_system.db
+	*/
+	// todo: 这里都存储的什么信息，什么时候会用到
+	// control 层面的元数据信息
 	boltDB, err := boltdb.New(boltdb.Options{
 		Path: dbCfg.DBFilePath(),
 		BoltOptions: &bbolt.Options{
@@ -279,11 +290,18 @@ func (db *Database) ConfigureTransport(srv *grpc.Server, dialOpts ...grpc.DialOp
 // initRaft sets up the backing raft service for use. If the service has
 // already been bootstrapped, then it will start immediately. Otherwise,
 // it will need to be bootstrapped before it can be used.
+// 初始化的时候，就会生成/mnt/s0/control_raft/daos_system.db 文件
 func (db *Database) initRaft() error {
 	if err := createRaftDir(db.cfg.RaftDir); err != nil {
 		return err
 	}
 
+	// 这里会创建 control_raft 下面的daos_system.db 文件
+	/*
+	root@server03:/mnt/daos/s0/control_raft# ls
+	daos_system.db
+	*/
+	// 传入创建好的sysdb 的配置信息，内部会创建依赖的kv 引擎创建 boltdb 实例（类似leveldb 但提供了事务功能）
 	cmps, err := ConfigureComponents(db.log, db.cfg)
 	if err != nil {
 		return errors.Wrap(err, "failed to configure raft components")
@@ -312,6 +330,7 @@ func (db *Database) initRaft() error {
 		})
 	}
 
+	// todo: raft api 相关的用法
 	r, err := raft.NewRaft(
 		cmps.Config,        // *raft.Config
 		(*fsm)(db),         // raft.FSM
@@ -323,6 +342,7 @@ func (db *Database) initRaft() error {
 	if err != nil {
 		return err
 	}
+	// 设置db 的raft，raft 里有创建的daos_system.db 文件对应的 cmps.LogStore 和 cmps.StableStore
 	db.raft.setSvc(r)
 	db.initialized.SetTrue()
 

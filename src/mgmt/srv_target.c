@@ -457,12 +457,14 @@ recreate_pooltgts()
 
 	D_ASSERT(bio_nvme_configured(SMD_DEV_TYPE_META));
 	D_INIT_LIST_HEAD(&pool_list);
+	// 从smd 模块获取pool list
 	rc = smd_pool_list(&pool_list, &pool_list_cnt);
 	if (rc != 0) {
 		D_ERROR("Failed to get pool info list from SMD\n");
 		return rc;
 	}
 
+	// 遍历所有的pool
 	d_list_for_each_entry_safe(pool_info, tmp, &pool_list, spi_link) {
 		/* Cleanup Newborns */
 		if ((pool_info->spi_blob_sz[SMD_DEV_TYPE_META] == 0) ||
@@ -485,6 +487,7 @@ recreate_pooltgts()
 				DP_UUID(pool_info->spi_id), DP_RC(rc));
 			goto out;
 		}
+		// todo: 这个是比如engine 重启时恢复原有的pool 的target 创建吧，但是为啥要恢复呢，这个不能乱删除吧，删除了恢复也没用吧
 		rc = tgt_recreate(pool_info->spi_id, pool_info->spi_blob_sz[SMD_DEV_TYPE_META],
 				  pool_info->spi_tgt_cnt[SMD_DEV_TYPE_META], rdb_blob_sz);
 		if (rc)
@@ -505,6 +508,7 @@ ds_mgmt_tgt_setup(void)
 	mode_t	stored_mode;
 	int	rc;
 
+	// /mnt/daos/s0/ 下的两个文件夹
 	/** create the path string */
 	D_ASPRINTF(newborns_path, "%s/NEWBORNS", dss_storage_path);
 	if (newborns_path == NULL)
@@ -513,8 +517,10 @@ ds_mgmt_tgt_setup(void)
 	if (zombies_path == NULL)
 		D_GOTO(err_newborns, rc = -DER_NOMEM);
 
+	// 屏蔽掉生成的文件/文件夹的访问权限
 	stored_mode = umask(0);
 	/** create NEWBORNS directory if it does not exist already */
+	// 生成born 文件夹
 	rc = mkdir(newborns_path, S_IRWXU);
 	if (rc < 0 && errno != EEXIST) {
 		D_ERROR("failed to create NEWBORNS dir: %d\n", errno);
@@ -523,18 +529,21 @@ ds_mgmt_tgt_setup(void)
 	}
 
 	/** create ZOMBIES directory if it does not exist already */
+	// 生成zombies 文件夹
 	rc = mkdir(zombies_path, S_IRWXU);
 	if (rc < 0 && errno != EEXIST) {
 		D_ERROR("failed to create ZOMBIES dir: %d\n", errno);
 		umask(stored_mode);
 		D_GOTO(err_zombies, rc = daos_errno2der(errno));
 	}
+	// todo: 恢复权限屏蔽？
 	umask(stored_mode);
 
 	/** remove leftover from previous runs */
 	cleanup_leftover_pools(false);
 
 	if (bio_nvme_configured(SMD_DEV_TYPE_META)) {
+		// engine 启动的时候执行，创建targets，server 下发创建池请求的时候，也会创建targets -- tgt_create_preallocate
 		rc = recreate_pooltgts();
 		if (rc) {
 			D_ERROR("failed to create pool tgts: "DF_RC"\n", DP_RC(rc));
@@ -548,6 +557,7 @@ ds_mgmt_tgt_setup(void)
 		D_GOTO(err_zombies, rc = -DER_NOMEM);
 	}
 
+	// 创建mutex
 	rc = ABT_mutex_create(&pooltgts->dpt_mutex);
 	if (rc != ABT_SUCCESS) {
 		D_ERROR("failed to create pooltgts mutex: %d\n", rc);
@@ -555,12 +565,15 @@ ds_mgmt_tgt_setup(void)
 		goto err_pooltgts;
 	}
 
+	// 创建cond
 	rc = ABT_cond_create(&pooltgts->dpt_cv);
 	if (rc != ABT_SUCCESS) {
 		D_ERROR("failed to create pooltgts cv: %d\n", rc);
 		rc = dss_abterr2der(rc);
 		goto err_mutex;
 	}
+	// 创建hash table -- pooltgts->dpt_creates_ht
+	// pooltgts 是存储pool 信息的
 	rc = d_hash_table_create_inplace(D_HASH_FT_NOLOCK, 6 /* bits */,
 					 NULL /* priv */, &pooltgts_hops,
 					 &pooltgts->dpt_creates_ht);
@@ -570,11 +583,13 @@ ds_mgmt_tgt_setup(void)
 		goto err_cv;
 	}
 
+	// 清理newborn 目录
 	rc = subtree_destroy(newborns_path);
 	if (rc)
 		/** only log error, will try again next time */
 		D_ERROR("failed to cleanup NEWBORNS dir: %d, will try again\n",
 			rc);
+	// 清理zombies 目录
 	rc = subtree_destroy(zombies_path);
 	if (rc)
 		/** only log error, will try again next time */
@@ -630,6 +645,7 @@ struct vos_pool_arg {
 	daos_size_t	vpa_nvme_size;
 };
 
+// engine 下的每个target 会在pmem 上生成一个vos-tgtid 的文件
 static int
 tgt_vos_create_one(void *varg)
 {
@@ -638,17 +654,15 @@ tgt_vos_create_one(void *varg)
 	char			*path = NULL;
 	int			 rc;
 
-	// scm 目录下 vos-idx 文件
 	// todo: 为啥这里是 newborn dir
 	rc = path_gen(vpa->vpa_uuid, newborns_path, VOS_FILE, &info->dmi_tgt_id,
 		      &path);
 	if (rc)
 		return rc;
 
-	// 普通的vos pool，这个应该和/mnt/daos/2/ 下的vos-idx 一一对应
 	// 内部会创建memobj，进而wal open，进而 flush wal
 	// scm_sz = 0
-	// 创建vos pool
+	// 创建vos-tgtid 文件对应的pmem obj
 	rc = vos_pool_create(path, (unsigned char *)vpa->vpa_uuid,
 			     vpa->vpa_scm_size, vpa->vpa_nvme_size, 0, NULL);
 	if (rc)
@@ -670,8 +684,10 @@ tgt_vos_preallocate(uuid_t uuid, daos_size_t scm_size, int tgt_id)
 	if (rc)
 		goto out;
 
+	// newborn 下创建vos 文件
 	D_DEBUG(DB_MGMT, DF_UUID": creating vos file %s\n", DP_UUID(uuid), path);
 
+	// 创建
 	fd = open(path, O_CREAT|O_RDWR, 0600);
 	if (fd < 0) {
 		rc = daos_errno2der(errno);
@@ -764,6 +780,7 @@ tgt_vos_preallocate_sequential(uuid_t uuid, daos_size_t scm_size, int tgt_nr)
 {
 	int i, rc = 0;
 
+	// 按序创建vos-tgtid 文件
 	for (i = 0; i < tgt_nr; i++) {
 		rc = tgt_vos_preallocate(uuid, scm_size, i);
 		if (rc)
@@ -791,11 +808,13 @@ tgt_vos_preallocate_parallel(uuid_t uuid, daos_size_t scm_size, int tgt_nr, bool
 	/* Disable cancellation to manage other threads created within. */
 	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelstate);
 
+	// 每个target 创建一个vos-tgtid 文件
 	for (i = 0; i < tgt_nr; i++) {
 		entry = &thrds_list[i];
 		uuid_copy(entry->tvt_args.tvpa_uuid, uuid);
 		entry->tvt_args.tvpa_scm_size = scm_size;
 		entry->tvt_args.tvpa_tgt_id = i;
+		// tgt_vos_preallocate_thrd_func newborn 下创建vos 文件
 		rc = pthread_create(&entry->tvt_tid, NULL, tgt_vos_preallocate_thrd_func,
 				    &entry->tvt_args);
 		if (rc) {
@@ -911,18 +930,21 @@ struct tgt_create_args {
 static void *
 tgt_create_preallocate(void *arg)
 {
+	// 预处理，目的是要返回tca
 	struct tgt_create_args	*tca = arg;
 	int			 rc;
 
 	(void)dss_xstream_set_affinity(tca->tca_dx);
 
 	/** generate path to the target directory */
+	// 生成tca_path
 	rc = ds_mgmt_tgt_file(tca->tca_ptrec->dptr_uuid, NULL, NULL,
 			      &tca->tca_path);
 	if (rc)
 		goto out;
 
 	/** check whether the target already exists */
+	// 检查tca_path，保证目录存在
 	rc = access(tca->tca_path, F_OK);
 	if (rc >= 0) {
 		/** target already exists, let's reuse it for idempotence */
@@ -936,11 +958,13 @@ tgt_create_preallocate(void *arg)
 			tca->tca_path, DP_RC(rc));
 	} else if (errno == ENOENT) { /** target doesn't exist, create one */
 		/** create the pool directory under NEWBORNS */
+		// 在 NEWBORNS 目录创建新的target
 		rc = path_gen(tca->tca_ptrec->dptr_uuid, newborns_path, NULL,
 			      NULL, &tca->tca_newborn);
 		if (rc)
 			goto out;
 
+		// 创建newborn
 		rc = mkdir(tca->tca_newborn, 0700);
 		if (rc < 0 && errno != EEXIST) {
 			rc = daos_errno2der(errno);
@@ -959,10 +983,12 @@ tgt_create_preallocate(void *arg)
 		 */
 		D_ASSERT(dss_tgt_nr > 0);
 		if (!bio_nvme_configured(SMD_DEV_TYPE_META)) {
+			// 顺序创建
 			rc = tgt_vos_preallocate_sequential(tca->tca_ptrec->dptr_uuid,
 							    max(tca->tca_scm_size / dss_tgt_nr,
 								1 << 24), dss_tgt_nr);
 		} else {
+			// 创建vos-tgtid 文件
 			rc = tgt_vos_preallocate_parallel(tca->tca_ptrec->dptr_uuid,
 							  max(tca->tca_scm_size / dss_tgt_nr,
 							      1 << 24), dss_tgt_nr,
@@ -983,7 +1009,7 @@ static int tgt_destroy(uuid_t pool_uuid, char *path);
 /**
  * RPC handler for target creation
  */
-// todo: 创建target 也是通过rpc 来的吗
+// 创建池的 rpc 请求到来后，engine 执行此函数，创建当前engine 对应的 targets 
 void
 ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 {
@@ -996,11 +1022,13 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 	int				 rc = 0;
 
 	/** incoming request buffer */
+	// 获取到rpc 入参
 	tc_in = crt_req_get(tc_req);
 	D_DEBUG(DB_MGMT, DF_UUID": processing rpc %p\n",
 		DP_UUID(tc_in->tc_pool_uuid), tc_req);
 
 	/** reply buffer */
+	// 准备rpc 出参
 	tc_out = crt_reply_get(tc_req);
 	D_ASSERT(tc_in != NULL && tc_out != NULL);
 
@@ -1034,6 +1062,9 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 	tca.tca_nvme_size = tc_in->tc_nvme_size;
 	tca.tca_dx = dss_current_xstream();
 	// 创建target 前预准备
+	// 预准备会在newborn 目录下创建vos-tgtid 文件
+	// 后面创建pmemobj 是需要文件已存在的
+	// 预处理的目的是创建一些空的vos 文件
 	rc = pthread_create(&thread, NULL, tgt_create_preallocate, &tca);
 	if (rc) {
 		rc = daos_errno2der(rc);
@@ -1043,6 +1074,7 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 		goto out;
 	}
 
+	// 等待预准备线程执行（在newborn 目录下创建vos-tgtid 文件）完成
 	for (;;) {
 		void *res;
 
@@ -1069,6 +1101,7 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 		ABT_thread_yield();
 	}
 	/* check the result of tgt_create_preallocate() */
+	// 检查预准备执行结果
 	if (rc == -DER_CANCELED) {
 		D_DEBUG(DB_MGMT, DF_UUID": tgt preallocate thread canceled\n",
 			DP_UUID(tc_in->tc_pool_uuid));
@@ -1081,6 +1114,7 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 		D_INFO(DF_UUID": tgt preallocate thread succeeded\n", DP_UUID(tc_in->tc_pool_uuid));
 	}
 
+	// 上面是预处理，现在是真正的创建，然后从newborn 中移动出来
 	if (tca.tca_newborn != NULL) {
 		struct vos_pool_arg vpa = {0};
 
@@ -1092,14 +1126,25 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 		// nvme 空间按 tgt数量均分
 		vpa.vpa_nvme_size = tc_in->tc_nvme_size / dss_tgt_nr;
 		/*
-		每个target 都会创建一个vos pool（如下是20个target）
+		每个target 都会创建一个vos-tgtid 文件（如下是20个target）
 		// 使用pemem 设备：
 		// 1. 让scm 设备在dev 下可以看到：ndctl create-namespace --continue
 		// 2. 设置到scm_list 中，之后将dev 下的mem-idx 会自动 mount 到daos的 scm_mount 路径上
-		// 擦除scm 上数据：wipefs -a /dev/pmem0
+		// 擦除 scm 上数据：wipefs -a /dev/pmem0  （不擦除scm 上数据，重新部署会失败，擦除操作之前需要先卸载，不然会报错设备busy）
 		root@server01:/mnt/daos/2/3d3f1d6e-56d2-4eb5-87a2-a631afcae508# ls
 		rdb-pool  vos-0  vos-1  vos-10  vos-11  vos-12  vos-13  vos-14  vos-15  vos-16  vos-17  vos-18  vos-19  vos-2  vos-3  vos-4  vos-5  vos-6  vos-7  vos-8  vos-9
 		*/
+
+		/*
+		类似 ceph -s 查看ranks 的情况：
+		root@server03:/opt/daos/bin# ./dmg  system  query  -v
+		Rank UUID                                 Control Address    Fault Domain State  Reason
+		---- ----                                 ---------------    ------------ -----  ------
+		0    aa7b36f3-7fae-4d63-8b39-55ebe9b7fcf5 10.110.64.36:10009 /server03    Joined
+		1    dd2bbf38-31ec-4ca4-bb3d-d66dddfc5adc 10.110.64.36:10009 /server03    Joined
+		*/
+		// 这里才真正的去创建pmem obj
+		// 预处理的目的是创建本地文件，umempobj_create 接口调用会用到 这个文件的 path 用于数据持久化
 		rc = dss_thread_collective(tgt_vos_create_one, &vpa, 0);
 		if (rc) {
 			D_ERROR(DF_UUID": thread collective tgt_vos_create_one failed, "DF_RC"\n",
@@ -1107,6 +1152,7 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 			goto out;
 		}
 
+		// todo: 这里是个什么流程
 		/** ready for prime time, move away from NEWBORNS dir */
 		// 重命名newborn 文件
 		rc = rename(tca.tca_newborn, tca.tca_path);

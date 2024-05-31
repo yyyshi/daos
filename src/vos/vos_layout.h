@@ -108,6 +108,7 @@ enum vos_gc_type {
  * Durable format for VOS pool
  */
 // pool 的df，cont 的df，object 和dkey & akey 的df 都有
+// df == durable format 持久模式
 struct vos_pool_df {
 	/** Structs stored in LE or BE representation */
 	uint32_t				pd_magic;
@@ -126,6 +127,7 @@ struct vos_pool_df {
 	uint64_t				pd_reserv;
 	/** Unique PoolID for each VOS pool assigned on creation */
 	uuid_t					pd_id;
+	// scm 和nvme 的总空间
 	/** Total space in bytes on SCM */
 	uint64_t				pd_scm_sz;
 	/** Total space in bytes on NVMe */

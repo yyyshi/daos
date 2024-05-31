@@ -155,6 +155,7 @@ func parseOpts(args []string, opts *mainOpts, log *logging.LeveledLogger) error 
 				"this command will not use it")
 		}
 
+		// 从这里到start.go 中执行
 		if err := cmd.Execute(cmdArgs); err != nil {
 			return err
 		}

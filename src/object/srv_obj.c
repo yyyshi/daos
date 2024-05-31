@@ -1438,6 +1438,7 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		// 而后面 bio_iod_prep 里面是给biov 设置地址。如果是fetch 的话，还需要在缓冲区里面填充数据 
 		// 这里会构建后面buffer map 时候用到的vos io ctx，这个ctx 就是在这里和ioh 关联上的
 		// 注意区分daos iods 和biods
+		// ！！！这里会通过vea 模块预留资源offset，后面 bio_iod_prep 里面会用到预留的offset（nvme 场景）
 		rc = vos_update_begin(ioc->ioc_vos_coh, orw->orw_oid,
 			      orw->orw_epoch, cond_flags, dkey,
 			      iods_nr, iods, iod_csums,
@@ -1643,6 +1644,8 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 	// 1. 如果是scm，直接转化pmdk pmemobj offset 为直接内存
 	// 2. 如果是nvme，将spdk blob 页面偏移量映射到内部维护的dma 缓冲区。如果是fetch 操作，还需要填充缓冲区
 	// 如果rma == true，将rpc->cr_ctx 作为bulk ctx 传递出去
+	// 上面 vos_update_begin 中会预留offset，这里会使用offset 完成dma_map_one/bulk_map_one 映射
+	// map完成后，offset 将被设置到reserved dma 的region 中。后续使用spdk_blob_io_write 接口时候，直接使用对应region 里的offset
 	rc   = bio_iod_prep(biod, BIO_CHK_TYPE_IO, rma ? rpc->cr_ctx : NULL, CRT_BULK_RW);
 	if (rc) {
 		D_ERROR(DF_UOID " bio_iod_prep failed: " DF_RC "\n", DP_UOID(orw->orw_oid),

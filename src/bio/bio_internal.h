@@ -342,11 +342,13 @@ struct bio_bdev {
  * SPDK blobstore isn't thread safe and there can be only one SPDK
  * blobstore for certain NVMe device.
  */
+// bio 模块的blobstore
 struct bio_blobstore {
 	ABT_mutex		 bb_mutex;
 	ABT_cond		 bb_barrier;
 	/* Back pointer to bio_bdev */
 	struct bio_bdev		*bb_dev;
+	// spdk 的原生bs
 	struct spdk_blob_store	*bb_bs;
 	/*
 	 * The xstream responsible for blobstore load/unload, monitor
@@ -371,12 +373,14 @@ struct bio_blobstore {
 };
 
 /* Per-xstream blobstore */
+// 每个xs的bs 数据结构
 struct bio_xs_blobstore {
 	/* In-flight blob read/write */
 	unsigned int		 bxb_blob_rw;
 	/* spdk io channel */
 	struct spdk_io_channel	*bxb_io_channel;
 	/* per bio blobstore */
+	// bio 模块的blobstore
 	struct bio_blobstore	*bxb_blobstore;
 	/* All I/O contexts for this xstream blobstore */
 	d_list_t		 bxb_io_ctxts;

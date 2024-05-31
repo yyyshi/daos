@@ -153,8 +153,11 @@ func (cmd *startCmd) configureLogging() error {
 	return applyLogConfig()
 }
 
+// 来自于main.go
 func (cmd *startCmd) Execute(args []string) error {
+	// 默认零值，== 没被赋值过
 	if cmd.start == nil {
+		// server 包下的Start 函数
 		cmd.start = server.Start
 	}
 
@@ -164,5 +167,6 @@ func (cmd *startCmd) Execute(args []string) error {
 
 	cmd.config.AutoFormat = cmd.AutoFormat
 
+	// 执行server.go 中server 包下的Start 函数
 	return cmd.start(cmd.Logger, cmd.config)
 }

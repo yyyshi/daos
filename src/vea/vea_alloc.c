@@ -98,6 +98,7 @@ reserve_extent(struct vea_space_info *vsi, uint32_t blk_cnt,
 	       struct vea_resrvd_ext *resrvd)
 {
 	struct vea_free_class *vfc = &vsi->vsi_class;
+	// 空闲的extent
 	struct vea_free_extent vfe;
 	struct vea_extent_entry *entry;
 	struct d_binheap_node *root;
@@ -108,6 +109,7 @@ reserve_extent(struct vea_space_info *vsi, uint32_t blk_cnt,
 
 	// 大根堆直接获取最大的root 节点，即最大的free extent
 	root = d_binheap_root(&vfc->vfc_heap);
+	// entry 是现在的提供预留服务的free extent，即从entry 里预留nvme 资源
 	entry = container_of(root, struct vea_extent_entry, vee_node);
 
 	D_ASSERT(entry->vee_ext.vfe_blk_cnt > vfc->vfc_large_thresh);
@@ -125,51 +127,61 @@ reserve_extent(struct vea_space_info *vsi, uint32_t blk_cnt,
 	 * reserve from the small extents first, if it fails, reserve from the
 	 * largest free extent.
 	 */
-	// free extent 足够大，且可以拆分，那么一分为二，把其中半个预留出去
+	// free extent 足够大，且可以拆分，那么一分为二，把其中后半个预留出去（从后一半中预留）
 	if (entry->vee_ext.vfe_blk_cnt <= (max(blk_cnt, vfc->vfc_large_thresh) * 2)) {
 		// 这里是不满足拆分的场景，将使用多个小的free extent 来预留
 		vfe.vfe_blk_off = entry->vee_ext.vfe_blk_off;
 		vfe.vfe_blk_cnt = blk_cnt;
 
+		// compound 混合
 		rc = compound_alloc_extent(vsi, &vfe, entry);
 		if (rc)
 			return rc;
 
 	} else {
+		// 这里是满足拆分的场景，一分为二并返回其中后一半作为此次预留（从后一半中预留）
+		// 将前一半添加到free 中，用于下次预留，本次从后一半中预留
 		uint32_t half_blks, tot_blks;
 		uint64_t blk_off;
 
+		// 当前free extent 的off
 		blk_off = entry->vee_ext.vfe_blk_off;
+		// 当前free extnet 的所有块
 		tot_blks = entry->vee_ext.vfe_blk_cnt;
 		// 减半
 		half_blks = tot_blks >> 1;
 		D_ASSERT(tot_blks >= (half_blks + blk_cnt));
 
 		/* Shrink the original extent to half size */
-		// 拆分成原来一半大小
+		// 将拆分前的extent 删除
 		extent_free_class_remove(vsi, entry);
+		// 修改成原来一半大小
 		entry->vee_ext.vfe_blk_cnt = half_blks;
+		// 将申请到的一半的extent 添加到extent list 中
 		rc = extent_free_class_add(vsi, entry);
 		if (rc)
 			return rc;
 
 		/* Add the remaining part of second half */
-		// 把剩下的一半添加到free extent 列表中
+		// 处理后一半
 		if (tot_blks > (half_blks + blk_cnt)) {
+			// 在原来off 基础上添加后一半的大小，因为在后一半上预留，所以再加上要预留的大小
 			vfe.vfe_blk_off = blk_off + half_blks + blk_cnt;
+			// 剩下的大小
 			vfe.vfe_blk_cnt = tot_blks - half_blks - blk_cnt;
 			vfe.vfe_age = 0;	/* Not used */
 
+			// 根据vfe_blk_cnt 作为key 去查询tree
 			rc = compound_free_extent(vsi, &vfe, VEA_FL_NO_MERGE |
 						  VEA_FL_NO_ACCOUNTING);
 			if (rc)
 				return rc;
 		}
-		// 更新off
+		// 更新off，因为是从后一半开始预留，所以off 为 + half_blks
 		vfe.vfe_blk_off = blk_off + half_blks;
 	}
 
-	// 更新resrvd 的off
+	// 更新resrvd 的off，到此，此次空间已经申请完毕，并保存在resrvd 中
 	resrvd->vre_blk_off = vfe.vfe_blk_off;
 	resrvd->vre_blk_cnt = blk_cnt;
 

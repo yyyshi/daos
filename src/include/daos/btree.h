@@ -411,6 +411,7 @@ typedef struct {
 /**
  * Tree instance, it is instantiated while creating or opening a tree.
  */
+// btree 实例，当创建或者打开一棵树的时候将被实例化
 struct btr_instance {
 	/** instance of memory class for the tree */
 	struct umem_instance		 ti_umm;

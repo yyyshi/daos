@@ -402,6 +402,7 @@ ilog_create(struct umem_instance *umm, struct ilog_df *root)
 			  _root, _root == NULL ? 0 : _root->lr_magic);	\
 	} while (0)
 
+// 实际上是创建ctx
 int
 ilog_open(struct umem_instance *umm, struct ilog_df *root,
 	  const struct ilog_desc_cbs *cbs, daos_handle_t *loh)

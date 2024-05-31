@@ -783,6 +783,7 @@ vos_dtx_post_handle(struct vos_container *cont,
 int
 vos_dtx_act_reindex(struct vos_container *cont);
 
+// 这么多种类型的vos tree
 enum vos_tree_class {
 	/** the first reserved tree class */
 	VOS_BTR_BEGIN		= DBTREE_VOS_BEGIN,
@@ -792,14 +793,17 @@ enum vos_tree_class {
 	VOS_BTR_AKEY		= (VOS_BTR_BEGIN + 1),
 	/** single value + epoch tree */
 	VOS_BTR_SINGV		= (VOS_BTR_BEGIN + 2),
+	// object idx 表，cont idx 表
 	/** object index table */
 	VOS_BTR_OBJ_TABLE	= (VOS_BTR_BEGIN + 3),
 	/** container index table */
 	VOS_BTR_CONT_TABLE	= (VOS_BTR_BEGIN + 4),
+	// 存储活跃和已提交事务的表
 	/** DAOS two-phase commit transaction table (active) */
 	VOS_BTR_DTX_ACT_TABLE	= (VOS_BTR_BEGIN + 5),
 	/** DAOS two-phase commit transaction table (committed) */
 	VOS_BTR_DTX_CMT_TABLE	= (VOS_BTR_BEGIN + 6),
+	// ilog 树
 	/** The VOS incarnation log tree */
 	VOS_BTR_ILOG		= (VOS_BTR_BEGIN + 7),
 	/** the last reserved tree class */
