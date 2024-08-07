@@ -103,6 +103,7 @@ struct dtx_handle {
 	/* The array of the DTXs for Commit on Share (conflcit). */
 	struct dtx_id			*dth_dti_cos;
 	/** Pointer to the DTX entry in DRAM. */
+	// 指向 dram 中dtx 的记录
 	void				*dth_ent;
 	/** The flags, see dtx_entry_flags. */
 	uint32_t			 dth_flags;
@@ -124,19 +125,27 @@ struct dtx_handle {
 	/* Hash of the dkey to be modified if applicable. Per modification. */
 	uint64_t			 dth_dkey_hash;
 
+	// todo: 这俩结构是干啥的
 	struct dtx_rsrvd_uint		 dth_rsrvd_inline;
 	struct dtx_rsrvd_uint		*dth_rsrvds;
 	void				**dth_deferred;
+	// todo: 看下这些dtx list 相关的逻辑
+	// 待释放的nmve extents，跟事务的hdl 是什么关系
 	/* NVME extents to release */
 	d_list_t			 dth_deferred_nvme;
+	// 已提交和可提交列表
 	/* Committed or comittable DTX list */
 	d_list_t			 dth_share_cmt_list;
+	// 废弃的dtx 列表
 	/* Aborted DTX list */
 	d_list_t			 dth_share_abt_list;
+	// 活跃的dtx 列表
 	/* Active DTX list */
 	d_list_t			 dth_share_act_list;
+	// 待检查的dtx 列表
 	/* DTX list to be checked */
 	d_list_t			 dth_share_tbd_list;
+	// 需要刷新的个数
 	int				 dth_share_tbd_count;
 };
 
@@ -163,6 +172,7 @@ struct dtx_leader_handle {
 	struct dtx_id			*dlh_dti_cos;
 
 	/* The future to wait for sub requests to finish. */
+	// 用来等待sub req 完成的future
 	ABT_future			dlh_future;
 
 	dtx_agg_cb_t			dlh_agg_cb;
@@ -178,8 +188,10 @@ struct dtx_leader_handle {
 	/* The index of the first target that forward sub-request to. */
 	uint32_t			dlh_forward_idx;
 	/* The count of the targets that forward sub-request to. */
+	// 转发sub req 到targets 的个数
 	uint32_t			dlh_forward_cnt;
 	/* Sub transaction handle to manage the dtx leader */
+	// 改leader hdl 的子事务句柄
 	struct dtx_sub_status		*dlh_subs;
 };
 

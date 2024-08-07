@@ -41,6 +41,7 @@ struct vos_object {
 	/** Key for searching, object ID within a container */
 	daos_unit_oid_t			obj_id;
 	/** dkey tree open handle of the object */
+	// 能获取到dkey
 	daos_handle_t			obj_toh;
 	/** btree iterator handle */
 	daos_handle_t			obj_ih;

@@ -887,6 +887,7 @@ dtx_handle_init(struct dtx_id *dti, daos_handle_t coh, struct dtx_epoch *epoch,
 	dth->dth_already = 0;
 	dth->dth_need_validation = 0;
 
+	// 存在修改的dtx 的dtx id 数组 dti_cos
 	dth->dth_dti_cos = dti_cos;
 	dth->dth_dti_cos_count = dti_cos_cnt;
 	dth->dth_ent = NULL;
@@ -1133,6 +1134,7 @@ dtx_leader_begin(daos_handle_t coh, struct dtx_id *dti,
 		dlh->dlh_future = ABT_FUTURE_NULL;
 		dlh->dlh_subs = (struct dtx_sub_status *)(dlh + 1);
 		for (i = 0; i < tgt_cnt; i++) {
+			// todo: 给dlh_subs 设置targets 是什么含义
 			dlh->dlh_subs[i].dss_tgt = tgts[i];
 			if (unlikely(tgts[i].st_flags & DTF_DELAY_FORWARD))
 				dlh->dlh_delay_sub_cnt++;
@@ -1152,6 +1154,7 @@ dtx_leader_begin(daos_handle_t coh, struct dtx_id *dti,
 			     (flags & DTX_PREPARED) ? true : false,
 			     (flags & DTX_DROP_CMT) ? true : false, dth);
 	if (rc == 0 && sub_modification_cnt > 0)
+		// 第三个参数是 false
 		rc = vos_dtx_attach(dth, false, (flags & DTX_PREPARED) ? true : false);
 
 	D_DEBUG(DB_IO, "Start DTX "DF_DTI" sub modification %d, ver %u, leader "
@@ -1174,11 +1177,14 @@ dtx_leader_wait(struct dtx_leader_handle *dlh)
 {
 	int	rc;
 
+	// ！= null，需要等待
 	if (dlh->dlh_future != ABT_FUTURE_NULL) {
+		// todo: 怎么触发的wake？
 		rc = ABT_future_wait(dlh->dlh_future);
 		D_ASSERTF(rc == ABT_SUCCESS,
 			  "ABT_future_wait failed %d.\n", rc);
 
+		// 再次走到again 时，future 已经被free 了，重新创建重新使用
 		ABT_future_free(&dlh->dlh_future);
 	}
 
@@ -1346,6 +1352,7 @@ dtx_leader_end(struct dtx_leader_handle *dlh, struct ds_cont_hdl *coh, int resul
 		flags = 0;
 	
 	// 在一次dtx 要结束的时候，向cos 缓存中添加dtx entry
+	// 这是向 dcr_prio_list 中插入一个item，这个list 将在 dtx_leader_begin 的时候遍历并处理
 	rc = dtx_add_cos(cont, dte, &dth->dth_leader_oid,
 			 dth->dth_dkey_hash, dth->dth_epoch, flags);
 	dtx_entry_put(dte);
@@ -1476,13 +1483,16 @@ dtx_begin(daos_handle_t coh, struct dtx_id *dti,
 	  struct dtx_id *dti_cos, int dti_cos_cnt, uint32_t flags,
 	  struct dtx_memberships *mbs, struct dtx_handle **p_dth)
 {
+	// 创建一个dtx 句柄
 	struct dtx_handle	*dth;
 	int			 rc;
 
+	// 申请资源
 	D_ALLOC(dth, sizeof(*dth));
 	if (dth == NULL)
 		return -DER_NOMEM;
 
+	// 初始化句柄
 	// dth 的epoch 根据epoch 设置 
 	rc = dtx_handle_init(dti, coh, epoch, sub_modification_cnt,
 			     pm_ver, leader_oid, dti_cos, dti_cos_cnt, mbs,
@@ -1491,7 +1501,9 @@ dtx_begin(daos_handle_t coh, struct dtx_id *dti,
 			     (flags & DTX_FOR_MIGRATION) ? true : false,
 			     (flags & DTX_IGNORE_UNCOMMITTED) ? true : false,
 			     (flags & DTX_RESEND) ? true : false, false, false, dth);
+	// 初始化后进行attach
 	if (rc == 0 && sub_modification_cnt > 0)
+		// attach dtx
 		rc = vos_dtx_attach(dth, false, false);
 
 	D_DEBUG(DB_IO, "Start DTX "DF_DTI" sub modification %d, ver %u, "
@@ -1502,6 +1514,7 @@ dtx_begin(daos_handle_t coh, struct dtx_id *dti,
 	if (rc != 0)
 		D_FREE(dth);
 	else
+	// 返回这个句柄
 		*p_dth = dth;
 
 	return rc;
@@ -1512,12 +1525,13 @@ dtx_end(struct dtx_handle *dth, struct ds_cont_child *cont, int result)
 {
 	D_ASSERT(dth != NULL);
 
+	// 释放dth 里面的所有 list 里的items
 	dtx_shares_fini(dth);
 
 	if (daos_is_zero_dti(&dth->dth_xid))
 		goto out;
 
-	// 说明tx 执行出错了
+	// 说明tx 执行出错了，rc == 0 是正常值
 	if (result < 0) {
 		// 虽然本次执行错误，但是因为cos 缓存中还没done，所以需要commit
 		if (dth->dth_dti_cos_count > 0 && !dth->dth_cos_done) {
@@ -1557,7 +1571,9 @@ dtx_end(struct dtx_handle *dth, struct ds_cont_child *cont, int result)
 
 	D_ASSERTF(result <= 0, "unexpected return value %d\n", result);
 
+	// todo: rsrvd 是干啥的
 	vos_dtx_rsrvd_fini(dth);
+	// begin 里是attach，end 是detach
 	vos_dtx_detach(dth);
 
 out:
@@ -1999,6 +2015,8 @@ dtx_leader_exec_ops_ult(void *arg)
 	uint32_t			 k;
 	int				 rc = 0;
 
+	// 当前ult 开始处理以下多个dlh_forward req
+	// 从idx 开始遍历 cnt 个数
 	for (i = dlh->dlh_forward_idx, j = 0, k = 0; j < dlh->dlh_forward_cnt; i++, j++) {
 		sub = &dlh->dlh_subs[i];
 		tgt = &sub->dss_tgt;
@@ -2026,7 +2044,10 @@ dtx_leader_exec_ops_ult(void *arg)
 			continue;
 		}
 
+		// 对当前遍历当前轮次的idx，执行 obj_tgt_update 更新
 		// func == obj_tgt_update
+		// i 标记事务在哪个target 上， -1 表示本地事务
+		// 这里idx 从 0 开始，表示要forward 到remote，外面 idx == -1 表示本地执行
 		rc = ult_arg->func(dlh, ult_arg->func_arg, i, dtx_sub_comp_cb);
 		if (rc != 0) {
 			if (sub->dss_comp == 0)
@@ -2053,6 +2074,7 @@ dtx_leader_exec_ops_ult(void *arg)
 	}
 
 	/* To indicate that the IO forward ULT itself has done. */
+	// 表明ult 协程执行完成
 	rc = ABT_future_set(dlh->dlh_future, dlh);
 	D_ASSERTF(rc == ABT_SUCCESS, "ABT_future_set failed [%u, %u), for delay %s: %d\n",
 		  dlh->dlh_forward_idx, dlh->dlh_forward_idx + dlh->dlh_forward_cnt,
@@ -2067,22 +2089,27 @@ dtx_leader_exec_ops(struct dtx_leader_handle *dlh, dtx_sub_func_t func,
 		    dtx_agg_cb_t agg_cb, int allow_failure, void *func_arg)
 {
 	struct dtx_ult_arg	ult_arg;
+	// todo: 这两个来源分别是什么信息
 	int			sub_cnt = dlh->dlh_normal_sub_cnt + dlh->dlh_delay_sub_cnt;
 	int			rc = 0;
 	int			local_rc = 0;
 	int			remote_rc = 0;
 
+	// 设置ult 的参数
 	// func == obj_tgt_update
 	ult_arg.func = func;
 	ult_arg.func_arg = func_arg;
 	ult_arg.dlh = dlh;
 
+	// 设置dlh 相关参数
 	dlh->dlh_result = 0;
 	dlh->dlh_allow_failure = allow_failure;
 	dlh->dlh_normal_sub_done = 0;
 	dlh->dlh_drop_cond = 0;
 	dlh->dlh_forward_idx = 0;
 
+	// 单次处理最多 DTX_EXEC_STEP_LENGTH 多个，如果很多，就分多次处理，第一次处理完后又进到again 再次处理
+	// 直到sub_cnt 为 0
 	if (sub_cnt > DTX_EXEC_STEP_LENGTH) {
 		dlh->dlh_forward_cnt = DTX_EXEC_STEP_LENGTH;
 		dlh->dlh_agg_cb = NULL;
@@ -2104,6 +2131,8 @@ again:
 	 * Create the future with dlh->dlh_forward_cnt + 1, the additional one is used by the IO
 	 * forward ULT itself to prevent the DTX handle being freed before the IO forward ULT exit.
 	 */
+	// 创建dlh 的 future
+	// todo: 第二次进到again 时，之前的future 已经可以被释放了，这里是重新利用多次
 	rc = ABT_future_create(dlh->dlh_forward_cnt + 1, dtx_comp_cb, &dlh->dlh_future);
 	if (rc != ABT_SUCCESS) {
 		D_ERROR("ABT_future_create failed [%u, %u] (1): "DF_RC"\n",
@@ -2115,6 +2144,7 @@ again:
 	 * NOTE: Ideally, we probably should create ULT for each shard, but for performance
 	 *	 reasons, let's only create one for all remote targets for now.
 	 */
+	// todo: 第二次进到again 里，上一轮的ult 已经执行完了
 	rc = dss_ult_create(dtx_leader_exec_ops_ult, &ult_arg, DSS_XS_IOFW,
 			    dss_get_module_info()->dmi_tgt_id, DSS_DEEP_STACK_SZ, NULL);
 	if (rc != 0) {
@@ -2126,20 +2156,28 @@ again:
 
 exec:
 	/* Execute the local operation only for once. */
+	// 这里和上边ult 中比，这里idx == -1，是本地执行，上面idx 从 0 开始，是要forward 到 remote 节点的
+	// 如果不为 0，那么将在ult 中遍历（上边设置的值就是 0）
 	if (dlh->dlh_forward_idx == 0)
+		// 执行 obj_tgt_update
 		local_rc = func(dlh, func_arg, -1, NULL);
 
 	/* Even the local request failure, we still need to wait for remote sub request. */
+	// 即使本地req 失败了，我们还是需要等待远程sub req
 	if (dlh->dlh_normal_sub_cnt > 0)
 		remote_rc = dtx_leader_wait(dlh);
 
+	// 本地不允许失败，直接out
 	if (local_rc != 0 && local_rc != allow_failure)
 		D_GOTO(out, rc = local_rc);
 
+	// 远程不允许失败，直接out
 	if (remote_rc != 0 && remote_rc != allow_failure)
 		D_GOTO(out, rc = remote_rc);
 
+	// 更新forward cnt
 	sub_cnt -= dlh->dlh_forward_cnt;
+	// 还存在剩余sub req，只要sub_req 不为0，就重新go again
 	if (sub_cnt > 0) {
 		dlh->dlh_forward_idx += dlh->dlh_forward_cnt;
 		if (sub_cnt <= DTX_EXEC_STEP_LENGTH) {
@@ -2154,11 +2192,15 @@ exec:
 			dlh->dlh_delay_sub_cnt, dlh->dlh_forward_idx,
 			dlh->dlh_forward_cnt, allow_failure);
 
+		// 一次没处理完，再处理一次
 		goto again;
 	}
 
+	// sub_req 为 0 了，设置标记位
 	dlh->dlh_normal_sub_done = 1;
 
+	// 正常情况是直接out
+	// todo: 非正常是什么场景？
 	if (likely(dlh->dlh_delay_sub_cnt == 0))
 		goto out;
 
@@ -2176,6 +2218,7 @@ exec:
 	 * Delay forward is rare case, the count of targets with delay forward
 	 * will be very limited. So le's handle them via another one cycle dispatch.
 	 */
+	// 处理delay 的req
 	rc = ABT_future_create(dlh->dlh_delay_sub_cnt + 1, dtx_comp_cb, &dlh->dlh_future);
 	if (rc != ABT_SUCCESS) {
 		D_ERROR("ABT_future_create failed (3): "DF_RC"\n", DP_RC(rc));

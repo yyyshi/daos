@@ -226,6 +226,7 @@ vos_oi_find(struct vos_container *cont, daos_unit_oid_t oid,
 	int			 tmprc;
 
 	*obj_p = NULL;
+	// oid 作为查询 key
 	d_iov_set(&key_iov, &oid, sizeof(oid));
 	d_iov_set(&val_iov, NULL, 0);
 
@@ -233,6 +234,7 @@ vos_oi_find(struct vos_container *cont, daos_unit_oid_t oid,
 	rc = dbtree_fetch(cont->vc_btr_hdl, BTR_PROBE_EQ,
 			  DAOS_INTENT_DEFAULT, &key_iov, NULL, &val_iov);
 	if (rc == 0) {
+		// 从btree 里查询到的obj_df 信息
 		struct vos_obj_df *obj = val_iov.iov_buf;
 
 		D_ASSERT(daos_unit_obj_id_equal(obj->vo_id, oid));
@@ -241,6 +243,7 @@ vos_oi_find(struct vos_container *cont, daos_unit_oid_t oid,
 		ilog = &obj->vo_ilog;
 	}
 
+	// todo: 检查和时间戳相关的ilog 是否已经在cache 中，是的话加到ts_set 里去
 	tmprc = vos_ilog_ts_add(ts_set, ilog, &oid, sizeof(oid));
 
 	D_ASSERT(tmprc == 0); /* Non-zero return for akey only */

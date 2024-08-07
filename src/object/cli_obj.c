@@ -456,6 +456,7 @@ obj_init_oca(struct dc_object *obj)
 
 	// 根据oid 查找oca
 	// 内部会根据oid 查找oclass，这些信息在初始化时候存储在数组中，这里会通过二分查找获取
+	// nr_grps 保存在oc 里
 	oca = daos_oclass_attr_find(obj->cob_md.omd_id, &nr_grps);
 	if (!oca)
 		return -DER_INVAL;
@@ -739,6 +740,7 @@ obj_replica_leader_select(struct dc_object *obj, unsigned int grp_idx, uint64_t 
 	D_ASSERT(oca != NULL);
 	grp_size = obj_get_grp_size(obj);
 	if (grp_size == 1) {
+		// 每个grp 都有自己的leader，备份场景下每组的第一个就是leader
 		pos = grp_idx * obj_get_grp_size(obj);
 		shard = obj_get_shard(obj, pos);
 		if (shard->po_target == -1) {
@@ -810,6 +812,7 @@ obj_grp_leader_get(struct dc_object *obj, int grp_idx, uint64_t dkey_hash,
 		return obj_ec_leader_select(obj, grp_idx, cond_modify, map_ver, dkey_hash,
 					    bit_map);
 
+	// todo: 三备份场景leader 获取
 	return obj_replica_leader_select(obj, grp_idx, dkey_hash, map_ver);
 }
 
@@ -865,6 +868,8 @@ obj_dkey2grpidx(struct dc_object *obj, uint64_t hash, unsigned int map_ver)
 	// todo：容错域指的是 obj->cob_shards_nr / grp_size 信息吗？
 	// 在open 阶段创建的layout 实际上就是一个object 的shard 分布信息，这里使用当时的layout 信息和dkey 的hash 来获取所在桶
 	// 其实是每个object 自己一个hash 环，环上是容错域对应的shard 信息。再根据dkey 不同散列到不同的shard 上
+	// sx 场景时就是根据dkey 在所有的targets 里选择一个target 作为grp_idx。也就是根据dkey 将地址映射到一个target 上，一个target 就是一个grp
+	// 当副本数为三个副本的时候，将根据dkey 将地址分布到一个bucket 上，这个bucket 将对应三个target，这三个target 是一个grp
 	grp_idx = obj_pl_grp_idx(obj->cob_layout_version, hash,
 				 obj->cob_shards_nr / grp_size);
 	D_RWLOCK_UNLOCK(&obj->cob_lock);
@@ -880,6 +885,7 @@ obj_dkey2grpmemb(struct dc_object *obj, uint64_t hash, uint32_t map_ver,
 
 	// 根据dkey 的hash 值获取grp idx
 	// dkey 的目的就是分布式的分散数据，分散方式就是根据hash，所以返回指定的grp idx，表示的就是被划分到的bucket
+	// todo: 这个grp 是什么的group，是shard的吗，是target的吗
 	// 根据dkey 的hash 来获取所在的grp，也是pl 算法决定的，即从layout 里选一个shard（todo：layout 应该是多个shard 的组合吧）
 	grp_idx = obj_dkey2grpidx(obj, hash, map_ver);
 	if (grp_idx < 0)
@@ -888,6 +894,7 @@ obj_dkey2grpmemb(struct dc_object *obj, uint64_t hash, uint32_t map_ver,
 	// sx 场景时候grp size是 1，grp_idx 相当于就是某个target的index
 	*grp_size = obj_get_grp_size(obj);
 	// todo: 这个grp 的布局是啥样的，谁是几组是由什么决定的？
+	// 1 = 1 x 1
 	*start_shard = grp_idx * *grp_size;
 	return 0;
 }
@@ -1242,7 +1249,9 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 		return rc;
 	}
 
+	// == 1
 	req_tgts->ort_grp_nr = grp_nr;
+	// == 1
 	req_tgts->ort_grp_size = grp_size;
 	shard_idx = start_shard;
 	// sx 场景grp size == 1，grp nr == targets 个数，相当于遍历所有的targets
@@ -1270,6 +1279,7 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 			} else {
 				// 获取leader shard
 				// todo: leader
+				// 每组的第一个是leader
 				leader_shard = obj_grp_leader_get(obj, grp_idx, obj_auxi->dkey_hash,
 								  obj_auxi->cond_modify,
 								  map_ver, bit_map);
@@ -1286,6 +1296,7 @@ obj_shards_2_fwtgts(struct dc_object *obj, uint32_t map_ver, uint8_t *bit_map,
 			// 填充tgt 信息
 			// 根据leader shard 返回target id
 			// 设置req_tgts 数组中当前位置的target 值
+			// 根据layout 信息填充shard target = tgt
 			rc = obj_shard_tgts_query(obj, map_ver, leader_shard,
 						  tgt, obj_auxi, NIL_BITMAP);
 			if (rc < 0)
@@ -1521,6 +1532,7 @@ dc_obj_open(tse_task_t *task)
 	struct dc_object	*obj;
 	int			 rc;
 
+	// 根据task 信息获取参数信息，最后又存储到dc obj 里
 	args = dc_task_get_args(task);
 	D_ASSERTF(args != NULL, "Task Argument OPC does not match DC OPC\n");
 
@@ -1551,7 +1563,10 @@ dc_obj_open(tse_task_t *task)
 		D_GOTO(fail_spin_created, rc);
 
 	/* it is a local operation for now, does not require event */
-	// todo: 啥也没做啊，元数据只有一个oid 吗
+	// oid 是保存了编码后的sharding 和冗余策略相关的信息
+	// cob_md = client object meta
+	// 客户端依据oid 查询元数据
+	// todo: 这里其实啥也没做，出了oid 并没有填充md 数据
 	rc = dc_obj_fetch_md(args->oid, &obj->cob_md);
 	if (rc != 0)
 		D_GOTO(fail_rwlock_created, rc);
@@ -1559,12 +1574,14 @@ dc_obj_open(tse_task_t *task)
 	D_ASSERT(obj->cob_co->dc_props.dcp_obj_version < MAX_OBJ_LAYOUT_VERSION);
 	obj->cob_layout_version = obj->cob_co->dc_props.dcp_obj_version;
 	// 根据创建cont 时候传入的oca 信息初始化object 的oca
+	// oca = object class attr
 	rc = obj_init_oca(obj);
 	if (rc != 0)
 		D_GOTO(fail_rwlock_created, rc);
 
-	// 创建layout，内部会构建obj 的元数据信息。实际上就是通过计算得到当前obj 要分布到的targets id，每次计算结果都是一样的
+	// 客户端创建layout，内部会构建obj 的元数据信息。实际上就是通过计算得到当前obj 要分布到的targets id，每次计算结果都是一样的
 	// 使用创建好的layout 初始化 obj->cob_shards->do_shards
+	// simple_object.c 里的mode 是 DAOS_OO_RW
 	rc = obj_layout_create(obj, obj->cob_mode, false);
 	if (rc != 0)
 		D_GOTO(fail_rwlock_created, rc);
@@ -1638,6 +1655,7 @@ dc_obj_fetch_md(daos_obj_id_t oid, struct daos_obj_md *md)
 	// todo:
 	// 对于预定义的object class，不做任何事
 	// 对于定制的class，我们需要获取远程oi table
+	// todo: 这里可以做个缓存来缓存oid 元数据信息吗，怎么和服务端数据保持一致性
 	md->omd_id	= oid;
 	md->omd_ver	= 0;
 	md->omd_pda	= 0;
@@ -2091,7 +2109,7 @@ obj_bulk_prep(d_sg_list_t *sgls, unsigned int nr, bool bulk_bind,
 	for (; sgls != NULL && i < nr; i++) {
 		if (sgls[i].sg_iovs != NULL &&
 		    sgls[i].sg_iovs[0].iov_buf != NULL) {
-			// 创建多个bulks
+			// 根据sgls 创建多个bulks。即其实就是转化成bulk 方式的数据结构便于后续rdma 传输
 			// 每一个sgls 对应一个bulk
 			rc = crt_bulk_create(daos_task2ctx(task), &sgls[i],
 					     bulk_perm, &bulks[i]);
@@ -2165,9 +2183,12 @@ obj_rw_bulk_prep(struct dc_object *obj, daos_iod_t *iods, d_sg_list_t *sgls,
 		bulk_perm = update ? CRT_BULK_RO : CRT_BULK_RW;
 		// 根据sgl 填充bulks 成员
 		// 构建object 的bulk，用于rdma 传输
+		// 填充obj_auxi 的bulks
 		rc = obj_bulk_prep(sgls, nr, bulk_bind, bulk_perm, task,
 				   &obj_auxi->bulks);
 	}
+
+	// 不进if 的话会走inline 方式传输
 	obj_auxi->reasb_req.orr_size_fetched = 0;
 
 	return rc;
@@ -2755,7 +2776,7 @@ obj_req_valid(tse_task_t *task, void *args, int opc, struct dtx_epoch *epoch,
 	// 这个hdl 是事务的hdl，epoch 初始化和事务有关
 	// 如果hdl 是valid
 	// todo: 啥时候是valid，啥时候是invalid 呀
-	// todo: 什么时候有cookie，什么时候没有cookie
+	// todo: 什么时候有cookie，什么时候没有cookie: pool cont obj 等open 后就会有cookie
 	if (daos_handle_is_valid(th)) {
 		// opt 不具备修改属性，比如fetch
 		if (!obj_is_modification_opc(opc)) {
@@ -2766,7 +2787,8 @@ obj_req_valid(tse_task_t *task, void *args, int opc, struct dtx_epoch *epoch,
 				D_GOTO(out, rc);
 		}
 	} else {
-		// 第一次走这里，这里是直接设置成 DAOS_EPOCH_MAX
+		// 第一次走这里，这里是直接设置成 DAOS_EPOCH_MAX，到达服务端后会在 process_epoch 里生成新的epoch
+		// todo: 如果不是第一次呢？？
 		// todo: 如果不是valid，那还能用吗？
 		dc_io_epoch_set(epoch, opc);
 		D_DEBUG(DB_IO, "set fetch epoch "DF_U64"\n", epoch->oe_value);
@@ -3065,6 +3087,8 @@ shard_task_reset_param(tse_task_t *shard_task, void *arg)
 	return 0;
 }
 
+// todo: shard_rw_prep 是做啥
+// obj_req_fanout --> shard_rw_prep --> shard_io --> dc_obj_shard_rw --> ds_obj_rw_handler
 static int
 obj_req_fanout(struct dc_object *obj, struct obj_auxi_args *obj_auxi,
 	       uint32_t map_ver, struct dtx_epoch *epoch,
@@ -3084,6 +3108,7 @@ obj_req_fanout(struct dc_object *obj, struct obj_auxi_args *obj_auxi,
 
 	// 准备好这些targets
 	tgt = req_tgts->ort_shard_tgts;
+	// == 1
 	tgts_nr = req_tgts->ort_srv_disp ? req_tgts->ort_grp_nr :
 		  req_tgts->ort_grp_nr * req_tgts->ort_grp_size;
 
@@ -3185,7 +3210,9 @@ obj_req_fanout(struct dc_object *obj, struct obj_auxi_args *obj_auxi,
 	// 如果不是重试的场景
 	/* if with only one target, need not to create separate shard task */
 	// 如果只有一个target，不需要单独的shard task。直接执行了就完事返回，也不用调度，不用绑定主task 和sub task
+	// xs 场景tgts_nr == 1，会走这里
 	if (tgts_nr == 1 && !require_shard_task) {
+		// 根据obj 获取shard
 		shard_auxi = obj_embedded_shard_arg(obj_auxi);
 		D_ASSERT(shard_auxi != NULL);
 		// 这里设置了shard_auxi 的shard 索引，后面shard_open 时获取的就是tgt->st_shard 索引的do_shards 元素
@@ -3209,6 +3236,7 @@ obj_req_fanout(struct dc_object *obj, struct obj_auxi_args *obj_auxi,
 
 		/* for fail case the obj_task will be completed in shard_io() */
 		// shard_io 里面会执行 io_cb == dc_obj_shard_rw
+		// 在这之前都是对object 操作，到这里是将obj 分成shard 来操作。这里是只有一个shard 的情况
 		rc = shard_io(obj_task, shard_auxi);
 		return rc;
 	}
@@ -3228,6 +3256,7 @@ obj_req_fanout(struct dc_object *obj, struct obj_auxi_args *obj_auxi,
 		if (rc != 0)
 			goto out_task;
 
+		// 如果是有多个，根据task 和shard 依次获取每一个shard
 		shard_auxi = tse_task_buf_embedded(shard_task,
 						   sizeof(*shard_auxi));
 		// 多个targets 的场景，依次遍历，设置为target 的st_shard 为shard_auxi 的索引，后面shard_open 时候用于找到对应的do_shards
@@ -4615,8 +4644,12 @@ obj_update_sgls_dup(struct obj_auxi_args *obj_auxi, daos_obj_update_t *args)
 			iov_dup->iov_buf_len = iov_dup->iov_len;
 		}
 	}
+	// todo: 这里保存的三份sgls 分别作用是什么
+	// 将sgls 填充到obj_auxi 中
 	obj_auxi->reasb_req.orr_usgls = sgls;
+	// 将去重的sgls 保存到obj_auxi 的rw_args 和reasb_req 里
 	obj_auxi->rw_args.sgls_dup = sgls_dup;
+	// 去重完后更新sgls
 	args->sgls = sgls_dup;
 	return 0;
 
@@ -5698,7 +5731,7 @@ dc_obj_fetch_task(tse_task_t *task)
 		}
 		tgt_bitmap = obj_auxi->reasb_req.tgt_bitmap;
 	} else {
-		// 非EC 场景
+		// 非EC 副本场景
 		if (args->extra_flags & DIOF_CHECK_EXISTENCE) {
 			/*
 			 * XXX: Be as tempoary solution, fetch from leader fisrtly, that
@@ -5771,6 +5804,7 @@ obj_update_shards_get(struct dc_object *obj, daos_obj_fetch_t *args, unsigned in
 		// 这里会考虑到容错域，即从容错域中选择targets 来随机的分布对象
 		// todo: 容错域的构建和维护
 		// todo: 当容错域发生变化后呢，rebalance 和recover 相关
+		// 1, 1
 		return obj_dkey2grpmemb(obj, obj_auxi->dkey_hash, map_ver, shard, shard_cnt);
 
 	grp_idx = obj_dkey2grpidx(obj, obj_auxi->dkey_hash, map_ver);
@@ -5857,7 +5891,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 		D_GOTO(out_task, rc);
 	}
 
-	// sgls 去重
+	// sgls 去重，并且将args 中的sgls 信息保存到obj_auxi 里
 	rc = obj_update_sgls_dup(obj_auxi, args);
 	if (rc) {
 		D_ERROR(DF_OID" obj_update_sgls_dup failed %d.\n", DP_OID(obj->cob_md.omd_id), rc);
@@ -5915,6 +5949,10 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 	// todo: 只是根据shard 找target，为什么需要这么多行代码？
 	// update 场景flag 为：forward to leader
 	// fetch 场景flag 为：dispatch
+	// 1, 1
+	// todo: 第六个参数设置为1 是表示只支持sx 类型吗，三副本的场景呢？
+	// todo: 根据dkey 做数据分布，那么dkey 的设置将如何保证数据均衡呢？会不会都偏向打到少量的bucket 上
+	// 所有的target shard 都保存在 obj_auxi 中 req_tgts 里了
 	rc = obj_shards_2_fwtgts(obj, map_ver, tgt_bitmap, shard, shard_cnt, 1,
 				 OBJ_TGT_FLAG_FW_LEADER_INFO, obj_auxi);
 	if (rc != 0)
@@ -5956,7 +5994,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 
 	// 扇出，内部会调用shard_io，进而调用 dc_obj_shard_rw，里面会发送rpc 的写请求到服务端
 	// fanout 指的是电子原件的输入输出之间的流动
-	// 有时，较大的请求可能比较小的请求需要更长的时间才能完成，因此，我们可以将一个较大的请求转换成多个较小的请求
+	// 有时，较大的请求可能比较小的请求需要更长的时间才能完成，因此，我们可以将一个较大的请求转换成多个较小的请求（就是obj 转换成1个或者多个shard 信息）
 	// 这里的扇出意味着将一个大的请求负载拆分成更小的子请求，并多次向服务发送请求
 	// 这里将传入的 task 在内部转化成了多个 sub_task 存储在 obj_auxi->shard_task_head 中
 	// dc_obj_shard_rw 将在shard_io 中执行
@@ -5975,9 +6013,9 @@ out_task:
 int
 dc_obj_update_task(tse_task_t *task)
 {
-	// fetch 和update 对应的task 的args 数据结构都是 daos_obj_rw_t。里面有iods 和sgls 信息
+	// fetch 和update 对应的task 的args 数据结构都是 daos_obj_rw_t。里面有iods 和sgls 等信息
 	daos_obj_update_t	*args = dc_task_get_args(task);
-	// todo: obj 是啥用
+	// 构建dc obj
 	struct dc_object	*obj = NULL;
 	// 在task 创建时，同时创建一个epoch
 	// todo: snapshot 怎么根据epoch 实现的

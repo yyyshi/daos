@@ -696,6 +696,7 @@ daos_cont_list_snap(daos_handle_t coh, int *nr, daos_epoch_t *epochs,
 	return dc_task_schedule(task, true);
 }
 
+// daos cont pool-test cont-test
 int
 daos_cont_create_snap_opt(daos_handle_t coh, daos_epoch_t *epoch, char *name,
 			  enum daos_snapshot_opts opts, daos_event_t *ev)
@@ -711,8 +712,11 @@ daos_cont_create_snap_opt(daos_handle_t coh, daos_epoch_t *epoch, char *name,
 		return rc;
 
 	args = dc_task_get_args(task);
+	// 容器
 	args->coh	= coh;
+	// 时间戳
 	args->epoch	= epoch;
+	// 名字
 	args->name	= name;
 	args->opts	= opts;
 
@@ -823,6 +827,7 @@ daos_cont_snap_oit_destroy(daos_handle_t coh, daos_handle_t oh, daos_event_t *ev
 	return dc_task_schedule(task, true);
 }
 
+// 创建快照
 int
 daos_cont_create_snap(daos_handle_t coh, daos_epoch_t *epoch, char *name,
 		      daos_event_t *ev)

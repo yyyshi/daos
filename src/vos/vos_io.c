@@ -35,6 +35,7 @@ struct vos_io_context {
 	daos_iod_t		*ic_iods;
 	struct dcs_iod_csums	*ic_iod_csums;
 	/** reference on the object */
+	// 对obj 的引用
 	struct vos_object	*ic_obj;
 	/** BIO descriptor, has ic_iod_nr SGLs */
 	// biod 有那么多个 sgls，这是存储的传输的数据payload
@@ -827,6 +828,7 @@ iod_fetch(struct vos_io_context *ioc, struct bio_iov *biov)
 		bsgl->bs_nr = iov_nr * 2;
 	}
 
+	// 将查询到的数据存到 bsgl 里
 	bsgl->bs_iovs[iov_at] = *biov;
 	bsgl->bs_nr_out++;
 	ioc->ic_iov_at++;
@@ -927,6 +929,7 @@ akey_fetch_single(daos_handle_t toh, const daos_epoch_range_t *epr,
 	// biov 里面存储了查询到的value
 	// 这里是将biov 中的数据传到ioc 的bsgls 中
 	// 这样，数据由ioc 带回
+	// 这个信息是数据存储在scm 或者nvme 上的设备地址，具体看biov 的数据结构定义。这个信息是存在btree 里的
 	rc = iod_fetch(ioc, &biov);
 	if (rc != 0)
 		goto out;
@@ -1472,7 +1475,7 @@ dkey_fetch(struct vos_io_context *ioc, daos_key_t *dkey)
 	bool			 has_cond;
 	bool			 standalone = ioc->ic_cont->vc_pool->vp_sysdb;
 
-	// btree 初始化
+	// 按照object 构建或者打开已存在的 btree，获得bt-root
 	rc = obj_tree_init(obj);
 	if (rc != 0)
 		return rc;
@@ -1485,7 +1488,7 @@ dkey_fetch(struct vos_io_context *ioc, daos_key_t *dkey)
 
 	// obj->obj_toh 为当前树的hdl，toh 是子树的hdl
 	// krec 是object 下的dkey 的df
-	// 根据parent object 加载子树dkey
+	// 根据parent object 加载子树dkey，dkey/akey 的pmem 地址返回到 krec 中
 	rc = key_tree_prepare(obj, obj->obj_toh, VOS_BTR_DKEY, dkey, flags, DAOS_INTENT_DEFAULT,
 			      &krec, &toh, ioc->ic_ts_set);
 	if (stop_check(ioc, VOS_COND_FETCH_MASK | VOS_OF_COND_PER_AKEY, NULL,
@@ -1532,13 +1535,15 @@ dkey_fetch(struct vos_io_context *ioc, daos_key_t *dkey)
 	}
 
 fetch_akey:
+	// 现在已经获取到了描述dkey/akey 的pmem 地址 krec
 	// 开始fetch akey
 	// value 直接存储在dkey 下，没有akey。传入子树的hdl-- toh
 	if (krec->kr_bmap & KREC_BF_NO_AKEY) {
 		iod_set_cursor(ioc, 0);
+		// dkey 下直接就能获取到value
 		rc = fetch_value(ioc, &ioc->ic_iods[0], toh, &ioc->ic_epr, standalone);
 	} else {
-		// 通过akey 获取value
+		// dkey 和value 之间还有akey。先fetch akey
 		for (i = 0; i < ioc->ic_iod_nr; i++) {
 			iod_set_cursor(ioc, i);
 			// 嵌套 fetch akey
@@ -1596,6 +1601,7 @@ vos_fetch_add_missing(struct vos_ts_set *ts_set, daos_key_t *dkey, int iod_nr,
 	vos_ts_add_missing(ts_set, dkey, iod_nr, &ad);
 }
 
+// 函数执行完得到了哪些信息：构建好了vos io ctx，里面包含bio ctx，并且完成了object 的df 的获取
 int
 vos_fetch_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 		daos_key_t *dkey, unsigned int iod_nr,
@@ -1613,6 +1619,7 @@ vos_fetch_begin(daos_handle_t coh, daos_unit_oid_t oid, daos_epoch_t epoch,
 
 	// fetch 场景。read_only == true。checksum 传NULL
 	// todo: dth 里面有epoch，这里又传递一个epoch
+	// 创建vos io ctx，包括里面的bio ctx，bio ctx 包含准备sgl 等资源
 	rc = vos_ioc_create(coh, oid, true, epoch, iod_nr, iods,
 			    NULL, vos_flags, shadows, 0, dth, &ioc);
 	if (rc != 0)
@@ -1653,10 +1660,13 @@ fetch_dkey:
 	}
 
 	// 开始 fetch deky
+	// ioc 的ic_obj 里已经有obj_df 信息
+	// 已经锁定了object，接下来锁定dkey，然后锁定akey，一层层查询，最后找到最终要查询的数据。都是树的查找操作
 	rc = dkey_fetch(ioc, dkey);
 	if (rc != 0)
 		goto out;
 set_ioc:
+	// 将ioc 和ioh 关联
 	*ioh = vos_ioc2ioh(ioc);
 out:
 	vos_dth_set(NULL, ioc->ic_cont->vc_pool->vp_sysdb);
@@ -2149,10 +2159,10 @@ vos_reserve_blocks(struct vos_container *cont, d_list_t *rsrvd_nvme,
 	hint_ctxt = cont->vc_hint_ctxt[ios];
 	D_ASSERT(hint_ctxt);
 
-	// 根据字节计算占用的block 数
+	// 根据字节计算需要申请的block 数
 	blk_cnt = vos_byte2blkcnt(size);
 
-	// 1. 获取预留的nvme 列表
+	// 1. 获取预留的nvme 列表。去vsi 什么 blk_cnt 多个块的list
 	rc = vea_reserve(vsi, blk_cnt, hint_ctxt, rsrvd_nvme);
 	if (rc)
 		return rc;
@@ -2185,8 +2195,10 @@ reserve_space(struct vos_io_context *ioc, uint16_t media, daos_size_t size,
 		// umoff 可以定位到pool 中某个obj 的地址
 		umoff = vos_reserve_scm(ioc->ic_cont, ioc->ic_rsrvd_scm, size);
 		if (!UMOFF_IS_NULL(umoff)) {
+			// scm 资源预留成功
 			ioc->ic_umoffs[ioc->ic_umoffs_cnt] = umoff;
 			ioc->ic_umoffs_cnt++;
+			// 预留完成获取的offset
 			*off = umoff;
 			return 0;
 		}
@@ -2206,6 +2218,7 @@ reserve_space(struct vos_io_context *ioc, uint16_t media, daos_size_t size,
 	// todo: extent 是个什么样的概念，是什么结构。junchong之前提到过这个
 	// todo: 输入ic_blk_exts 和size，输出off
 	// todo: ic_blk_extent 是指的server 管理的nvme list 吗？
+	// nvme 资源预留成功
 	rc = vos_reserve_blocks(ioc->ic_cont, &ioc->ic_blk_exts, size, VOS_IOS_GENERIC, off);
 	if (rc == -DER_NOSPACE) {
 		now = daos_gettime_coarse();
@@ -2219,6 +2232,7 @@ reserve_space(struct vos_io_context *ioc, uint16_t media, daos_size_t size,
 	return rc;
 }
 
+// 将biov 信息存储到biod 中
 static int
 iod_reserve(struct vos_io_context *ioc, struct bio_iov *biov)
 {
@@ -2250,6 +2264,7 @@ vos_reserve_single(struct vos_io_context *ioc, uint16_t media,
 	struct vos_irec_df	*irec;
 	daos_size_t		 scm_size;
 	umem_off_t		 umoff;
+	// 这个结构是最终vos 存储scm /nvme 设备地址信息的结构
 	struct bio_iov		 biov;
 	uint64_t		 off = 0;
 	int			 rc;
@@ -2308,10 +2323,12 @@ vos_reserve_single(struct vos_io_context *ioc, uint16_t media,
 		}
 	}
 done:
+	// 上面是从scm/nvme 预留资源到ioc 和off 中
 	// reserve_space 获取到了 off, 这里设置off 到 biov 中，后面spdk_blob_io_write 会调用
-	// 这里是设置bio address，根据预留media 的off
+	// 构造biov
 	bio_addr_set(&biov.bi_addr, media, off);
 	bio_iov_set_len(&biov, size);
+	// 将biov 信息赋值到biod 中
 	rc = iod_reserve(ioc, &biov);
 
 	return rc;
@@ -2366,6 +2383,7 @@ done:
 	// 这里是设置bio address
 	bio_addr_set(&biov.bi_addr, media, off);
 	bio_iov_set_len(&biov, size);
+	// 将biov 和off 存到biod 中
 	rc = iod_reserve(ioc, &biov);
 
 	return rc;

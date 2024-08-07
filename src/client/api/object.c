@@ -46,6 +46,7 @@ daos_obj_open(daos_handle_t coh, daos_obj_id_t oid, unsigned int mode,
 	if (rc)
 		return rc;
 
+	// 调度上面的task，对应的回调函数被调用，obj 的layout 被创建
 	return dc_task_schedule(task, true);
 }
 
@@ -178,12 +179,13 @@ daos_obj_update(daos_handle_t oh, daos_handle_t th, uint64_t flags,
 	tse_task_t	*task;
 	int		rc;
 
-	// 创建update 任务，用户传递的daos_hdl
+	// 创建update task，用户传递的daos_hdl
 	rc = dc_obj_update_task_create(oh, th, flags, dkey, nr, iods, sgls,
 				       ev, NULL, &task);
 	if (rc)
 		return rc;
 
+	// 立即调度这个task
 	return dc_task_schedule(task, true);
 }
 

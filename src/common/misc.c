@@ -594,10 +594,20 @@ struct d_hlink *
 daos_hhash_link_lookup(uint64_t key)
 {
 	D_ASSERT(daos_ht.dht_hhash != NULL);
-	// todo: 啥时候插入的
+	// 在pool，cont，obj open 时插入，在tx alloc 时候插入
 	return d_hhash_link_lookup(daos_ht.dht_hhash, key);
 }
 
+// 所有这些类型的都会被inset 到table，提供后续lokkup
+// enum {
+//	DAOS_HTYPE_POOL		= 3, /**< pool */
+//	DAOS_HTYPE_CO		= 5, /**< container */
+//	DAOS_HTYPE_OBJ		= 7, /**< object */
+//	DAOS_HTYPE_TX		= 11, /**< transaction */
+//	/* Must enlarge D_HTYPE_BITS to add more types */
+//};
+// 每个类型外层提供函数 dc_cont_hdl_link，dc_tx_hdl_link，dc_pool_hdl_link，dc_obj_hdl_link 执行对应的insert
+// pool, cont 等都是在open 是插入到 hash table 中。tx 是在 alloc 中插入hash table
 void
 daos_hhash_link_insert(struct d_hlink *hlink, int type)
 {

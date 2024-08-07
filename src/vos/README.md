@@ -93,6 +93,7 @@ This provides a major scalability improvement for parallel I/O by correctly orde
 For example, if two application processes agree on how to resolve a conflict on a given update, they may write their updates independently with the assurance that they will be resolved in the correct order at the VOS.
 
 vos 的主要目的是以任意时间顺序捕获和记录对象更新，并将这些更新集成到可以按需高效遍历的有序epoch history中，这为并行io 提供了主要的可扩展性改进。
+todo: 怎么做到捕获和记录的
 
 The VOS also allows all object updates associated with a given epoch and process group to be discarded.
 This functionality ensures that when a DAOS transaction must be aborted, all associated updates are invisible before the epoch is committed for that process group and becomes immutable.
@@ -502,7 +503,7 @@ time of the starting server.   This ensures that any updates at an earlier
 time are forced to restart to ensure we maintain automicity since timestamp
 data is lost when a server goes down.
 
-负记录缓存。每个target有一个全局数组，来保存所有类型的实体（objects，dkeys，akeys）。
+负/正记录缓存。每个target有一个全局数组，来保存所有类型的实体（objects，dkeys，akeys）。
 2. Positive entry cache. An LRU cache per target for existing containers,
 objects, dkeys, and akeys.  One LRU array is used for each level such that
 containers, objects, dkeys, and akeys only conflict with cache entries of the
@@ -871,7 +872,7 @@ is ignored and the latest committed modification is returned to the client.
 。服务端收到rpc 后如果相关的dtx 是committed 或者committable，那么返回要查询的记录。1. 如果这个dtx 状态为 prepared，
 并且这个replica 不是leader，将回复给client 重新请求leader 节点读取数据。2. 如果当前replica是leader并且状态为committed 
 或者committable，那么这些记录将对应用程序可见。3. 如果是leader 上的dtx 并且处于prepared 状态，a. 如果是事务读，
-将回复client 一个特殊的错误码 DER_INPROGRESS 请求客户端等待并重试。b. 如果非事务读，相关的记录将被忽略最新的已提交修改
+将回复client 一个特殊的错误码 DER_INPROGRESS 请求客户端等待并重试。b. 如果非事务读，相关的记录将被忽略，最新的已提交修改
 将被回复给client。
 
 todo: EC 场景

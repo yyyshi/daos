@@ -344,7 +344,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		create ? "true" : "false", epr->epr_lo, epr->epr_hi);
 
 	/* Create the key for obj cache */
-	// 构建用于去cache 里查询的key
+	// 根据cont 和oid 构建用于去cache 里查询的key
 	lkey.olk_cont = cont;
 	// todo: oid 在cache 里可能没有，但是入参肯定有吧，入参是怎么构建的呢？
 	lkey.olk_oid = oid;
@@ -393,6 +393,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		tmprc = vos_ilog_ts_add(ts_set, &obj->obj_df->vo_ilog,
 					&oid, sizeof(oid));
 		D_ASSERT(tmprc == 0); /* Non-zero only valid for akey */
+		// 查到obj_df 了，直接去检查
 		goto check_object;
 	}
 
@@ -437,7 +438,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		D_GOTO(failed, rc = -DER_NONEXIST);
 	}
 
-	// 如果获取到了有效的df，那么会处理ilog 相关的操作
+	// todo: 如果获取到了有效的df，那么会处理ilog 相关的操作
 check_object:
 	if (obj->obj_discard && (create || (flags & VOS_OBJ_DISCARD) != 0)) {
 		/** Cleanup before assert so unit test that triggers doesn't corrupt the state */
@@ -450,11 +451,14 @@ check_object:
 	if ((flags & VOS_OBJ_DISCARD) || intent == DAOS_INTENT_KILL || intent == DAOS_INTENT_PUNCH)
 		goto out;
 
+	// 实际读写之前先写日志
 	// 1. 如果是fetch 操作
 	if (!create) {
 		// todo: 先 ilog fetch，这返回的是什么信息
 		// 使用的epoch 信息：epr->epr_hi, bound
 		// 上面获取到了df，这里使用从df 里获取到的ilog 信息--ilog 的tree root
+		// vo_ilog 是从lru 或者oit 中查询出来的，vos_ilog_fetch 查询结果保存在 obj_ilog_info 中
+		// ilog 信息和obj 的df 信息是存在一块的
 		rc = vos_ilog_fetch(vos_cont2umm(cont), vos_cont2hdl(cont),
 				    intent, &obj->obj_df->vo_ilog, epr->epr_hi,
 				    bound, false, /* has_cond: no object level condition. */
@@ -468,7 +472,8 @@ check_object:
 			goto failed;
 		}
 
-		// todo: 再 ilog check
+		// 上边的fetch 是从umm 中加载了ilog 信息到 obj_ilog_info 中
+		// todo: 再 ilog check，到ilog_info 中检查
 		rc = vos_ilog_check(&obj->obj_ilog_info, epr, epr,
 				    visible_only);
 		if (rc != 0) {
@@ -513,6 +518,7 @@ check_object:
 
 out:
 	if (obj->obj_df != NULL)
+		// 最新的epoch
 		obj->obj_sync_epoch = obj->obj_df->vo_sync;
 
 	if (obj->obj_df != NULL && epr->epr_hi <= obj->obj_sync_epoch &&

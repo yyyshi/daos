@@ -49,12 +49,16 @@ struct vos_ilog_info {
 	/** Visible uncommitted epoch */
 	// 可见的未提交的 epoch
 	daos_epoch_t		 ii_uncommitted;
+	// 当前ilog 的最早时间
 	/** If non-zero, earliest creation timestamp in current incarnation. */
 	daos_epoch_t		 ii_create;
+	// 前一个已提交punch
 	/** If non-zero, prior committed punch */
 	struct vos_punch_record	 ii_prior_punch;
 	/** If non-zero, prior committed or uncommitted punch */
+	// 前一个已提交或者未提交punch
 	struct vos_punch_record	 ii_prior_any_punch;
+	// 后一个提交
 	/** If non-zero, subsequent committed punch.  Minor epoch not used for
 	 *  subsequent punch as it does not need replay if it's intermediate
 	 */

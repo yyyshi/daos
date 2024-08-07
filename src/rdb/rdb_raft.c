@@ -240,6 +240,7 @@ rdb_raft_store_replicas(daos_handle_t lc, uint64_t index, const d_rank_list_t *r
 	keys[1] = rdb_lc_replicas;
 	d_iov_set(&vals[1], replicas->rl_ranks,
 		  sizeof(*replicas->rl_ranks) * nreplicas);
+	// rdb 的replica
 	return rdb_lc_update(lc, index, RDB_LC_ATTRS, true /* crit */,
 			     2 /* n */, keys, vals);
 }

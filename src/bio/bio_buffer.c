@@ -268,6 +268,7 @@ bio_iod_sgl(struct bio_desc *biod, unsigned int idx)
 	D_ASSERTF(idx < biod->bd_sgl_cnt, "Invalid sgl index %d/%d\n",
 		  idx, biod->bd_sgl_cnt);
 
+	// 按照idx 返回biod 中的sgl 数组元素
 	bsgl = &biod->bd_sgls[idx];
 	D_ASSERT(bsgl != NULL);
 
@@ -283,6 +284,7 @@ bio_iod_alloc(struct bio_io_context *ctxt, struct umem_instance *umem,
 	D_ASSERT(ctxt != NULL);
 	D_ASSERT(sgl_cnt != 0);
 
+	// 申请资源
 	D_ALLOC(biod, offsetof(struct bio_desc, bd_sgls[sgl_cnt]));
 	if (biod == NULL)
 		return NULL;
@@ -290,7 +292,9 @@ bio_iod_alloc(struct bio_io_context *ctxt, struct umem_instance *umem,
 	D_ASSERT(type < BIO_IOD_TYPE_MAX);
 	biod->bd_umem = umem;
 	// 设置io ctx，里面有blob id
+	// 将已有的mc 给到新创建的 biod
 	biod->bd_ctxt = ctxt;
+	// 设置biod 的类型
 	biod->bd_type = type;
 	biod->bd_sgl_cnt = sgl_cnt;
 
@@ -547,12 +551,15 @@ copy_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 	return -DER_REC2BIG;
 }
 
+// 遍历biod 中的sgl 下的biov，构造成biod 中dma buffer 里的region
 static int
 iterate_biov(struct bio_desc *biod,
 	     int (*cb_fn)(struct bio_desc *, struct bio_iov *, void *data),
 	     void *data)
 {
 	// 遍历所有的sgls，再遍历sgls 下的所有biov，然后对每个biov 执行对应的cb 函数（bulk_map_one 或者dma_map_one）
+	// 根据遍历中的biov 数据构造biod 中的dma buffer 里的region
+
 	// data 是表示当前biod 里面是否有bulk 数据
 	int i, j, rc = 0;
 
@@ -594,6 +601,7 @@ iterate_biov(struct bio_desc *biod,
 			// 本质是rdma vs inline 传输方式
 			// biov 也是从biod 的sgl 里面获取的
 			// 此时biov 里面已经存在了后面dma_map_one 需要的off 信息，也是后面spdk_blob_io_write 需要的off 信息
+			// 这里的biov 是在 iod_fetch 中获取的\
 			rc = cb_fn(biod, biov, data);
 			if (rc)
 				break;
@@ -710,10 +718,12 @@ iod_add_region(struct bio_desc *biod, struct bio_dma_chunk *chk,
 	       unsigned int chk_pg_idx, unsigned int chk_off, uint64_t off,
 	       uint64_t end, uint8_t media)
 {
+	// 获取biod 中的预留dma，里面包含多个regions
 	struct bio_rsrvd_dma *rsrvd_dma = &biod->bd_rsrvd;
 	unsigned int max, cnt;
 
 	max = rsrvd_dma->brd_rg_max;
+	// 当前数组的个数
 	cnt = rsrvd_dma->brd_rg_cnt;
 
 	// 预留dma buffer 数量满了
@@ -739,12 +749,14 @@ iod_add_region(struct bio_desc *biod, struct bio_dma_chunk *chk,
 		rsrvd_dma->brd_rg_max = new_cnt;
 	}
 
+	// ---填充rsrvd_dma 结构，扩展一个region 到当前数组---
 	// 直接在尾巴填充新创建的region
 	// 这些信息在最终读写nvme 的时候要用来决定读写地址
 	rsrvd_dma->brd_regions[cnt].brr_chk = chk;
 	// spdk_blob_io_read/write 会使用到 brr_pg_idx 来确定要读写的数据的buffer 地址，同时要用到off 来决定数据要写到blob 的哪里
 	// 实际存储数据的buffer 地址，后面到dma_rw 里会用这个来找payload 完成读写操作
 	rsrvd_dma->brd_regions[cnt].brr_pg_idx = chk_pg_idx;
+	// 给scm 用的
 	rsrvd_dma->brd_regions[cnt].brr_chk_off = chk_off;
 	// 是根据biov 计算出来的 dma_biov2pg
 	// todo: 这个预留出来的空间有什么说法，为啥这个object 要存在这里，而那个object 要存在那里？
@@ -753,6 +765,7 @@ iod_add_region(struct bio_desc *biod, struct bio_dma_chunk *chk,
 	rsrvd_dma->brd_regions[cnt].brr_off = off;
 	rsrvd_dma->brd_regions[cnt].brr_end = end;
 	rsrvd_dma->brd_regions[cnt].brr_media = media;
+	// region 个数增加
 	rsrvd_dma->brd_rg_cnt++;
 
 	if (media == DAOS_MEDIA_NVME)
@@ -875,8 +888,7 @@ iod_pad_region(struct bio_iov *biov, struct bio_rsrvd_region *last_rg, unsigned 
 }
 
 /* Convert offset of @biov into memory pointer */
-// 将offset 转化为内存指针
-// todo: 这个函数以及bulk_map_one 的含义作用
+// biov 是通过vos 模块查询出来的scm /nvme 上设备地址信息
 int
 dma_map_one(struct bio_desc *biod, struct bio_iov *biov, void *arg)
 {
@@ -917,7 +929,7 @@ dma_map_one(struct bio_desc *biod, struct bio_iov *biov, void *arg)
 	// 现在要根据biov 数据的大小，申请相应的资源
 	// spdk_blob_io_write 时用到的off，是和当前off 有关联的
 	// off 在此根据biov 被初始化
-	// biov 里是有已经在vea 模块通过 vea_reserve 时申请好的off，转换一下就行了
+	// biov 里是有已经在vea 模块通过 akey_update_begin  --> vea_reserve 时申请好的off，转换一下就行了
 	dma_biov2pg(biov, &off, &end, &pg_cnt, &pg_off);
 
 	/*
@@ -960,7 +972,8 @@ dma_map_one(struct bio_desc *biod, struct bio_iov *biov, void *arg)
 		goto add_region;
 	}
 
-	// iov 不够大，直接使用已经预留的空间，这里先获取最后一个region
+	// iov 不够大（没超过最大限制 bio_chk_sz），直接使用已经预留的空间，这里先获取最后一个region
+	// todo: 多个region 是如何管理的，这里为什么要选择最后一个region
 	last_rg = iod_last_region(biod);
 
 	/* First, try consecutive reserve from the last reserved region */
@@ -1072,6 +1085,9 @@ add_region:
 	// 依赖新创建的chunk 添加新的region
 	// dma map 里也可能会add region
 	// chk_pg_idx 是描述chunk 下的page 起始页的
+	// 在biod 里添加一个rgion，描述当前类型的media 所对应的spdk 或者scm offset 信息
+	// 这几个idx 和off 也是通过biov 获取到的。biov 是从vos 模块出来的scm /nvme 的设备地址信息
+	// iod_add_region 函数是把biov 中的那些信息赋值到 biod 的dma buffer 的region 中
 	return iod_add_region(biod, chk, chk_pg_idx, chk_off, off, end,
 			      bio_iov2media(biov));
 }
@@ -1339,20 +1355,19 @@ dma_rw(struct bio_desc *biod)
 	D_DEBUG(DB_IO, "DMA start, type:%d\n", biod->bd_type);
 
 	// 每个rg 是rsrvd_dma 的一个元素，是一个dma buffer region
-	// 看下这些region 是在哪构建的
+	// 这些region 是在map 的时候构建的
 	for (i = 0; i < rsrvd_dma->brd_rg_cnt; i++) {
-		// 从dma buffer io描述符获取rg 信息
-		// todo: 在map 之后，要写入的数据已经存储到rg 中了吗？
+		// 依次按region 完成读写
 		rg = &rsrvd_dma->brd_regions[i];
 
 		D_ASSERT(rg->brr_chk != NULL);
 		D_ASSERT(rg->brr_end > rg->brr_off);
 
-		// 以rg 为单元完成读写
+		// 以region 为单元完成scm 读写
 		if (rg->brr_media == DAOS_MEDIA_SCM)
 			scm_rw(biod, rg);
 		else
-			// 向blob 中的rg 这里写入
+			// 以region 为单元完成nvme 的读写
 			nvme_rw(biod, rg);
 	}
 
@@ -1415,6 +1430,7 @@ iod_fifo_in(struct bio_desc *biod, struct bio_dma_buffer *bdb)
 		return;
 
 	// 否则的话说明当前请求的优先级一般，要进入到队列等待被唤醒
+	// todo: 哪有队列？
 	biod->bd_in_fifo = 1;
 	bdb->bdb_queued_iods++;
 	if (bdb->bdb_stats.bds_queued_iods)
@@ -1498,7 +1514,7 @@ iod_map_iovs(struct bio_desc *biod, void *arg)
 	int			 rc, retry_cnt = 0;
 
 	/* NVMe context isn't allocated */
-	// 赋值dma buffer
+	// 赋值bio dma buffer
 	if (biod->bd_ctxt->bic_xs_ctxt == NULL)
 		bdb = NULL;
 	else
@@ -1652,10 +1668,8 @@ iod_prep_internal(struct bio_desc *biod, unsigned int type, void *bulk_ctxt,
 	}
 
 	// 根据biod 里面的biov，构建dma buffer 和region等信息
-	// 构建dma buffer region
-	// 里面会执行biod add region 操作，在biod 下添加新的region（dma buffer） 
-	// map 映射说的是将iovs 中的数据映射到boid 里面rsrvd_dma 中的bulk，chunk 或者region中，对应scm 的内存地址或者spdk 的硬盘地址
-	// todo: 为啥不在mapping 的时候直接传输数据呢？
+	// map 映射说的是将biov 中的数据（保存的是从vos 中取出来的scm/nmve 的设备地址）映射到boid 里面rsrvd_dma 中的bulk，chunk 或者region中
+	// 实际就是根据biod 中的 sgl 里的 biov 构建biod 中 dma buffer 里的regions
 	rc = iod_map_iovs(biod, arg);
 	if (rc)
 		return rc;

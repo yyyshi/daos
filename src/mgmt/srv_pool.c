@@ -167,6 +167,7 @@ ds_mgmt_pool_svc_create(uuid_t pool_uuid, int ntargets, const char *group, d_ran
 	D_DEBUG(DB_MGMT, DF_UUID": all tgts created, setting up pool "
 		"svc\n", DP_UUID(pool_uuid));
 
+	// 分发create pool
 	return ds_pool_svc_dist_create(pool_uuid, ranks->rl_nr, group, ranks, domains_nr, domains,
 				       prop, svc_list);
 }
@@ -228,6 +229,7 @@ ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_l
 	}
 
 	// pg_targets == targets（请求中传递下来的ranks 都在 primary group 中）
+	// 参数3 其实是ranks
 	rc = ds_mgmt_tgt_pool_create_ranks(pool_uuid, tgt_dev, targets,
 					   scm_size, nvme_size);
 	if (rc != 0) {
@@ -239,7 +241,8 @@ ds_mgmt_create_pool(uuid_t pool_uuid, const char *group, char *tgt_dev, d_rank_l
 	// engine 对应的targets 都创建成功了
 	D_INFO(DF_UUID": creating targets on ranks succeeded\n", DP_UUID(pool_uuid));
 
-	// 创建pool srv
+	// 创建pool srv，包括选择ranks 并在对应的ranks 上启动rsvc 服务
+	// 参数4 targets 其实是rank
 	rc = ds_mgmt_pool_svc_create(pool_uuid, targets->rl_nr, group, targets, prop, svcp,
 				     domains_nr, domains);
 	if (rc) {

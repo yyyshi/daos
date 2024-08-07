@@ -1228,6 +1228,10 @@ out:
  * to refresh such DTX status from the leader. The DTX_REFRESH RPC is used
  * for such purpose.
  */
+// 因为异步批量提交语义，leader 上的dtx 状态可能和非leader 是不同的。由于leader 明确的
+// 知道dtx 是否是可提交的，但是非leader 不知道是否dtx 是prepared 状态。如果非leader 想知道
+// 是否一些prepared 的dtx 是否真正的可提交，他需要从leader 刷新这样的 dtx 状态。
+//  DTX_REFRESH 类型的rpc 就是这个作用
 int
 dtx_refresh(struct dtx_handle *dth, struct ds_cont_child *cont)
 {
@@ -1236,6 +1240,7 @@ dtx_refresh(struct dtx_handle *dth, struct ds_cont_child *cont)
 	if (DAOS_FAIL_CHECK(DAOS_DTX_NO_RETRY))
 		return -DER_IO;
 
+	// 多个list 一起去leader 刷新，从leader 同步数据
 	rc = dtx_refresh_internal(cont, &dth->dth_share_tbd_count,
 				  &dth->dth_share_tbd_list,
 				  &dth->dth_share_cmt_list,
@@ -1245,6 +1250,7 @@ dtx_refresh(struct dtx_handle *dth, struct ds_cont_child *cont)
 	/* If we can resolve the DTX status, then return -DER_AGAIN
 	 * to the caller that will retry related operation locally.
 	 */
+	// 如果我们可以解析这个dtx 状态，那么return -DER_AGAIN 给调用者
 	if (rc == 0) {
 		D_ASSERT(dth->dth_share_tbd_count == 0);
 

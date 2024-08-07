@@ -411,6 +411,7 @@ rdb_lc_update(daos_handle_t lc, uint64_t index, rdb_oid_t oid, bool crit,
 		" n=%d akeys[0]=<%p, %zd> values[0]=<%p, %zd>\n", lc.cookie,
 		index, oid, n, akeys[0].iov_buf, akeys[0].iov_len,
 		values[0].iov_buf, values[0].iov_len);
+	// replica 信息写到rdb
 	return rdb_vos_update(lc, index, oid, crit, n, akeys, values);
 }
 

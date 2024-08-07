@@ -401,6 +401,7 @@ struct bio_xs_context {
 struct bio_io_context {
 	d_list_t		 bic_link; /* link to bxb_io_ctxts */
 	// 当前bio ctx 的blob 和blobstore
+	// todo: 一种类型的设备只有一个blob 吗
 	struct spdk_blob	*bic_blob;
 	struct bio_xs_blobstore	*bic_xs_blobstore;
 	// xs 的ctx
@@ -418,18 +419,23 @@ struct bio_io_context {
 };
 
 /* A contiguous DMA buffer region reserved by certain io descriptor */
+// 为指定的iod 预留的连续的dma buffer region
 struct bio_rsrvd_region {
 	/* The DMA chunk where the region is located */
-	// region 所在的chunk
+	// region 所在的chunk，region 是组成chunk 的单元
 	struct bio_dma_chunk	*brr_chk;
 	/* Start page idx within the DMA chunk */
 	// dma chunk 的起始页索引
 	unsigned int		 brr_pg_idx;
 	/* Payload offset (from brr_pg_idx) in bytes, used for SCM only */
+	// for scm 设备
 	// 这个是单独给scm 用的
 	unsigned int		 brr_chk_off;
 	/* Offset within the SPDK blob in bytes */
+	// for spdk 设备
 	// spdk blob 的offset 字节
+	// todo: 具体哪个blob 呢？还是说因为只有一个blob，所以不需要保存这个信息（一个blob 是不是不如多个blob）
+	// todo: 一个blob 支持并发无锁读写码吗？
 	uint64_t		 brr_off;
 	/* End (not included) in bytes */
 	uint64_t		 brr_end;
@@ -438,7 +444,7 @@ struct bio_rsrvd_region {
 };
 
 /* Reserved DMA buffer for certain io descriptor */
-// dma region 和dma chunk 的信息（两个数组）
+// 为指定的iod 预留 dma region 和dma chunk 信息（两个数组）
 struct bio_rsrvd_dma {
 	/* DMA regions reserved by the io descriptor */
 	// dma region 数组

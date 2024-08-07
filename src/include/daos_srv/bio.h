@@ -62,6 +62,7 @@ struct sys_db;
 /** Ensure this remains compatible */
 D_CASSERT(sizeof(((bio_addr_t *)0)->ba_off) == sizeof(umem_off_t));
 
+// 描述的是smc 或者nvme 中的设备地址
 struct bio_iov {
 	/*
 	 * For SCM, it's direct memory address of 'ba_off';

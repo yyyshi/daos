@@ -134,14 +134,17 @@ typedef struct {
 #define MAX_OBJ_LAYOUT_VERSION		0xFFF0
 
 /** object metadata stored in the global OI table of container */
+// client object metadata
 struct daos_obj_md {
 	daos_obj_id_t		omd_id;
 	uint32_t		omd_ver;
 	/* Fault domain level - PO_COMP_TP_RANK, or PO_COMP_TP_RANK. If it is zero then will
 	 * use pl_map's default value PL_DEFAULT_DOMAIN (PO_COMP_TP_RANK).
 	 */
+	// 容错域级别（todo: object 级别的容错域么）
 	uint32_t		omd_fdom_lvl;
 	/* Performance domain affinity */
+	// todo: 这俩是干啥的
 	uint32_t		omd_pda;
 	/* Performance domain level - PO_COMP_TP_ROOT or PO_COMP_TP_GRP.
 	 * Now will enable the performance domain feature only when omd_pdom_lvl set as

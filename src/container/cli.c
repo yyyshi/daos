@@ -3048,6 +3048,7 @@ dc_epoch_op(daos_handle_t coh, crt_opcode_t opc, daos_epoch_t *epoch, unsigned i
 	}
 
 	crt_req_addref(arg.eoa_req.cra_rpc);
+	// 发送创建快照 rpc
 	return daos_rpc_send(arg.eoa_req.cra_rpc, task);
 
 out:

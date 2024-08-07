@@ -127,6 +127,7 @@ dc_hdl2pool(daos_handle_t poh)
 {
 	struct d_hlink *hlink;
 
+	// pool，cont，obj 在open & tx 在 alloc 时候会保存cookie，即insert 到hash table
 	hlink = daos_hhash_link_lookup(poh.cookie);
 	if (hlink == NULL)
 		return NULL;

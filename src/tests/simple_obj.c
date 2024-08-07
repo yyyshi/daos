@@ -190,6 +190,7 @@ example_daos_key_array()
 	 * choose max striping with no data prorection - OC_SX.
 	 */
 	// oc 用于数据保护和sharding。传入container hdl，返回oid
+	// 会把特性和obj class 编码到oid 里。其中class 决定分片和冗余策略
 	daos_obj_generate_oid(coh, &oid, 0, OC_SX, 0, 0);
 
 	/** open DAOS object */
@@ -197,6 +198,7 @@ example_daos_key_array()
 	// 输入container hdl 和oid，打开一个obj，返回object hdl == oh。这里会查询元数据信息
 	// todo: 如果layout 是根据oid 设置的，那么如果发生了数据移动，layout 是怎么变化的？
 	rc = daos_obj_open(coh, oid, DAOS_OO_RW, &oh, NULL);
+	// open 之后就可以读写了
 	ASSERT(rc == 0, "object open failed with %d", rc);
 
 	/*
@@ -218,6 +220,7 @@ example_daos_key_array()
 	 * updates just for simplicity.
 	 */
 	// 构建模拟写入的buffer数据
+	// todo 这个buff 最大可以多少
 	dts_buf_render(buf, BUFLEN);
 
 	// 创建10 个dkey
@@ -226,6 +229,7 @@ example_daos_key_array()
 		d_sg_list_t	sgl;
 		// 这里是d_iov 后面会转化为biov 再持久化到设备
 		d_iov_t		sg_iov;
+		// todo: iod 到底能描述什么：根据iod 的akey 可以唯一获取一组extent
 		daos_iod_t	iod;
 		// 存储records，是extent 的数组
 		daos_recx_t	recx;
@@ -247,6 +251,7 @@ example_daos_key_array()
 
 		/** init I/O descriptor */
 		// 构造iod
+		// todo: dkey 都不同，但是akey 一样，表示数据是怎么存储的？
 		d_iov_set(&iod.iod_name, "akey", strlen("akey")); /** akey */
 
 		/*
@@ -258,7 +263,7 @@ example_daos_key_array()
 		// todo: 用户端是如何自定义存储相关的设置的
 		// 1 表示一个extent，即recx 里面只有一个extent
 		iod.iod_nr	= 1;
-		// record 的容量大小
+		// todo: record 的容量大小
 		iod.iod_size	= 1; /** record size (1 byte array here) */
 		// todo: extent
 		// 每个extent 容量都是1k 大小
@@ -295,10 +300,12 @@ example_daos_key_array()
 		daos_recx_t	recx;
 
 		/** init dkey */
+		// todo dkey 是需要用户指定的
 		sprintf(dkey_str, "dkey_%d", i);
 		d_iov_set(&dkey, dkey_str, strlen(dkey_str));
 
 		/** init scatter/gather */
+		// todo: 读取的时候的iod 是不是要和写入时候的保持一致才能读取成功？
 		d_iov_set(&sg_iov, rbuf, BUFLEN);
 		sgl.sg_nr		= 1;
 		sgl.sg_nr_out		= 0;
@@ -306,9 +313,14 @@ example_daos_key_array()
 
 		/** init I/O descriptor */
 		d_iov_set(&iod.iod_name, "akey", strlen("akey")); /** akey */
+		// todo: 这俩描述的什么信息
+		// todo: 一个extent 在服务端具体表示什么
 		iod.iod_nr	= 1; /** number of extents in recx array */
+		// todo: record size 是什么玩意
 		iod.iod_size	= 1; /** record size (1 byte array here) */
+		// 一个extent 的大小
 		recx.rx_nr	= BUFLEN; /** extent size */
+		// extent 的idx
 		recx.rx_idx	= rank * BUFLEN; /** extent offset */
 		iod.iod_recxs	= &recx;
 		iod.iod_type	= DAOS_IOD_ARRAY; /** value type of the akey */
@@ -775,6 +787,7 @@ main(int argc, char **argv)
 	example_daos_array();
 
 	/** Example of DAOS KV object */
+	// 客户端kv 存储例子
 	example_daos_kv();
 
 	MPI_Barrier(MPI_COMM_WORLD);

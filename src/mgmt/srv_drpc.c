@@ -444,6 +444,7 @@ ds_mgmt_drpc_pool_create(Drpc__Call *drpc_req, Drpc__Response *drpc_resp)
 	int			 rc;
 
 	/* Unpack the inner request from the drpc call body */
+	// 解码drpc 数据包
 	req = mgmt__pool_create_req__unpack(&alloc.alloc, drpc_req->body.len,
 					    drpc_req->body.data);
 	if (alloc.oom || req == NULL) {

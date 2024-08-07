@@ -83,6 +83,7 @@ rdb_create(const char *path, const uuid_t uuid, uint64_t caller_term, size_t siz
 		goto out_mc_hdl;
 
 	/* Initialize Raft. */
+	// 初始化raft
 	rc = rdb_raft_init(pool, mc, replicas);
 	if (rc != 0)
 		goto out_mc_hdl;

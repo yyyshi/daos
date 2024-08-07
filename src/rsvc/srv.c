@@ -681,6 +681,7 @@ start(enum ds_rsvc_class_id class, d_iov_t *id, uuid_t db_uuid, uint64_t term, b
 	svc->s_ref++;
 
 	// 创建或者打开pool-uuid 下的rdb-pool 文件
+	// 如果是第一次创建，传入replicas，即池对应的ranks
 	if (create)
 		rc = rdb_create(svc->s_db_path, svc->s_db_uuid, term, size, replicas, &rsvc_rdb_cbs,
 				svc, &storage);
@@ -1177,6 +1178,7 @@ bcast_create(crt_opcode_t opc, bool filter_invert, d_rank_list_t *filter_ranks,
  * \param[in]	bootstrap	start with an initial list of replicas
  * \param[in]	size		size of each replica in bytes if \a create
  */
+// todo: 默认建池的时候，所有的rank 都是replica 吗？
 int
 ds_rsvc_dist_start(enum ds_rsvc_class_id class, d_iov_t *id, const uuid_t dbid,
 		   const d_rank_list_t *ranks, uint64_t caller_term, bool create, bool bootstrap,
@@ -1210,6 +1212,7 @@ ds_rsvc_dist_start(enum ds_rsvc_class_id class, d_iov_t *id, const uuid_t dbid,
 	in->sai_term = caller_term;
 	in->sai_ranks = (d_rank_list_t *)ranks;
 
+	// 发送 RSVC_START crpc 请求
 	rc = dss_rpc_send(rpc);
 	if (rc != 0)
 		goto out_mem;
@@ -1248,6 +1251,7 @@ ds_rsvc_start_handler(crt_rpc_t *rpc)
 	}
 
 	// 使用传递来的pool 的uuid创建rdb-pool 文件
+	// in->sai_ranks 是传递过来的rank list
 	rc = ds_rsvc_start(in->sai_class, &in->sai_svc_id, in->sai_db_uuid, in->sai_term, create,
 			   in->sai_size, bootstrap ? in->sai_ranks : NULL, NULL /* arg */);
 	if (rc == -DER_ALREADY)

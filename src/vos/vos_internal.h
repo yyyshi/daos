@@ -1336,6 +1336,7 @@ vos_pool2umm(struct vos_pool *pool)
 	return &pool->vp_umm;
 }
 
+// cont 共用 pool 的umm 
 static inline struct umem_instance *
 vos_cont2umm(struct vos_container *cont)
 {
@@ -1741,12 +1742,12 @@ static inline struct bio_io_context *
 vos_data_ioctxt(struct vos_pool *vp)
 {
 	// 获取vos pool 的元数据信息
-	// todo: 这个信息是在什么时候初始化的。在函数 vos_pmemobj_create --> bio_mc_open 里
+	// 这个信息是在什么时候初始化的：在函数 vos_pmemobj_create --> bio_mc_open 里
 	struct bio_meta_context	*mc = vos_pool2mc(vp);
 
 	// 返回data 类型的bio ctx（有data/meta/wal 三种类型的ctx，对应的是三种类型的存储设备）
 	if (mc != NULL && bio_mc2ioc(mc, SMD_DEV_TYPE_DATA) != NULL)
-		// 正常返回
+		// 正常返回  mc->mc_data
 		return bio_mc2ioc(mc, SMD_DEV_TYPE_DATA);
 
 	/* Use dummy I/O context when data blob doesn't exist */

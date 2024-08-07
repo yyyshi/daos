@@ -740,7 +740,7 @@ dc_tx_check(daos_handle_t th, bool check_write, struct dc_tx **ptx)
 	struct dc_tx	*tx = NULL;
 	int		 rc;
 
-	// 查表
+	// 查表获取dc_tx: 客户端的事务句柄
 	rc = dc_tx_check_pmv_internal(th, &tx);
 	if (rc != 0)
 		return rc;

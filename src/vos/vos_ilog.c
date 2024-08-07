@@ -271,7 +271,9 @@ vos_ilog_fetch_internal(struct umem_instance *umm, daos_handle_t coh, uint32_t i
 
 	vos_ilog_desc_cbs_init(&cbs, coh);
 	// 查询ilog。info 为入参 + 出参
+	// todo: ilog 的单位是什么粒度的，pool 吗，cont 吗，obj 吗
 	rc = ilog_fetch(umm, ilog, &cbs, intent, has_cond, &info->ii_entries);
+	// 如果不存在就去创建一个，初始化并返回
 	if (rc == -DER_NONEXIST)
 		goto init;
 	if (rc != 0) {
@@ -328,6 +330,9 @@ vos_ilog_check_(struct vos_ilog_info *info, const daos_epoch_range_t *epr_in,
 	if (epr_out && epr_out != epr_in)
 		*epr_out = *epr_in;
 
+	// fetch:   false
+	// update:  true
+	// 1. visible entry
 	if (visible_only) {
 		if (info->ii_create == 0)
 			return -DER_NONEXIST;
@@ -339,6 +344,8 @@ vos_ilog_check_(struct vos_ilog_info *info, const daos_epoch_range_t *epr_in,
 	/* Caller wants to see punched entries so we will return 0 if either the
 	 * entity is visible, has no incarnation log, or has a visible punch
 	 */
+	// 调用者想关注穿孔的entry，所以如果1. entry 是visable，或者2. 没有ilog，或者3. 有一个visible 穿孔，都返回 0
+	// 2. no ilog
 	if (info->ii_empty) {
 		/* mark whole thing as punched */
 		info->ii_prior_punch.pr_epc = epr_in->epr_hi;
@@ -346,6 +353,7 @@ vos_ilog_check_(struct vos_ilog_info *info, const daos_epoch_range_t *epr_in,
 		return 0;
 	}
 
+	// 3. todo: visible punch ?
 	if (info->ii_create == 0) {
 		if (info->ii_prior_punch.pr_epc == 0)
 			return -DER_NONEXIST;
@@ -365,6 +373,7 @@ vos_ilog_check_(struct vos_ilog_info *info, const daos_epoch_range_t *epr_in,
 static inline int
 vos_ilog_update_check(struct vos_ilog_info *info, const daos_epoch_range_t *epr)
 {
+	// 如果前一个已提交或者未提交的punch 的epoch 大于ilog 的create 时间，认为ilog 不存在更新
 	if (info->ii_create <= info->ii_prior_any_punch.pr_epc)
 		return -DER_NONEXIST;
 
@@ -399,6 +408,7 @@ int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 
 	/** Do a fetch first.  The log may already exist */
 	// todo: update 之前先fetch 一下，日志可能已经存在了
+	// 结果加载到变量 info 里
 	rc = vos_ilog_fetch(vos_cont2umm(cont), vos_cont2hdl(cont), DAOS_INTENT_UPDATE,
 			    ilog, epr->epr_hi, bound, has_cond, NULL, parent, info);
 	/** For now, if the state isn't settled, just retry with later timestamp. The state
@@ -408,6 +418,7 @@ int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 		D_GOTO(done, rc = -DER_INPROGRESS);
 	if (rc == -DER_TX_RESTART)
 		goto done;
+	// 没查到的obj，会在fetch 中初始化一个，并返回 nonexist 错误码
 	if (rc == -DER_NONEXIST)
 		goto update;
 	if (rc != 0) {
@@ -417,14 +428,20 @@ int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 	// ilog 已经存在了，直接goto gone
 	rc = vos_ilog_update_check(info, &max_epr);
 	if (rc == 0) {
+		// 有更新punch，cond = VOS_ILOG_COND_UPDATE
 		if (cond == VOS_ILOG_COND_INSERT)
 			D_GOTO(done, rc = -DER_EXIST);
+		// 应该是 goto done
 		goto done;
 	}
 	if (rc != -DER_NONEXIST) {
 		D_ERROR("Check failed: "DF_RC"\n", DP_RC(rc));
 		return rc;
 	}
+
+	// nonexist 会到这里
+	// 1. goto update 跳到这里
+	// 2. update_check 执行后默认走到这里
 update:
 	if (has_cond && rc == -DER_NONEXIST) {
 		/* There is an uncertain create, so restart */
@@ -444,6 +461,7 @@ update:
 	}
 
 	// ilog 还没存在，需要update
+	// todo: 更新了什么信息进去
 	rc = ilog_update(loh, &max_epr, epr->epr_hi, dtx_is_valid_handle(dth) ?
 			 dth->dth_op_seq : VOS_SUB_OP_MAX, false);
 
@@ -459,6 +477,7 @@ done:
 	 * is prior_any_punch.   This field will not be changed by ilog_update
 	 * for the purpose of parsing the child log.
 	 */
+	// 没有必要更新ilog
 
 	return rc;
 }

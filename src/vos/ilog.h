@@ -14,13 +14,17 @@
 #define __ILOG_H__
 #include <daos_types.h>
 
+// ilog 的id
 struct ilog_id {
 	/** DTX of entry */
 	union {
 		uint64_t	id_value;
 		struct {
+			// 事务id
 			uint32_t	 id_tx_id;
+			// punch 的小epoch
 			uint16_t	 id_punch_minor_eph;
+			// update 的小epoch
 			uint16_t	 id_update_minor_eph;
 		};
 	};

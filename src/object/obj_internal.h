@@ -423,7 +423,9 @@ struct obj_auxi_args {
 	uint16_t			 retry_cnt;
 	uint16_t			 inprogress_cnt;
 	struct obj_req_tgts		 req_tgts;
+	// inline 方式传输，保存数据的结构
 	d_sg_list_t			*sgls_dup;
+	// rdma 方式传输，保存数据的结构
 	crt_bulk_t			*bulks;
 	uint32_t			 iod_nr;
 	uint32_t			 initial_shard;

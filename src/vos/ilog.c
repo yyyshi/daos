@@ -69,6 +69,7 @@ struct ilog_root {
 };
 
 struct ilog_context {
+	// ilog 的root
 	/** Root pointer */
 	struct ilog_root		*ic_root;
 	/** Cache the callbacks */
@@ -148,6 +149,7 @@ ilog_log_add(struct ilog_context *lctx, struct ilog_id *id)
 
 	D_ASSERT(id->id_epoch != 0);
 
+	// == vos_ilog_add
 	rc = cbs->dc_log_add_cb(lctx->ic_umm, lctx->ic_root_off, &id->id_tx_id, id->id_epoch,
 				cbs->dc_log_add_args);
 	if (rc != 0) {
@@ -891,6 +893,7 @@ ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 	int			 visibility = ILOG_UNCOMMITTED;
 	uint32_t		 version;
 
+	// 根据hdl 获取lctx
 	lctx = ilog_hdl2lctx(loh);
 	if (lctx == NULL) {
 		D_ERROR("Invalid log handle\n");
@@ -900,6 +903,7 @@ ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 	D_ASSERT(!lctx->ic_in_txn);
 	D_ASSERTF(id_in->id_epoch != 0, "Invalid epoch for ilog opc %d\n", opc);
 
+	// lctx 获取root
 	root = lctx->ic_root;
 
 	version = ilog_mag2ver(root->lr_magic);
@@ -917,6 +921,7 @@ ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 		}
 	}
 
+	// 如果root 为空
 	if (ilog_empty(root)) {
 		if (opc != ILOG_OP_UPDATE) {
 			D_DEBUG(DB_TRACE, "ilog entry "DF_X64" not found\n",
@@ -924,17 +929,22 @@ ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 			goto done;
 		}
 
+		// insert 到ilog tree 的根
 		D_DEBUG(DB_TRACE, "Inserting "DF_X64" at ilog root\n",
 			id_in->id_epoch);
+		// 版本增加
 		tmp.lr_magic = ilog_ver_inc(lctx);
 		tmp.lr_ts_idx = root->lr_ts_idx;
 		tmp.lr_id = *id_in;
 		rc = ilog_ptr_set(lctx, root, &tmp);
+		// 新加入
 		if (rc == 0)
+			// 传进来的id
 			rc = ilog_log_add(lctx, &root->lr_id);
 	} else if (root->lr_tree.it_embedded) {
 		bool	is_equal;
 
+		// 如果root 不为空，原地更新，is_equal 是lr_id 和id_in 的比较结果
 		rc = update_inplace(lctx, &root->lr_id, id_in,
 				    opc, &is_equal);
 		if (rc != 0)
@@ -1001,17 +1011,23 @@ ilog_update(daos_handle_t loh, const daos_epoch_range_t *epr,
 
 	D_ASSERT(minor_eph != 0);
 
+	// vos_ilog_update_ 里传递时使用的是 punch == false
 	if (punch) {
 		id.id_punch_minor_eph = minor_eph;
 		id.id_update_minor_eph = 0;
 	} else {
+		// 走这里
+		// punch 小epoch 为0
 		id.id_punch_minor_eph = 0;
+		// update 小epoch 为 minor_eph
 		id.id_update_minor_eph = minor_eph;
 	}
 
 	if (epr)
 		range = *epr;
 
+	// 更新ilog
+	// 传入 ilog 的hdl，id 和range
 	return ilog_modify(loh, &id, &range, ILOG_OP_UPDATE);
 
 }
@@ -1192,6 +1208,7 @@ done:
 	return 0;
 }
 
+// todo: 这个函数没看明白，是从哪里取得数据做fetch
 int
 ilog_fetch(struct umem_instance *umm, struct ilog_df *root_df,
 	   const struct ilog_desc_cbs *cbs, uint32_t intent, bool has_cond,
@@ -1200,6 +1217,7 @@ ilog_fetch(struct umem_instance *umm, struct ilog_df *root_df,
 	struct ilog_context	*lctx;
 	struct ilog_root	*root;
 	struct ilog_id		*id;
+	// 从entry 里获取priv
 	struct ilog_priv	*priv = ilog_ent2priv(entries);
 	struct ilog_array_cache	 cache;
 	int			 i;
@@ -1225,12 +1243,15 @@ ilog_fetch(struct umem_instance *umm, struct ilog_df *root_df,
 		return 0;
 	}
 
+	// 获取lctx
 	lctx = &priv->ip_lctx;
 	if (ilog_empty(root))
 		D_GOTO(out, rc = 0);
 
+	// lctx 转换成cache
 	ilog_log2cache(lctx, &cache);
 
+	// 根据cache 准备entry
 	rc = prepare_entries(entries, &cache);
 	if (rc != 0)
 		goto fail;
@@ -1240,6 +1261,7 @@ ilog_fetch(struct umem_instance *umm, struct ilog_df *root_df,
 	else
 		retry = true;
 
+	// 遍历cache，填充entry
 	for (i = 0; i < cache.ac_nr; i++) {
 		id = &cache.ac_entries[i];
 		status = ilog_status_get(lctx, id, intent, retry);

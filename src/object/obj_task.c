@@ -26,10 +26,12 @@ dc_obj_open_task_create(daos_handle_t coh, daos_obj_id_t oid, unsigned int mode,
 	int		rc;
 
 	DAOS_API_ARG_ASSERT(*args, OBJ_OPEN);
+	// dc_obj_open 里会创建布局layout
 	rc = dc_task_create(dc_obj_open, tse, ev, task);
 	if (rc)
 		return rc;
 
+	// 构建task，还没被调度
 	args = dc_task_get_args(*task);
 	// 透传参数
 	args->coh	= coh;
@@ -252,7 +254,7 @@ dc_obj_update_task_create(daos_handle_t oh, daos_handle_t th, uint64_t flags,
 	if (rc)
 		return rc;
 
-	// 把客户端的参数传到args 里，触发 task
+	// 把客户端的参数传到args 里，即构建task 要用到的一些参数
 	args = dc_task_get_args(*task);
 	args->oh	= oh;
 	// 使用用户传递的tx hdl 透传

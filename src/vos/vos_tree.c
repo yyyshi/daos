@@ -999,6 +999,7 @@ key_tree_prepare(struct vos_object *obj, daos_handle_t toh,
 		break;
 	}
 
+	// 如果根据当前key 和父树的toh，查询不到结果，将insert 到toh 中
 	if (rc == -DER_NONEXIST) {
 		if (!(flags & SUBTR_CREATE))
 			goto out;
@@ -1010,12 +1011,15 @@ key_tree_prepare(struct vos_object *obj, daos_handle_t toh,
 			D_ERROR("Failed to upsert: "DF_RC"\n", DP_RC(rc));
 			goto out;
 		}
+		// 新产生的 dkey/akey 的pmem 地址
 		krec = rbund.rb_krec;
+		// todo: ilog 相关操作
 		vos_ilog_ts_ignore(vos_obj2umm(obj), &krec->kr_ilog);
 		vos_ilog_ts_mark(ts_set, &krec->kr_ilog);
 		created = true;
 	}
 
+	// 如果dkey 存在于当前toh 中，并且子树存在，直接根据sub_toh 打开子树获取dkey/akey 的pmem 地址krec
 	if (sub_toh) {
 		D_ASSERT(krec != NULL);
 		rc = tree_open_create(obj, tclass, flags, krec, created,
@@ -1028,6 +1032,7 @@ key_tree_prepare(struct vos_object *obj, daos_handle_t toh,
 	D_ASSERT(krec != NULL);
 	/* For updates, we need to be able to modify the epoch range */
 	if (krecp != NULL)
+		// 返回dkey/akey 的pmem 地址
 		*krecp = krec;
  out:
 	D_CDEBUG(rc == 0, DB_TRACE, DB_IO, "prepare tree, flags=%x, tclass=%d %d\n",
@@ -1181,7 +1186,7 @@ obj_tree_init(struct vos_object *obj)
 		else if (daos_is_dkey_lexical_type(type))
 			tree_feats |= VOS_KEY_CMP_LEXICAL_SET;
 
-		// 创建btree
+		// 创建btree，将初始化obj_df -> vo_tree
 		rc = dbtree_create_inplace_ex(ta->ta_class, tree_feats,
 					      ta->ta_order, vos_obj2uma(obj),
 					      &obj->obj_df->vo_tree,

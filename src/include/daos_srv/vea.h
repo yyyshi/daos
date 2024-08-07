@@ -21,7 +21,7 @@
 #include <daos/btree.h>
 
 /* Reserved extent(s) */
-// extent 是多个 blk
+// extent 是多个 blk，每次预留空间是以extent 为单元
 struct vea_resrvd_ext {
 	/* Link to a list for a series of vea_reserve() calls */
 	d_list_t		 vre_link;

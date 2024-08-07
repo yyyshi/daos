@@ -26,6 +26,7 @@ type snapshot struct {
 	Name      string `json:"name,omitempty"`
 }
 
+// 快照创建
 type containerSnapCreateCmd struct {
 	existingContainerCmd
 
@@ -51,6 +52,7 @@ func (cmd *containerSnapCreateCmd) Execute(args []string) error {
 		defer freeString(cSnapName)
 	}
 
+	// engine 创建快照
 	var cEpoch C.uint64_t
 	if err := daosError(C.daos_cont_create_snap(ap.cont, &cEpoch, cSnapName, nil)); err != nil {
 		return errors.Wrapf(err, "failed to create snapshot of container %s", cmd.ContainerID())
@@ -245,6 +247,7 @@ func (cmd *containerSnapListCmd) Execute(args []string) error {
 	return nil
 }
 
+// 快照回滚
 type containerSnapshotRollbackCmd struct {
 	existingContainerCmd
 
@@ -286,6 +289,7 @@ func (cmd *containerSnapshotRollbackCmd) Execute(args []string) error {
 		return errors.New("must specify one of snapshot name or epoch")
 	}
 
+	// engine 的rollback
 	if err := daosError(C.daos_cont_rollback(ap.cont, epc, nil)); err != nil {
 		return errors.Wrapf(err, "failed to roll back container %s", cmd.ContainerID())
 	}

@@ -161,6 +161,7 @@ dtx_inprogress(struct vos_dtx_act_ent *dae, struct dtx_handle *dth,
 	dsp->dsp_mbs = mbs;
 
 	d_list_add_tail(&dsp->dsp_link, &dth->dth_share_tbd_list);
+	// dtx 需要刷新
 	dth->dth_share_tbd_count++;
 
 out:
@@ -2983,6 +2984,7 @@ vos_dtx_attach(struct dtx_handle *dth, bool persistent, bool exist)
 	} else {
 		D_ASSERT(dth->dth_pinned == 0);
 
+		// false
 		if (exist) {
 			d_iov_set(&kiov, &dth->dth_xid, sizeof(dth->dth_xid));
 			d_iov_set(&riov, NULL, 0);
@@ -3001,6 +3003,7 @@ vos_dtx_attach(struct dtx_handle *dth, bool persistent, bool exist)
 		}
 	}
 
+	// false
 	if (persistent) {
 		umm = vos_cont2umm(cont);
 		rc = umem_tx_begin(umm, NULL);

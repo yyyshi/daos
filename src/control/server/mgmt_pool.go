@@ -348,6 +348,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 		// If the request supplies a specific rank list, use it. Note that
 		// the rank list may include downed ranks, in which case the create
 		// will fail with an error.
+		// 如果请求提供了一个指定的rank list，直接使用
 		reqRanks := ranklist.RanksFromUint32(req.GetRanks())
 		// Create a RankSet to sort/dedupe the ranks.
 		reqRanks = ranklist.RankSetFromRanks(reqRanks).Ranks()
@@ -361,7 +362,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 		// Otherwise, create the pool across the requested number of
 		// available ranks in the system (if the request does not
 		// specify a number of ranks, all are used).
-		// 不带参数的话，使用所有的rank 创建池
+		// 没指定rank list的话，使用所有的rank 创建池
 		nAllRanks := len(allRanks)
 		nRanks := nAllRanks
 		if req.GetNumranks() > 0 {
@@ -460,7 +461,7 @@ func (svc *mgmtSvc) poolCreate(parent context.Context, req *mgmtpb.PoolCreateReq
 		}
 	}()
 
-	// 发送创建池 drpc 请求
+	// 发送创建池 drpc 请求，engine 收到后会从req 里的rank 中选择几个作为rsvc rank
 	dresp, err := svc.harness.CallDrpc(ctx, drpc.MethodPoolCreate, req)
 	if err != nil {
 		svc.log.Errorf("pool create dRPC call failed: %s", err)

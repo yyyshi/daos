@@ -999,10 +999,13 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 	if (auxi->epoch.oe_flags & DTX_EPOCH_UNCERTAIN)
 		flags |= ORF_EPOCH_UNCERTAIN;
 
+	// 根据shard 可以找到对应的container 相关的信息
 	rc = dc_cont2uuid(shard->do_co, &cont_hdl_uuid, &cont_uuid);
 	if (rc != 0)
 		D_GOTO(out, rc);
 
+	// 根据shard 查找pool 相关的信息，根据pool 获取元数据信息
+	// todo: 当时是怎么填充pool 相关的信息的
 	pool = obj_shard_ptr2pool(shard);
 	if (pool == NULL)
 		D_GOTO(out, rc = -DER_NO_HDL);
@@ -1106,8 +1109,10 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 		tgt_ep.ep_tag, auxi->epoch.oe_value, DP_DTI(&orw->orw_dti),
 		orw->orw_start_shard, orw->orw_map_ver);
 
+	// 根据不同的传输类型做不同的数据拷贝
 	// 传输方式为rdma 的数据都是通过bulks 来作为数据结构来组织数据的
 	if (args->bulks != NULL) {
+		// rdma 方式传输，数据存储在bulks 里
 		orw->orw_sgls.ca_count = 0;
 		orw->orw_sgls.ca_arrays = NULL;
 		// todo: 输入带过来的数据？比如写场景，就表示要写的数据？
@@ -1125,6 +1130,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 			orw->orw_sgls.ca_count = 0;
 			orw->orw_sgls.ca_arrays = NULL;
 		} else {
+			// inline 方式，数据存储在sgls 里
 			/* Transfer data inline */
 			// 非rdma，而是inline 方式传输的数据
 			if (sgls != NULL)
@@ -1139,6 +1145,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 	}
 
 	// rpc 请求到这里已经构建完成，就差发送，这里是先构建cb 的一些参数
+	// 构建rpc 相关的参数
 	crt_req_addref(req);
 	// rw_args 里面有rpc 要发送的对端节点的地址，这里又和req 关联上
 	rw_args.rpc = req;
@@ -1174,7 +1181,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 	if (DAOS_FAIL_CHECK(DAOS_SHARD_OBJ_RW_CRT_ERROR))
 		D_GOTO(out_args, rc = -DER_HG);
 
-	// 注册读写完成的回调函数
+	// 注册读写完成的回调函数。以及回调函数dc_rw_cb 对应的参数信息 rw_args
 	rc = tse_task_register_comp_cb(task, dc_rw_cb, &rw_args,
 				       sizeof(rw_args));
 	if (rc != 0)

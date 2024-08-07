@@ -1342,6 +1342,8 @@ obj_rw_recx_list_post(struct obj_rw_in *orw, struct obj_rw_out *orwo, uint8_t *s
 
 // read/write begin
 // todo: 当前读写是在哪个节点，是怎么决定的？shard 2 targets 那里吗
+// client: 客户端传入oid 可以通过pl 算法知道object 分布在哪些target 上，rpc 将发送到这些target
+// server: 服务端target 收到rpc 请求后将在本地进行object 的寻址和读写，即 local_rw。服务端根据oid 查找读写的机制就是vos
 static int
 obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *iods,
 		      struct dcs_iod_csums *iod_csums, uint64_t *offs, uint8_t *skips,
@@ -1382,6 +1384,7 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		D_GOTO(out, rc = 0);
 	}
 
+	// checksum 计算校验
 	rc = csum_verify_keys(ioc->ioc_coc->sc_csummer, &orw->orw_dkey,
 			      orw->orw_dkey_csum, &orw->orw_iod_array,
 			      &orw->orw_oid);
@@ -1630,8 +1633,7 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 
 	time = daos_get_ntime();
 	// 根据ioh 获取biod，biod 里面有biov，存储要读写的数据
-	// todo: 这个数据是从ioh 里面带过来的吗，做关联
-	// todo: 研究下vos io ctx 的构建，包括里面biod 的构建
+	// ioh 和vos ioc 有关联，vos ioc 里面有biod
 	biod = vos_ioh2desc(ioh);
 	// 这里会设置dma buffer 和regions
 	// 如果当前是fetch 请求，那么这里面会直接调用 dma_rw，完成读的功能
@@ -2068,6 +2070,8 @@ again:
 	// 接收rpc 后本地读写操作。需要传入checksum
 	// todo: iods csums offs 等是怎么生成的
 	rc = obj_local_rw_internal(rpc, ioc, iods, csums, offs, skips, nr, dth);
+	// todo: 先执行本地读写，之后才刷新dtx 相关
+	// todo: 不先刷新，再执行读写吗？
 	if (dth != NULL && obj_dtx_need_refresh(dth, rc)) {
 		if (unlikely(++count % 10 == 3)) {
 			struct dtx_share_peer	*dsp;
@@ -2079,6 +2083,8 @@ again:
 			       dth->dth_share_tbd_count, count);
 		}
 
+		// 需要刷新dth
+		// todo: 先读后刷新？
 		rc = dtx_refresh(dth, ioc->ioc_coc);
 		if (rc == -DER_AGAIN)
 			goto again;
@@ -2816,6 +2822,7 @@ obj_tgt_update(struct dtx_leader_handle *dlh, void *arg, int idx,
 		 *	on the server. That should be avoided. So pre-allocating
 		 *	DTX entry before bulk data transfer is necessary.
 		 */
+		// 本地读写，也传递了dlh
 		rc = obj_local_rw(exec_arg->rpc, exec_arg->ioc, &dlh->dlh_handle);
 		if (rc != 0)
 			DL_CDEBUG(rc == -DER_INPROGRESS || rc == -DER_TX_RESTART ||
@@ -2835,7 +2842,7 @@ comp:
 	}
 
 	/* Handle the object remotely */
-	// 远程处理object 更新
+	// 远程处理object 更新，idx 表示dlh_subs 的索引，进而可以找到 target
 	return ds_obj_remote_update(dlh, arg, idx, comp_cb);
 }
 
@@ -2881,6 +2888,9 @@ process_epoch(uint64_t *epoch, uint64_t *epoch_first, uint32_t *flags)
 // rpc 服务端读写接口，对应的cli 接口为 dc_obj_shard_rw
 // rdma 实际上都是表现为客户端的操作，读场景，其实就是将远程内存中数据pull 回客户端本地内存
 // 写场景，就是将客户端本地内存的数据push 到远端内存
+// dtx_begin 和dtx_leader_begin 的实现
+// 读请求：obj_ioc_begin --> process_epoch --> dtx_begin --> obj_local_rw  --> dtx_end
+// 写请求：obj_ioc_begin --> process_epoch --> dtx_leader_begin --> dtx_leader_exec_ops  --> obj_tgt_update -->  dtx_leader_end
 void
 ds_obj_rw_handler(crt_rpc_t *rpc)
 {
@@ -2908,7 +2918,8 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 	D_ASSERT(orw != NULL);
 	D_ASSERT(orwo != NULL);
 
-	// todo: 这个是做了什么事情
+	// todo: 这个是做了什么事情，就是把一系列的信息添加到ioc 中
+	// 构建io contex
 	rc = obj_ioc_begin(orw->orw_oid.id_pub, orw->orw_map_ver,
 			   orw->orw_pool_uuid, orw->orw_co_hdl,
 			   orw->orw_co_uuid, rpc, orw->orw_flags, &ioc);
@@ -2963,11 +2974,13 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 			       &orw->orw_oid, NULL, 0, dtx_flags, NULL, &dth);
 		if (rc == 0) {
 			// 事务包围的本地读写操作，其实只是fetch。update 场景到后面的 obj_tgt_update 里面处理
+			// todo: 本地读写是什么意思
 			rc = obj_local_rw(rpc, &ioc, dth);
+			// 事务结束
 			rc = dtx_end(dth, ioc.ioc_coc, rc);
 		}
 
-		// fetch 直接到out 了
+		// fetch 完直接到out 了
 		D_GOTO(out, rc);
 	}
 
@@ -3075,7 +3088,8 @@ again2:
 		dtx_flags &= ~DTX_PREPARED;
 
 	// 需要传入tx mems
-	// 会将epoch 添加到dlh 中 
+	// 会将epoch 添加到dlh 中
+	// dlh 中 dlh_subs 数组将对应客户端传递来的targets 数组
 	rc = dtx_leader_begin(ioc.ioc_vos_coh, &orw->orw_dti, &epoch, 1,
 			      version, &orw->orw_oid, dti_cos, dti_cos_cnt,
 			      tgts, tgt_cnt, dtx_flags, mbs, &dlh);
@@ -3085,14 +3099,19 @@ again2:
 		D_GOTO(out, rc);
 	}
 
+	// 构建leader 将要执行的操作的参数信息
+	// 直接使用cli 发来的rpc
 	exec_arg.rpc = rpc;
+	// 上边构建的ioc
 	exec_arg.ioc = &ioc;
 	exec_arg.flags = flags;
+	// todo: 这个start shard在多备份场景是leader target？
 	exec_arg.start = orw->orw_start_shard;
 
 	/* Execute the operation on all targets */
 	// 在所有的节点执行opt。所有的读写请求在服务端这边收到后，首先先执行obj_tgt_update 函数
 	// 写场景进入到这里完成更新操作
+	// 被leader dtx 包围的leader exec ops
 	rc = dtx_leader_exec_ops(dlh, obj_tgt_update, NULL, 0, &exec_arg);
 
 	/* Stop the distributed transaction */

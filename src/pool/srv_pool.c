@@ -818,7 +818,7 @@ select_svc_ranks(int svc_rf, const d_rank_list_t *target_addrs, int ndomains,
 	/*daos_rank_list_shuffle(rnd_tgts);*/
 
 	/* Determine the number of selectable targets. */
-	// 参与选择的target 的数量
+	// 去重后的所有rank 都将作为候选者
 	selectable = rnd_tgts->rl_nr;
 
 	// 如果要选的比可选的多，修改小一点
@@ -836,6 +836,7 @@ select_svc_ranks(int svc_rf, const d_rank_list_t *target_addrs, int ndomains,
 		if (j == ranks->rl_nr)
 			break;
 		D_DEBUG(DB_MD, "ranks[%d]: %u\n", j, rnd_tgts->rl_ranks[i]);
+		// 从 rnd_tgts 选前 ranks->rl_nr 个作为最终的rsvc rank
 		ranks->rl_ranks[j] = rnd_tgts->rl_ranks[i];
 		j++;
 	}
@@ -935,14 +936,14 @@ ds_pool_svc_dist_create(const uuid_t pool_uuid, int ntargets, const char *group,
 	D_DEBUG(DB_MD, DF_UUID": creating PS: ntargets=%d ndomains=%d svc_rf="DF_U64"\n",
 		DP_UUID(pool_uuid), ntargets, ndomains, svc_rf_entry->dpe_val);
 
-	// 选择rsvc 的ranks
+	// 从 target_addrs 选择rsvc 的ranks（不是target，能改改名吗，，，）并返回
 	rc = select_svc_ranks(svc_rf_entry->dpe_val, target_addrs, ndomains, domains, &ranks);
 	if (rc != 0)
 		D_GOTO(out, rc);
 
 	d_iov_set(&psid, (void *)pool_uuid, sizeof(uuid_t));
 	// 后面会使用pool 的uuid 创建后面的rdb-pool目录
-	// 请求在ranks 上启动rsvc 服务
+	// 请求在被选中的ranks 上启动rsvc 服务
 	rc = ds_rsvc_dist_start(DS_RSVC_CLASS_POOL, &psid, pool_uuid, ranks, RDB_NIL_TERM,
 				true /* create */, true /* bootstrap */, ds_rsvc_get_md_cap());
 	if (rc != 0)

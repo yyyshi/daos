@@ -108,7 +108,8 @@ func getBdevCfgsFromSrvCfg(cfg *config.Server) storage.TierConfigs {
 	return bdevCfgs
 }
 
-// 获取conf 配置的access list，在engine 里叫做 replica
+// 获取conf 配置的access list
+// todo: 这里为啥叫做 replica
 // todo: 为啥名字不统一呢
 func cfgGetReplicas(cfg *config.Server, lookup ipLookupFn) ([]*net.TCPAddr, error) {
 	var dbReplicas []*net.TCPAddr

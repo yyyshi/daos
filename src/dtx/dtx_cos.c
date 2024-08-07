@@ -32,6 +32,7 @@ struct dtx_cos_rec {
 	 *	of prepared ilog entries that will much affect subsequent
 	 *	operation efficiency.
 	 */
+	// 被修改的dtx 的list
 	d_list_t		 dcr_prio_list;
 	/* The list for those DTXs that need to committed via explicit DTX
 	 * commit RPC instead of piggyback via dispatched update/punch RPC.
@@ -40,6 +41,7 @@ struct dtx_cos_rec {
 	/* The number of the PUNCH DTXs in the dcr_reg_list. */
 	int			 dcr_reg_count;
 	/* The number of the DTXs in the dcr_prio_list. */
+	// 被修改的dtx 的list 中元素的个数
 	int			 dcr_prio_count;
 	/* The number of the DTXs in the dcr_explicit_list. */
 	int			 dcr_expcmt_count;
@@ -354,16 +356,19 @@ dtx_list_cos(struct ds_cont_child *cont, daos_unit_oid_t *oid,
 	 * DTXs. If some DTX in the left part caused current modification
 	 * failure (conflict), related RPC will be retried sometime later.
 	 */
+	// dcr_prio_count 是当前存在修改的dtx 的个数，对应的list 是 dcr_prio_list
 	if (dcr->dcr_prio_count > max)
 		count = max;
 	else
 		count = dcr->dcr_prio_count;
 
+	// 就是一个dtx id 的数组，数组最大个数为 max 这么大
 	D_ALLOC_ARRAY(dti, count);
 	if (dti == NULL)
 		return -DER_NOMEM;
 
-	// 将查到的cos dtx 都返回
+	// 遍历 dcr_prio_list 将获取到的cos dtx 都返回
+	// dcr_prio_list 里的item 是在 dtx_leader_end 里insert 进去的
 	d_list_for_each_entry(dcrc, &dcr->dcr_prio_list, dcrc_lo_link) {
 		dti[i] = dcrc->dcrc_dte->dte_xid;
 		if (++i >= count)
@@ -403,7 +408,7 @@ dtx_add_cos(struct ds_cont_child *cont, struct dtx_entry *dte,
 	rbund.flags = flags;
 	d_iov_set(&riov, &rbund, sizeof(rbund));
 
-	// 插入cos dtx item
+	// 插入cos dtx item 到修改list 中
 	rc = dbtree_upsert(cont->sc_dtx_cos_hdl, BTR_PROBE_EQ,
 			   DAOS_INTENT_UPDATE, &kiov, &riov, NULL);
 

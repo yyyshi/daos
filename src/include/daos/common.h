@@ -986,6 +986,7 @@ daos_recx_can_merge(daos_recx_t *src, daos_recx_t *dst)
  * inline in the request/reply. Otherwise, a RDMA transfer will be used.
  * Based on RPC size above and reserve 1KiB for RPC fields and cart/HG headers.
  */
+// todo: bulk 方式最大能传输多大的数据量
 // 决定使用inline 或bulk 哪种传输方式的阈值
 // 即：如果小于这个limit，使用inline传输。大于这个值的时候将使用rdma 方式传输数据
 #define DAOS_BULK_LIMIT	(DAOS_RPC_SIZE - 1024) /* Reserve 1KiB for headers */

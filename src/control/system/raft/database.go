@@ -289,9 +289,10 @@ func NewDatabase(log logging.Logger, cfg *DatabaseConfig) (*Database, error) {
 // isReplica returns true if the supplied address matches
 // a known replica address.
 // todo: leader 和非leader 不是应该都属于replica 吗，为啥要有个这个函数来判断是否为 replica
+// daos_server.yml 和daos_agent.yml 中的 accesslist 列表中的才是replica
 func (db *Database) isReplica(ctrlAddr *net.TCPAddr) bool {
 	// 判断当前的地址，是否在conf 里的replicas 里存在
-	// todo: 看下db.cfg 的Replicas 是怎么构造的
+	// todo: 看下db.cfg 的Replicas 是怎么构造的：和accesslist 中的数据是一样的
 	for _, candidate := range db.cfg.Replicas {
 		if common.CmpTCPAddr(ctrlAddr, candidate) {
 			return true
@@ -310,7 +311,7 @@ func (db *Database) SystemName() string {
 // LeaderQuery returns the system leader, if known.
 func (db *Database) LeaderQuery() (leader string, replicas []string, err error) {
 	// 如果是leader，首先得是replica
-	// todo: 意思是可能存在不是replica 的节点吗？
+	// todo: 意思是可能存在不是replica 的节点吗？：是的，只有在accesslist 中才是replica
 	if !db.IsReplica() {
 		return "", nil, &system.ErrNotReplica{db.cfg.stringReplicas()}
 	}
