@@ -298,6 +298,7 @@ vea_unload(struct vea_space_info *vsi)
  * Load space tracking information from SCM to initialize the in-memory
  * compound index.
  */
+// 生成vsi
 int
 vea_load(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 	 struct vea_space_df *md, struct vea_unmap_context *unmap_ctxt,
@@ -334,6 +335,7 @@ vea_load(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 	vsi->vsi_bitmap_btr = DAOS_HDL_INVAL;
 	D_INIT_LIST_HEAD(&vsi->vsi_agg_lru);
 	vsi->vsi_agg_btr = DAOS_HDL_INVAL;
+	// flush 参数
 	vsi->vsi_flush_time = 0;
 	vsi->vsi_flush_scheduled = false;
 	vsi->vsi_unmap_ctxt = *unmap_ctxt;
@@ -349,7 +351,7 @@ vea_load(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 	memset(&uma, 0, sizeof(uma));
 	uma.uma_id = UMEM_CLASS_VMEM;
 	/* Create in-memory free extent tree */
-	// free extent 的树，后面申请预留资源信息都是些在这个树上
+	// free extent 的树，后面申请预留资源信息都是写在这个树上
 	rc = dbtree_create(DBTREE_CLASS_IFV, BTR_FEAT_DIRECT_KEY, VEA_TREE_ODR, &uma, NULL,
 			   &vsi->vsi_free_btr);
 	if (rc != 0)

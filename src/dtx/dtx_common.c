@@ -888,6 +888,7 @@ dtx_handle_init(struct dtx_id *dti, daos_handle_t coh, struct dtx_epoch *epoch,
 	dth->dth_need_validation = 0;
 
 	// 存在修改的dtx 的dtx id 数组 dti_cos
+	// cos == conflicts
 	dth->dth_dti_cos = dti_cos;
 	dth->dth_dti_cos_count = dti_cos_cnt;
 	dth->dth_ent = NULL;
@@ -1331,9 +1332,11 @@ dtx_leader_end(struct dtx_leader_handle *dlh, struct ds_cont_hdl *coh, int resul
 		goto sync;
 	}
 
+	// 事务的参与者
 	mbs = (struct dtx_memberships *)(dte + 1);
 	memcpy(mbs, dth->dth_mbs, size - sizeof(*dte));
 
+	// 填充entry 的信息
 	dte->dte_xid = dth->dth_xid;
 	dte->dte_ver = dth->dth_ver;
 	dte->dte_refs = 1;
@@ -1353,6 +1356,7 @@ dtx_leader_end(struct dtx_leader_handle *dlh, struct ds_cont_hdl *coh, int resul
 	
 	// 在一次dtx 要结束的时候，向cos 缓存中添加dtx entry
 	// 这是向 dcr_prio_list 中插入一个item，这个list 将在 dtx_leader_begin 的时候遍历并处理
+	// dte 里面有dtx id
 	rc = dtx_add_cos(cont, dte, &dth->dth_leader_oid,
 			 dth->dth_dkey_hash, dth->dth_epoch, flags);
 	dtx_entry_put(dte);
@@ -1378,8 +1382,10 @@ sync:
 		 *	done successfully. That is not only for sync commit, but also for async
 		 *	batched commit.
 		 */
+		// 标记为可提交
 		vos_dtx_mark_committable(dth);
 		dte = &dth->dth_dte;
+		// 提交事务
 		rc = dtx_commit(cont, &dte, NULL, 1);
 		if (rc != 0)
 			D_WARN(DF_UUID": Fail to sync commit DTX "DF_DTI": "DF_RC"\n",

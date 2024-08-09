@@ -2905,6 +2905,7 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 	uint32_t			opc = opc_get(rpc->cr_opc);
 	struct dtx_memberships		*mbs = NULL;
 	struct daos_shard_tgt		*tgts = NULL;
+	// 两阶段提交事务标识符，由客户端产生，全局唯一
 	struct dtx_id			*dti_cos = NULL;
 	struct obj_pool_metrics		*opm;
 	int				dti_cos_cnt;

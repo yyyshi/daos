@@ -143,6 +143,7 @@ struct dss_module_metrics dtx_metrics = {
 	.dmm_nr_metrics = dtx_metrics_count,
 };
 
+// dtx rpc 的服务端接口
 static void
 dtx_handler(crt_rpc_t *rpc)
 {
@@ -175,6 +176,7 @@ dtx_handler(crt_rpc_t *rpc)
 	dpm = cont->sc_pool->spc_metrics[DAOS_DTX_MODULE];
 
 	switch (opc) {
+	// 提交dtx rpc 请求
 	case DTX_COMMIT: {
 		uint64_t	opc_cnt = 0;
 		uint64_t	ent_cnt = 0;

@@ -1311,6 +1311,7 @@ pool_open(void *ph, struct vos_pool_df *pool_df, unsigned int flags, void *metri
 		unmap_ctxt.vnc_data = vos_data_ioctxt(pool);
 		unmap_ctxt.vnc_ext_flush = flags & VOS_POF_EXTERNAL_FLUSH;
 		// 打开vos pool 的时候，先加载vea 的space 信息
+		// 后面 vea_reserve 是要根据vsi 信息来申请资源
 		// pool_df->pd_vea_df 里存储了vsi 的元数据信息
 		rc = vea_load(&pool->vp_umm, vos_txd_get(flags & VOS_POF_SYSDB),
 			      &pool_df->pd_vea_df, &unmap_ctxt, vea_metrics, &pool->vp_vea_info);

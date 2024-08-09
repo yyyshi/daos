@@ -75,6 +75,7 @@ struct dtx_entry {
 	/** The reference count. */
 	uint32_t			 dte_refs;
 	/** The DAOS targets participating in the DTX. */
+	// 此次事务参与的targets
 	struct dtx_memberships		*dte_mbs;
 };
 

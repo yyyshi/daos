@@ -398,10 +398,12 @@ dtx_req_list_send(struct dtx_common_args *dca, daos_epoch_t epoch, int len)
 
 	D_DEBUG(DB_TRACE, "DTX req for opc %x, future %p start.\n", dra->dra_opc, dra->dra_future);
 
+	// todo: 这个head 里的item 都是哪里来的
 	d_list_for_each_entry(drr, &dca->dca_head, drr_link) {
 		drr->drr_parent = dra;
 		drr->drr_result = 0;
 
+		// 对应的处理rpc 的函数是：dtx_handler(crt_rpc_t *rpc)
 		if (unlikely(dra->dra_opc == DTX_COMMIT && i == 0 &&
 			     DAOS_FAIL_CHECK(DAOS_DTX_FAIL_COMMIT)))
 			rc = dtx_req_send(drr, 1);
@@ -644,6 +646,7 @@ dtx_rpc_internal(struct dtx_common_args *dca)
 
 	D_ASSERT(length > 0);
 
+	// 发送dtx 的rpc
 	return dtx_req_list_send(dca, dca->dca_epoch, length);
 }
 
@@ -705,6 +708,7 @@ dtx_rpc_prep(struct ds_cont_child *cont,d_list_t *dti_list,  struct dtx_entry **
 	}
 
 	/* Use helper ULT to handle DTX RPC if there are enough helper XS. */
+	// 如果有额外的helper xs，使用ult 来处理dtx rpc
 	if (dss_has_enough_helper())
 		rc = dss_ult_create(dtx_rpc_helper, dca, DSS_XS_IOFW, dca->dca_tgtid,
 				    DSS_DEEP_STACK_SZ, &dca->dca_helper);
@@ -724,11 +728,13 @@ dtx_rpc_post(struct dtx_common_args *dca, int ret, bool keep_head)
 	if (dca->dca_helper != ABT_THREAD_NULL)
 		ABT_thread_free(&dca->dca_helper);
 
+	// dtx 的args
 	rc = dtx_req_wait(&dca->dca_dra);
 
 	if (daos_handle_is_valid(dca->dca_tree_hdl))
 		dbtree_destroy(dca->dca_tree_hdl, NULL);
 
+	// keep_head == false
 	if (!keep_head) {
 		while ((drr = d_list_pop_entry(&dca->dca_head, struct dtx_req_rec,
 					       drr_link)) != NULL)
@@ -752,6 +758,7 @@ dtx_rpc_post(struct dtx_common_args *dca, int ret, bool keep_head)
  * as one target has committed, then the DTX logic can re-sync those failed
  * targets when dtx_resync() is triggered next time.
  */
+// 全局提交给定的dtx 数组
 int
 dtx_commit(struct ds_cont_child *cont, struct dtx_entry **dtes,
 	   struct dtx_cos_key *dcks, int count)
@@ -764,6 +771,8 @@ dtx_commit(struct ds_cont_child *cont, struct dtx_entry **dtes,
 	int			 rc1 = 0;
 	int			 i;
 
+	// 发送dtx 的rpc 请求给参与者
+	// todo； 这个是2pc 中的p 吗？
 	rc = dtx_rpc_prep(cont, NULL, dtes, count, DTX_COMMIT, 0, NULL, NULL, NULL, &dca);
 
 	/*
@@ -777,6 +786,10 @@ dtx_commit(struct ds_cont_child *cont, struct dtx_entry **dtes,
 	 *
 	 * Some RPC may has been sent, so need to wait even if dtx_rpc_prep hit failure.
 	 */
+	// 在提交该dtx 到远程参与者之前，不能本地移除active 状态的dtx。否则，在远程参与者提交之前
+	// 本地已提交的dtx 记录将通过dtx agg被移除。在这种情况时，如果一些远程dtx 这样...会那样...
+	// 所以我们让远程参与者先提交，如果失败了就让leader 重试直到成功
+	// dtx_rpc_post 这个函数是等待远程的参与者提交完成
 	rc = dtx_rpc_post(&dca, rc, false);
 	if (rc > 0 || rc == -DER_NONEXIST || rc == -DER_EXCLUDED)
 		rc = 0;
@@ -801,6 +814,7 @@ dtx_commit(struct ds_cont_child *cont, struct dtx_entry **dtes,
 			}
 		}
 
+		// 向远程参与者发送完提交rpc 并等待远程提交完成后，开始进行本地提交
 		rc1 = vos_dtx_commit(cont->sc_hdl, dca.dca_dtis, count, rm_cos);
 		if (rc1 > 0) {
 			dra->dra_committed += rc1;

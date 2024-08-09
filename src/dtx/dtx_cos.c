@@ -321,6 +321,7 @@ dtx_fetch_committable(struct ds_cont_child *cont, uint32_t max_cnt,
 	return i;
 }
 
+// 从dbtree 中获取以oid 和dkey_hash 为key 的cos 列表
 int
 dtx_list_cos(struct ds_cont_child *cont, daos_unit_oid_t *oid,
 	     uint64_t dkey_hash, int max, struct dtx_id **dtis)
@@ -347,6 +348,7 @@ dtx_list_cos(struct ds_cont_child *cont, daos_unit_oid_t *oid,
 	if (rc != 0)
 		return rc == -DER_NONEXIST ? 0 : rc;
 
+	// 获取查到的cos 数组
 	dcr = (struct dtx_cos_rec *)riov.iov_buf;
 	if (dcr->dcr_prio_count == 0)
 		return 0;
@@ -381,6 +383,7 @@ dtx_list_cos(struct ds_cont_child *cont, daos_unit_oid_t *oid,
 	return count;
 }
 
+// 添加以oid & dkey_hash 作为key 的cos item 到dbtree
 int
 dtx_add_cos(struct ds_cont_child *cont, struct dtx_entry *dte,
 	    daos_unit_oid_t *oid, uint64_t dkey_hash,
