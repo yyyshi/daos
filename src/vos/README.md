@@ -868,12 +868,8 @@ is also 'prepared', then for transactional read, ask the client to wait and
 retry via returning -DER_INPROGRESS; for non-transactional read, related entry
 is ignored and the latest committed modification is returned to the client.
 
-当引用程序想要从一个object 读取数据，这个object 分布式在多个副本上。client 将发送rpc 给任意的replica节点
-。服务端收到rpc 后如果相关的dtx 是committed 或者committable，那么返回要查询的记录。1. 如果这个dtx 状态为 prepared，
-并且这个replica 不是leader，将回复给client 重新请求leader 节点读取数据。2. 如果当前replica是leader并且状态为committed 
-或者committable，那么这些记录将对应用程序可见。3. 如果是leader 上的dtx 并且处于prepared 状态，a. 如果是事务读，
-将回复client 一个特殊的错误码 DER_INPROGRESS 请求客户端等待并重试。b. 如果非事务读，相关的记录将被忽略，最新的已提交修改
-将被回复给client。
+当应用程序想要从一个object 读取数据，这个object 分布式在多个副本上。client 将发送rpc 给任意的replica节点
+。服务端收到rpc 后如果相关的dtx 是committed 或者committable，那么返回要查询的记录。1. 如果这个dtx 状态为 prepared，并且这个replica 不是leader，将回复给client 重新请求leader 节点读取数据。2. 如果当前replica是leader并且状态为committed 或者committable，那么这些记录将对应用程序可见。3. 如果是leader 上的dtx 并且处于prepared 状态，a. 如果是事务读，将回复client 一个特殊的错误码 DER_INPROGRESS 请求客户端等待并重试。b. 如果非事务读，相关的记录将被忽略，最新的已提交修改将被回复给client。
 
 todo: EC 场景
 If the read operation refers to an EC object and the data read from a data

@@ -136,6 +136,7 @@ dtx_inprogress(struct vos_dtx_act_ent *dae, struct dtx_handle *dth,
 		return -DER_NOMEM;
 	}
 
+	// 根据查询到的dae，构建dsp 并插入到待check 列表中
 	dsp->dsp_xid = DAE_XID(dae);
 	dsp->dsp_oid = DAE_OID(dae);
 	dsp->dsp_epoch = DAE_EPOCH(dae);
@@ -160,8 +161,9 @@ dtx_inprogress(struct vos_dtx_act_ent *dae, struct dtx_handle *dth,
 	dsp->dsp_inline_mbs = 1;
 	dsp->dsp_mbs = mbs;
 
+	// 将 dsp->dsp_link 添加到 dth->dth_share_tbd_list 末尾
 	d_list_add_tail(&dsp->dsp_link, &dth->dth_share_tbd_list);
-	// dtx 需要刷新
+	// dtx 待检查列表中 item + 1
 	dth->dth_share_tbd_count++;
 
 out:
@@ -752,6 +754,8 @@ dtx_rec_release(struct vos_container *cont, struct vos_dtx_act_ent *dae,
 	return rc;
 }
 
+// 输入 vos_cont，dtx cos list，count，epoch = 0
+// 输出 committed entry 和active entry
 static int
 vos_dtx_commit_one(struct vos_container *cont, struct dtx_id *dti, daos_epoch_t epoch,
 		   daos_epoch_t cmt_time, struct vos_dtx_cmt_ent **dce_p,
@@ -769,25 +773,33 @@ vos_dtx_commit_one(struct vos_container *cont, struct dtx_id *dti, daos_epoch_t 
 	 * modification done. Under such case, the caller exactly knows the
 	 * @epoch and no need to lookup the active DTX table.
 	 */
+	// 对于单副本对象，我们在本地修改完成后触发提交。这种场景下，调用者准确的知道epoch 不需要去active dtx 表中查询
+	// todo: 那 epoch == 0 是什么场景（写死的，epoch 都是 0）
 	if (epoch == 0) {
 		d_iov_set(&riov, NULL, 0);
+		// 1. 从active 列表对应的tree 中删除对应的dtx
 		rc = dbtree_lookup(cont->vc_dtx_active_hdl, &kiov, &riov);
 		if (rc == -DER_NONEXIST) {
+			// 如果active 中没，从commit 中查询
 			rc = dbtree_lookup(cont->vc_dtx_committed_hdl,
 					   &kiov, &riov);
 			if (rc == 0) {
 				dce = (struct vos_dtx_cmt_ent *)riov.iov_buf;
 				if (dce->dce_invalid)
+					// active 和commit 中都不存在这个dtx
 					rc = -DER_NONEXIST;
 				else
+					// 已经提交过了
 					rc = -DER_ALREADY;
 				dce = NULL;
 			}
 		}
 
+		// 1. active 和commit 中都没查到 | 2. active 中没有查到但是在commit 中查到，直接返回
 		if (rc != 0)
 			goto out;
 
+		// 如果在active tree中查到了对应的dtx，将数据返回到dae 中
 		dae = riov.iov_buf;
 		D_ASSERT(dae->dae_preparing == 0);
 
@@ -800,6 +812,7 @@ vos_dtx_commit_one(struct vos_container *cont, struct dtx_id *dti, daos_epoch_t 
 		/* It has been committed before, but failed to be removed
 		 * from the active table, just remove it again.
 		 */
+		// 如果已经被提交过了，但是没有从active 中被删除，直接再删除然后go out
 		if (unlikely(dae->dae_committed)) {
 			rc = dbtree_delete(cont->vc_dtx_active_hdl,
 					   BTR_PROBE_BYPASS, &kiov, &dae);
@@ -814,6 +827,8 @@ vos_dtx_commit_one(struct vos_container *cont, struct dtx_id *dti, daos_epoch_t 
 		/* Another ULT is committing the DTX, but yield, then regard it as 'committed'.
 		 * The former committing ULT will guarantee the DTX to be committed successfully.
 		 */
+		// 如果另外一个ult 正在提交这个dtx 但是yield 状态，认为是 committed 状态
+		// 前一个ult 将会保证这个dtx 能成功的被提交
 		if (dae->dae_committing)
 			D_GOTO(out, rc = -DER_ALREADY);
 	}
@@ -841,15 +856,18 @@ vos_dtx_commit_one(struct vos_container *cont, struct dtx_id *dti, daos_epoch_t 
 		DCE_EPOCH(dce) = dth->dth_epoch;
 	}
 
+	// 2. 上边从active tree 中删除后，再将这个dtx 插入到已提交列表对应的tree 中
 	d_iov_set(&riov, dce, sizeof(*dce));
 	rc = dbtree_upsert(cont->vc_dtx_committed_hdl, BTR_PROBE_EQ,
 			   DAOS_INTENT_UPDATE, &kiov, &riov, NULL);
 	if (rc != 0)
 		goto out;
 
+	// 返回提交成功的dtx，即成功添加到commit tree 中的dtx
 	*dce_p = dce;
 	dce = NULL;
 
+	// 设置commit 状态为 true
 	dae->dae_committing = 1;
 
 	if (epoch != 0)
@@ -857,11 +875,13 @@ vos_dtx_commit_one(struct vos_container *cont, struct dtx_id *dti, daos_epoch_t 
 
 	rc = dtx_rec_release(cont, dae, false);
 	if (rc != 0) {
+		// 释放资源失败，设置fatal 为true
 		*fatal = true;
 		goto out;
 	}
 
 	D_ASSERT(dae_p != NULL);
+	// 返回从active 中删除成功的dtx
 	*dae_p = dae;
 
 out:
@@ -1012,6 +1032,7 @@ vos_dtx_alloc(struct vos_dtx_blob_df *dbd, struct dtx_handle *dth)
 
 	d_iov_set(&kiov, &DAE_XID(dae), sizeof(DAE_XID(dae)));
 	d_iov_set(&riov, dae, sizeof(*dae));
+	// 添加到active tree 中
 	rc = dbtree_upsert(cont->vc_dtx_active_hdl, BTR_PROBE_EQ,
 			   DAOS_INTENT_UPDATE, &kiov, &riov, NULL);
 	if (rc == 0) {
@@ -1025,15 +1046,19 @@ vos_dtx_alloc(struct vos_dtx_blob_df *dbd, struct dtx_handle *dth)
 	return rc;
 }
 
+// todo: record 是个什么东西，append 是添加到了哪里
 static int
 vos_dtx_append(struct dtx_handle *dth, umem_off_t record, uint32_t type)
 {
+	// 获取dtx 下的entrys
 	struct vos_dtx_act_ent		*dae = dth->dth_ent;
 	umem_off_t			*rec;
 
 	D_ASSERT(dae != NULL);
 
+	// 如果当前entry 个数小于内置个数 = 4
 	if (DAE_REC_CNT(dae) < DTX_INLINE_REC_CNT) {
+		// 获取最后一个item
 		rec = &DAE_REC_INLINE(dae)[DAE_REC_CNT(dae)];
 	} else {
 		if (DAE_REC_CNT(dae) >= dae->dae_rec_cap + DTX_INLINE_REC_CNT) {
@@ -1061,10 +1086,12 @@ vos_dtx_append(struct dtx_handle *dth, umem_off_t record, uint32_t type)
 		rec = &dae->dae_records[DAE_REC_CNT(dae) - DTX_INLINE_REC_CNT];
 	}
 
+	// 赋值为record
 	*rec = record;
 	dtx_type2umoff_flag(rec, type);
 
 	/* The rec_cnt on-disk value will be refreshed via vos_dtx_prepared() */
+	// 个数自增
 	DAE_REC_CNT(dae)++;
 
 	return 0;
@@ -1105,6 +1132,7 @@ vos_dtx_status(struct vos_dtx_act_ent *dae)
  * remove) operations, ALB_UNAVAILABLE should never be returned for the
  * DAOS_INTENT_PURGE.
  */
+// 进到 dtx_inprogress
 int
 vos_dtx_check_availability(daos_handle_t coh, uint32_t entry,
 			   daos_epoch_t epoch, uint32_t intent, uint32_t type, bool retry)
@@ -1152,6 +1180,8 @@ vos_dtx_check_availability(daos_handle_t coh, uint32_t entry,
 
 	D_ASSERTF(epoch != 0, "Invalid epoch for DTX (lid: %x) availability check\n", entry);
 
+	// 根据key（key == epoch） 查询lru array（cont 中活跃的dtx） 中的记录
+	// todo: 活跃的dtx 是怎么定义的，有什么特点
 	found = lrua_lookupx(cont->vc_dtx_array, (entry & DTX_LID_SOLO_MASK) - DTX_LID_RESERVED,
 			     epoch, &dae);
 	if (!found) {
@@ -1424,10 +1454,14 @@ vos_dtx_validation(struct dtx_handle *dth)
 }
 
 /* The caller has started local transaction. */
+// todo: 本地事务和分布式事务的区别的实现原理，和关联
+// todo: 本地事务由pmdk 提供？分布式事务由2pc 实现？
+// 此函数目的是将ilog 的root 添加到dth 上
 int
 vos_dtx_register_record(struct umem_instance *umm, umem_off_t record,
 			uint32_t type, uint32_t *tx_id)
 {
+	// 获取对应的dth
 	struct dtx_handle	*dth = vos_dth_get(umm->umm_pool->up_store.store_standalone);
 	struct vos_dtx_act_ent	*dae;
 	int			 rc = 0;
@@ -1473,30 +1507,38 @@ vos_dtx_register_record(struct umem_instance *umm, umem_off_t record,
 		}
 	}
 
+	// 根据dth 获取entrys
 	dae = dth->dth_ent;
+	// 在这之前必须要执行过 vos_dtx_attach
 	/* There must has been vos_dtx_attach() before vos_dtx_register_record(). */
 	D_ASSERT(dae != NULL);
 
 	/* For single participator case, we only hold DTX entry
 	 * for handling resend case, not trace modified target.
 	 */
+	// 如果当前dtx 只有一个参与者，设置该dtx 为 active 后直接返回
 	if (dth->dth_solo) {
 		dth->dth_active = 1;
 		*tx_id = DAE_LID(dae);
 		return 0;
 	}
 
+	// 如果当前dtx 是多参与者且当前dtx 不在active tree 中
 	if (!dth->dth_active) {
 		struct vos_container	*cont;
 		struct vos_cont_df	*cont_df;
 		struct vos_dtx_blob_df	*dbd;
 
+		// 根据dtx 的hdl 获取vos cont
 		cont = vos_hdl2cont(dth->dth_coh);
 		D_ASSERT(cont != NULL);
 
+		// cont 在pmem中地址
 		umm = vos_cont2umm(cont);
 		cont_df = cont->vc_cont_df;
 
+		// blob 地址
+		// todo: 下面是干啥了
 		dbd = umem_off2ptr(umm, cont_df->cd_dtx_active_tail);
 		if (dbd == NULL || dbd->dbd_index >= dbd->dbd_cap) {
 			rc = vos_dtx_extend_act_table(cont);
@@ -1515,6 +1557,8 @@ vos_dtx_register_record(struct umem_instance *umm, umem_off_t record,
 		dth->dth_active = 1;
 	}
 
+	// 如果已经在active tree 中了，append dtx
+	// record 就是ilog 的root 的地址，这里是把这个root 加到dth 的entrys 中
 	rc = vos_dtx_append(dth, record, type);
 	if (rc == 0) {
 		/* Incarnation log entry implies a share */
@@ -1951,6 +1995,8 @@ vos_dtx_commit_internal(struct vos_container *cont, struct dtx_id dtis[],
 	bool				 fatal = false;
 	bool				 allocated = false;
 
+	// 获取已提交的dtx 的tail
+	// todo: 这东西不是存储在 nvram 中的么，为啥是blob
 	dbd = umem_off2ptr(umm, cont_df->cd_dtx_committed_tail);
 	if (dbd == NULL)
 		goto new_blob;
@@ -1966,20 +2012,26 @@ vos_dtx_commit_internal(struct vos_container *cont, struct dtx_id dtis[],
 		goto new_blob;
 
 again:
+	// 遍历blob 中保存的dtx
 	for (j = dbd->dbd_count; i < count && j < dbd->dbd_cap && rc1 == 0;
 	     i++, cur++) {
 		struct vos_dtx_cmt_ent	*dce = NULL;
 
+		// 循环，每次处理一个dtx
+		// 输入：dtis 为cos list，epoch 为 0，rm_cos 为NULL
+		// 输出：返回dce 和daes[cur]，分别是从active 中成功删除的dtx 和成功添加到commit 中的dtx 
 		rc = vos_dtx_commit_one(cont, &dtis[cur], epoch, cmt_time, &dce,
 					daes != NULL ? &daes[cur] : NULL,
 					rm_cos != NULL ? &rm_cos[cur] : NULL, &fatal);
 		if (dces != NULL)
 			dces[cur] = dce;
 
+		// 资源释放失败，直接 go out
 		if (fatal)
 			goto out;
 
 		if (rc == 0 && (daes == NULL || daes[cur] != NULL))
+			// 标记已提交的dtx
 			committed++;
 
 		if (rc == -DER_ALREADY || rc == -DER_NONEXIST)
@@ -1988,6 +2040,7 @@ again:
 		if (rc1 == 0)
 			rc1 = rc;
 
+		// 如果从active 中成功删除该dtx，那么添加到已提交list 中
 		if (dce != NULL) {
 			rc = umem_tx_xadd_ptr(umm, &dbd->dbd_committed_data[j],
 					      sizeof(struct vos_dtx_cmt_ent_df),
@@ -2010,6 +2063,7 @@ again:
 
 	dbd->dbd_count = j;
 
+	// 如果所有的dtx 都遍历处理完成，go out
 	if (i == count || rc1 != 0)
 		goto out;
 
@@ -2064,6 +2118,8 @@ new_blob:
 	goto again;
 
 out:
+	// 1. 如果释放资源失败，返回rc
+	// 2. 如果释放资源成，返回提交成功的dtx 个数
 	return fatal ? rc : (committed > 0 ? committed : rc1);
 }
 
@@ -2180,13 +2236,17 @@ vos_dtx_commit(daos_handle_t coh, struct dtx_id dtis[], int count, bool rm_cos[]
 	D_ASSERT(cont != NULL);
 
 	/* Commit multiple DTXs via single local transaction. */
+	// 通过单个本地事务提交多个dtx
 	rc = umem_tx_begin(vos_cont2umm(cont), NULL);
 	if (rc == 0) {
+		// todo: 这函数做了啥
 		committed = vos_dtx_commit_internal(cont, dtis, count, 0, rm_cos, daes, dces);
 		if (committed >= 0) {
+			// 开始提交
 			rc = umem_tx_commit(vos_cont2umm(cont));
 			D_ASSERT(rc == 0);
 		} else {
+			// 取消提交
 			rc = umem_tx_abort(vos_cont2umm(cont), committed);
 		}
 		vos_dtx_post_handle(cont, daes, dces, count, false, rc != 0);
@@ -2959,6 +3019,7 @@ vos_dtx_cleanup(struct dtx_handle *dth, bool unpin)
 	vos_tx_end(cont, dth, NULL, NULL, true /* don't care */, NULL, -DER_CANCELED);
 }
 
+// 会将dtx 添加到active 列表对应的tree 中
 int
 vos_dtx_attach(struct dtx_handle *dth, bool persistent, bool exist)
 {
@@ -3022,6 +3083,7 @@ vos_dtx_attach(struct dtx_handle *dth, bool persistent, bool exist)
 	}
 
 	if (dth->dth_ent == NULL) {
+		// 会添加dtx 到active 列表对应的tree 中
 		rc = vos_dtx_alloc(dbd, dth);
 	} else if (persistent) {
 		D_ASSERT(dbd != NULL);

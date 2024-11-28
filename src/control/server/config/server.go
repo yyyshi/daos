@@ -802,6 +802,7 @@ func (cfg *Server) validateMultiEngineConfig(log logging.Logger) error {
 			seenScmClsIdx = idx
 		}
 
+		// 获取当前rank 中配置的bdev list
 		bdevs := engine.Storage.GetBdevs()
 		bdevCount := bdevs.Len()
 		for _, dev := range bdevs.Devices() {

@@ -250,6 +250,7 @@ dc_obj_update_task_create(daos_handle_t oh, daos_handle_t th, uint64_t flags,
 
 	DAOS_API_ARG_ASSERT(*args, OBJ_UPDATE);
 	// 创建obj update 任务
+	// 调度这个task 就是执行这个函数：dc_obj_update_task
 	rc = dc_task_create(dc_obj_update_task, tse, ev, task);
 	if (rc)
 		return rc;

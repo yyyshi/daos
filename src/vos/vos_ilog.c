@@ -70,6 +70,7 @@ static int
 vos_ilog_add(struct umem_instance *umm, umem_off_t ilog_off, uint32_t *tx_id,
 	     daos_epoch_t epoch, void *args)
 {
+	// 注册 tx record
 	return vos_dtx_register_record(umm, ilog_off, DTX_RT_ILOG, tx_id);
 }
 
@@ -281,6 +282,7 @@ vos_ilog_fetch_internal(struct umem_instance *umm, daos_handle_t coh, uint32_t i
 		return rc;
 	}
 
+	// todo: 这里有问题，如果fetch 成功，不应该再执行init 了吧
 init:
 	info->ii_uncommitted = 0;
 	info->ii_create = 0;
@@ -380,6 +382,7 @@ vos_ilog_update_check(struct vos_ilog_info *info, const daos_epoch_range_t *epr)
 	return 0;
 }
 
+// epr 是客户端传递来的epoch 范围，bound 是 '向上取整' 后的结果
 int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 		     const daos_epoch_range_t *epr, daos_epoch_t bound,
 		     struct vos_ilog_info *parent, struct vos_ilog_info *info,
@@ -387,12 +390,15 @@ int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 {
 	// ilog 的更新是要事务保证的
 	struct dtx_handle	*dth = vos_dth_get(cont->vc_pool->vp_sysdb);
+	// 上游传递epoch range 过来，也会透传下去
+	// max_epr 通过上游传递来epoch range修改后一起和原来的epoch range 透传下去
 	daos_epoch_range_t	 max_epr = *epr;
 	struct ilog_desc_cbs	 cbs;
 	daos_handle_t		 loh;
 	bool			 has_cond;
 	int			 rc;
 
+	// todo: 这里怎么判断是否为空
 	if (parent != NULL) {
 		D_ASSERT(parent->ii_prior_any_punch.pr_epc >=
 			 parent->ii_prior_punch.pr_epc);
@@ -425,7 +431,7 @@ int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 		goto done;
 	}
 
-	// ilog 已经存在了，直接goto gone
+	// ilog 已经存在了，直接goto done
 	rc = vos_ilog_update_check(info, &max_epr);
 	if (rc == 0) {
 		// 有更新punch，cond = VOS_ILOG_COND_UPDATE
@@ -439,7 +445,7 @@ int vos_ilog_update_(struct vos_container *cont, struct ilog_df *ilog,
 		return rc;
 	}
 
-	// nonexist 会到这里
+	// 如果当前还不存在对应的ilog，返回错误码 nonexist 会到这里
 	// 1. goto update 跳到这里
 	// 2. update_check 执行后默认走到这里
 update:
@@ -461,7 +467,9 @@ update:
 	}
 
 	// ilog 还没存在，需要update
-	// todo: 更新了什么信息进去
+	// epr_hi 是客户端传递来的epoch range
+	// todo: max epr 在原基础上做了哪些修改
+	// dth_op_seq 为分布式事务中的修改序列号
 	rc = ilog_update(loh, &max_epr, epr->epr_hi, dtx_is_valid_handle(dth) ?
 			 dth->dth_op_seq : VOS_SUB_OP_MAX, false);
 
@@ -633,6 +641,7 @@ void
 vos_ilog_fetch_init(struct vos_ilog_info *info)
 {
 	memset(info, 0, sizeof(*info));
+	// 初始化ilog 的entry
 	ilog_fetch_init(&info->ii_entries);
 }
 

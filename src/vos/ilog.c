@@ -31,9 +31,8 @@ enum {
  *  is embedded into the root df struct.   If not, a b+tree is used.
  *  The tree is used more like a set where only the key is used.
  */
-
-// todo: 啥意思，啥时候是root df，啥时候是b+ 树
-// ilog 是干啥用的
+// ilog 被拆分成两部分。如果只有一个entry，ilog 被放到root df 中。否则的话使用b+ 树。
+// 这个tree 看起来更像是一个set 结构，因为只有key 被使用
 struct ilog_tree {
 	umem_off_t	it_root;
 	uint64_t	it_embedded;
@@ -59,9 +58,12 @@ struct ilog_array_cache {
 	uint32_t		 ac_nr;
 };
 
+// ilog 树根
 struct ilog_root {
 	union {
+		// 1. 这个是单条entry 场景下，保存的entry 记录
 		struct ilog_id		lr_id;
+		// 2. 这个就是多条entry 情况下，保存多条 entry 的b+ 树结构
 		struct ilog_tree	lr_tree;
 	};
 	uint32_t			lr_ts_idx;
@@ -149,7 +151,9 @@ ilog_log_add(struct ilog_context *lctx, struct ilog_id *id)
 
 	D_ASSERT(id->id_epoch != 0);
 
-	// == vos_ilog_add
+	// == vos_ilog_add，内部调用 vos_dtx_register_record
+	// 调用cb 函数，添加ilog id
+	// 传入umm 地址，umm off，tx id，epoch，args
 	rc = cbs->dc_log_add_cb(lctx->ic_umm, lctx->ic_root_off, &id->id_tx_id, id->id_epoch,
 				cbs->dc_log_add_args);
 	if (rc != 0) {
@@ -337,6 +341,7 @@ ilog_hdl2lctx(daos_handle_t hdl)
 	if (daos_handle_is_inval(hdl))
 		return NULL;
 
+	// todo: 从cookie 中获得ctx 信息是什么操作
 	lctx = (struct ilog_context *)hdl.cookie;
 
 	if (!ILOG_MAGIC_VALID(lctx->ic_root->lr_magic))
@@ -351,6 +356,7 @@ ilog_ptr_set_full(struct ilog_context *lctx, void *dest, const void *src,
 {
 	int	rc = 0;
 
+	// ilog 事务相关
 	rc = ilog_tx_begin(lctx);
 	if (rc != 0) {
 		D_ERROR("Failed to start PMDK transaction: " DF_RC "\n", DP_RC(rc));
@@ -444,16 +450,21 @@ ilog_log2cache(struct ilog_context *lctx, struct ilog_array_cache *cache)
 {
 	struct ilog_array	*array;
 
+	// 1. ilog 为空
 	if (ilog_empty(lctx->ic_root)) {
 		cache->ac_entries = NULL;
 		cache->ac_array = NULL;
 		cache->ac_nr = 0;
 	} else if (!lctx->ic_root->lr_tree.it_embedded) {
+		// 2. ilog entry 为多条，entry 都保存在b+树中
+		// todo: 这里的entry 数据量会不会超级多
 		array             = umem_off2ptr(lctx->ic_umm, lctx->ic_root->lr_tree.it_root);
+		// 上面从b+ 树中获取到ilog entrys，这里将获取到的entry 填充到 cache 中
 		cache->ac_array = array;
 		cache->ac_entries = &array->ia_id[0];
 		cache->ac_nr = array->ia_len;
 	} else {
+		// 3. ilog entry 为一条，不保存在b+ 树中
 		cache->ac_entries = &lctx->ic_root->lr_id;
 		cache->ac_nr = 1;
 		cache->ac_array = NULL;
@@ -527,6 +538,7 @@ ilog_root_migrate(struct ilog_context *lctx, const struct ilog_id *id_in)
 	int			 rc = 0;
 	int			 idx;
 
+	// 再拿到tree root
 	root = lctx->ic_root;
 
 	rc = ilog_tx_begin(lctx);
@@ -535,38 +547,49 @@ ilog_root_migrate(struct ilog_context *lctx, const struct ilog_id *id_in)
 		return rc;
 	}
 
+	// 获取pmem 地址
 	tree_root = umem_zalloc(lctx->ic_umm, ILOG_ARRAY_CHUNK_SIZE);
 
 	if (tree_root == UMOFF_NULL)
 		return lctx->ic_umm->umm_nospc_rc;
 
+	// 获取root 对应的保存entry 的array
 	array = umem_off2ptr(lctx->ic_umm, tree_root);
 
 	lctx->ic_ver_inc = true;
 
+	// 谁大谁在array 前头
 	if (root->lr_id.id_epoch > id_in->id_epoch)
 		idx = 1;
 	else
 		idx = 0;
 
+	// 先保存小的到array
 	array->ia_id[idx].id_value = root->lr_id.id_value;
 	array->ia_id[idx].id_epoch = root->lr_id.id_epoch;
 
+	// 再保存大得到到array
 	idx = 1 - idx;
 	array->ia_id[idx].id_value = id_in->id_value;
 	array->ia_id[idx].id_epoch = id_in->id_epoch;
+	// 更新size 为 2，即此时保存了2条记录
 	array->ia_len = 2;
 	array->ia_max_len = ILOG_ARRAY_INIT_NR;
 
+	// 22-2. append 新的记录（注册 record）
 	rc = ilog_log_add(lctx, &array->ia_id[idx]);
 	if (rc != 0)
 		return rc;
 
+	// 更新tree 信息
 	tmp.lr_tree.it_root = tree_root;
+	// 此时entry length 为2，设置flag 为 false
 	tmp.lr_tree.it_embedded = 0;
+	// 递增版本
 	tmp.lr_magic = ilog_ver_inc(lctx);
 	tmp.lr_ts_idx = root->lr_ts_idx;
 
+	// 22-3. 树根信息有变化，需要再次更新tree root信息
 	return ilog_ptr_set(lctx, root, &tmp);
 }
 
@@ -578,10 +601,12 @@ check_equal(struct ilog_context *lctx, struct ilog_id *id_out, const struct ilog
 
 	*is_equal = false;
 
+	// epoch 需要相等
 	if (id_in->id_epoch != id_out->id_epoch)
 		return 0;
 
 	if (update) {
+		// 如果是更新的话，tx 需要相等
 		rc = ilog_is_same_tx(lctx, id_out, is_equal);
 		if (rc != 0)
 			return rc;
@@ -589,11 +614,13 @@ check_equal(struct ilog_context *lctx, struct ilog_id *id_out, const struct ilog
 		*is_equal = true;
 	}
 
+	// 1. 如果epoch 和tx 都相等，那么直接返回，is_equal == true
 	if (!*is_equal) {
 		if (!update) {
 			D_DEBUG(DB_IO, "No entry found, done\n");
 			return 0;
 		}
+		// 2. 如果epoch 相等 & tx 不相等，先判断id_in 是否已经被提交
 		if (dtx_is_committed(id_in->id_tx_id, ilog_ctx2cont(lctx), id_in->id_epoch)) {
 			/** Need to differentiate between updates that are
 			 * overwrites and others that are conflicts.  Return
@@ -629,13 +656,19 @@ static int
 update_inplace(struct ilog_context *lctx, struct ilog_id *id_out, const struct ilog_id *id_in,
 	       int opc, bool *is_equal)
 {
+	// 构建新的 saved id
 	struct ilog_id	saved_id;
 	int		rc;
 
+	// 如果epoch 和tx 都相同，那么表示相等
 	rc = check_equal(lctx, id_out, id_in, opc == ILOG_OP_UPDATE, is_equal);
+	// 1. 如果明确相等，直接返回了
+	// 2. 如果存在错误，直接返回了
+	// 3. 如果opc == abort，直接返回了
 	if (rc != 0 || !*is_equal || opc == ILOG_OP_ABORT)
 		return rc;
 
+	// 先赋值为 旧id
 	saved_id.id_value = id_out->id_value;
 	if (opc == ILOG_OP_PERSIST) {
 		D_DEBUG(DB_TRACE, "Setting "DF_X64" to persistent\n",
@@ -650,18 +683,21 @@ update_inplace(struct ilog_context *lctx, struct ilog_id *id_out, const struct i
 	if (saved_id.id_update_minor_eph > saved_id.id_punch_minor_eph &&
 	    id_in->id_update_minor_eph)
 		return 0; /** Already an update */
-
+	// 如果新punch id 大，覆盖旧id
 	if (saved_id.id_punch_minor_eph < id_in->id_punch_minor_eph)
 		saved_id.id_punch_minor_eph = id_in->id_punch_minor_eph;
 	else if (saved_id.id_update_minor_eph < id_in->id_update_minor_eph)
+		// 如果新update id 大，覆盖旧id
 		saved_id.id_update_minor_eph = id_in->id_update_minor_eph;
 
+	// 1. 如果要保存的id 和旧的一样，那么不需要重新持久化到pmem，直接结束
 	if (saved_id.id_value == id_out->id_value)
 		return 0; /* Nothing to do */
 
 	/* New operation has a new minor epoch.  Update the old entry
 	 * accordingly.
 	 */
+	// 2. 如果存在更新，将新的id 持久化到pmem
 	D_DEBUG(DB_TRACE, "Updating "DF_X64
 		" lid=%d punch=(%d->%d) update=(%d-%d)\n", id_in->id_epoch,
 		id_out->id_tx_id, id_out->id_punch_minor_eph,
@@ -673,6 +709,8 @@ set_id:
 		D_ERROR("Matching punch/update minor epoch not allowed\n");
 		return -DER_NO_PERM;
 	}
+
+	// 将 id_value 保存到umm，
 	return ilog_ptr_set(lctx, &id_out->id_value, &saved_id.id_value);
 }
 
@@ -743,15 +781,20 @@ remove_entry(struct ilog_context *lctx, struct ilog_array_cache *cache, int i)
 	return ilog_ptr_set(lctx, &array->ia_len, &new_len);
 }
 
+// id 中保存的是客户端传递来的epoch 和分布式事务的修改序列号
+// epr 是上游的max epr
 static int
 ilog_tree_modify(struct ilog_context *lctx, const struct ilog_id *id_in,
 		 const daos_epoch_range_t *epr, int opc)
 {
 	struct ilog_root	*root;
+	// d_in->id_epoch 是客户端传递来的epoch
 	daos_epoch_t		 epoch = id_in->id_epoch;
+	// id 在id_in 基础上修改
 	struct ilog_id		 id = *id_in;
 	struct ilog_id		*id_out;
 	bool			 is_equal;
+	// 初始时认为ilog 是已提交状态
 	int			 visibility = ILOG_COMMITTED;
 	uint32_t		 new_len;
 	size_t			 new_size;
@@ -761,34 +804,55 @@ ilog_tree_modify(struct ilog_context *lctx, const struct ilog_id *id_in,
 	int			 rc = 0;
 	int			 i;
 
+	// 获取b+ 树根
 	root = lctx->ic_root;
 
+	// 从lctx 对应的root 下的b+ 树中获取entry 信息
 	ilog_log2cache(lctx, &cache);
 
+	// 遍历cache 中所有entry 记录，找到比epoch 小的entry
+	// todo: cache 中entry 是按照epoch 排好序的吗
 	for (i = cache.ac_nr - 1; i >= 0; i--) {
+		// 这里是在判断cache 中是否存在比当前epoch 还大的entry
+		// !!! 说明当前操作，只关注比当前epoch 小的ilog entry
 		if (cache.ac_entries[i].id_epoch <= epoch)
 			break;
 	}
 
+	// 从后往前比较，如果最后一个entry 的epoch 都比当前的小，那么所有的entry 的epoch 都会比当前的小，即不存在比当前epoch 大的entry
+
+	// 1. 如果 i < 0，说明cache 中不存在比epoch 小的entry。由于只关注比当前epoch 小的entry，那么直接插入到cache 尾巴上就行
+	// todo：也就是cache 中的entry 都比epoch 大，那么不是应该当前epoch 更新被撤销吗？即已经存在了比epoch 还新的更新
 	if (i < 0) {
+		// 如果不是update 场景，
 		if (opc != ILOG_OP_UPDATE) {
 			D_DEBUG(DB_TRACE, "No entry found, done\n");
 			return 0;
 		}
+		// 如果是第一次添加ilog entry 的话，直接go insert
 		goto insert;
 	}
 
+	// 2. i >= 0，说明cache 中存在entry 的epoch < 当前要update 的entry epoch
+	// 由于关注的是比当前epoch 小的entry，那么用当前entry 替换不关注的entry（插队并替换）
+	// todo: 先把上面打破break 的idx 的entry 取出，这个entry 的epoch > 当前要update 的entry 的epoch
+	// i 可能是cache 中的最后一个元素，也可能是cache 中间的一个元素
+	// 下面修改cache，起始就是修改pmem 中的内存中的数据了
 	id_out = &cache.ac_entries[i];
 
+	// 如果直接不走insert，先设置可见性为非提交状态
 	visibility = ILOG_UNCOMMITTED;
 
+	// 如果满足break 条件的entry 的epoch 介于max epr 之间
 	if (id_out->id_epoch <= epr->epr_hi &&
 	    id_out->id_epoch >= epr->epr_lo) {
+		// 更新可见性，可见性变为 ILOG_UNCOMMITTED
 		visibility = ilog_status_get(lctx, id_out, DAOS_INTENT_UPDATE, true);
 		if (visibility < 0 && visibility != -DER_TX_UNCERTAIN)
 			return visibility;
 	}
 
+	// 到此，可见性为：ILOG_UNCOMMITTED
 	rc = update_inplace(lctx, id_out, id_in, opc, &is_equal);
 	if (rc != 0)
 		return rc;
@@ -805,6 +869,10 @@ ilog_tree_modify(struct ilog_context *lctx, const struct ilog_id *id_in,
 		return 0;
 	}
 
+	// id_in->id_punch_minor_eph == 0
+	// visibility == ILOG_UNCOMMITTED
+	// 最终还是会进到 insert 中
+	// todo: 直接进入到 insert 和最终进入到inset 是什么区别
 	if (id_in->id_punch_minor_eph == 0 && visibility != ILOG_UNCOMMITTED &&
 	    id_out->id_update_minor_eph > id_out->id_punch_minor_eph)
 		return 0;
@@ -813,8 +881,11 @@ insert:
 	if (rc != 0)
 		return rc;
 
+	// 直接复制 id_in 的参数
 	id.id_value = id_in->id_value;
+	// 复制客户端传递来的epoch
 	id.id_epoch = id_in->id_epoch;
+	// 将id 添加到 ilog 中（注册 record）
 	rc = ilog_log_add(lctx, &id);
 	if (rc != 0)
 		return rc;
@@ -823,6 +894,7 @@ insert:
 	D_ASSERT(id.id_update_minor_eph == id_in->id_update_minor_eph);
 
 	/* We want to insert after 'i', so just increment it */
+	// 将新添加的entry append 到cache 的尾巴，即idx 为 i 的位置
 	i++;
 	if (cache.ac_nr == cache.ac_array->ia_max_len) {
 		new_len = (cache.ac_nr + 1) * 2 - 1;
@@ -835,18 +907,21 @@ insert:
 		array             = umem_off2ptr(lctx->ic_umm, new_array);
 		array->ia_len = cache.ac_nr + 1;
 		array->ia_max_len = new_len;
+		// 拷贝i 之前的entry
 		if (i != 0) {
 			/* Copy the entries before i */
 			memcpy(&array->ia_id[0], &cache.ac_array->ia_id[0],
 			       sizeof(array->ia_id[0]) * i);
 		}
 
+		// 拷贝i 之后的entry
 		if (i != cache.ac_nr) {
 			/* Copy the entries after i */
 			memcpy(&array->ia_id[i + 1], &cache.ac_array->ia_id[i],
 			       sizeof(array->ia_id[0]) * (cache.ac_nr - i));
 		}
 
+		// 填充idx = i 的entry，即当前要插入的entry
 		array->ia_id[i].id_value = id.id_value;
 		array->ia_id[i].id_epoch = id.id_epoch;
 
@@ -882,11 +957,16 @@ const char *opc_str[] = {
 	"Abort",
 };
 
+// 传入参数：ilog hdl，ilog id，epoch range，ilog op 类型
+// id_in 中保存了客户端传递的epoch 和分布式事务的修改序列号
+// epr 是上游的max epr
 static int
 ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 	    const daos_epoch_range_t *epr, int opc)
 {
+	// 构建ilog ctx
 	struct ilog_context	*lctx;
+	// 存储ilog 的root，存在两种结构，如果只存在一条entry，不使用b+tree；如果不止存在一条entry，需要保存到b+ 树中
 	struct ilog_root	*root;
 	struct ilog_root	 tmp = {0};
 	int			 rc = 0;
@@ -894,6 +974,7 @@ ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 	uint32_t		 version;
 
 	// 根据hdl 获取lctx
+	// todo: 这个cookie，， 是什么常规的操作
 	lctx = ilog_hdl2lctx(loh);
 	if (lctx == NULL) {
 		D_ERROR("Invalid log handle\n");
@@ -903,7 +984,7 @@ ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 	D_ASSERT(!lctx->ic_in_txn);
 	D_ASSERTF(id_in->id_epoch != 0, "Invalid epoch for ilog opc %d\n", opc);
 
-	// lctx 获取root
+	// lctx 获取root，这个就是ilog 的df，类似obj，dkey，akey的df
 	root = lctx->ic_root;
 
 	version = ilog_mag2ver(root->lr_magic);
@@ -921,7 +1002,10 @@ ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 		}
 	}
 
-	// 如果root 为空
+	// 以下三种场景都是通过 ilog_log_add 来完成最后的ilog entry 添加（entry 注册）
+	// 每种场景下的add 过程都是先 ilog_ptr_set （保存tree root信息到pmem），再 ilog_log_add （保存ilog entry 到tree）
+	// 即先保存树根信息，再添加entry 到树根对应的树中
+	// 如果root 为空，即存储ilog 的tree 为空
 	if (ilog_empty(root)) {
 		if (opc != ILOG_OP_UPDATE) {
 			D_DEBUG(DB_TRACE, "ilog entry "DF_X64" not found\n",
@@ -932,24 +1016,32 @@ ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 		// insert 到ilog tree 的根
 		D_DEBUG(DB_TRACE, "Inserting "DF_X64" at ilog root\n",
 			id_in->id_epoch);
+		// 构建tmp 为树根
 		// 版本增加
 		tmp.lr_magic = ilog_ver_inc(lctx);
 		tmp.lr_ts_idx = root->lr_ts_idx;
+		// 构造好的ilog id 
 		tmp.lr_id = *id_in;
+		// 11-1先保存 tree root，此时只有一条记录，其实不是b+ tree
 		rc = ilog_ptr_set(lctx, root, &tmp);
-		// 新加入
+		// 如果root 构建成功
 		if (rc == 0)
-			// 传进来的id
+			// 1. 如果tree 为空，将新的ilog 添加到tree 作为树根
+			// 11-2. 添加entry 到上面已经保存成功的树根中
 			rc = ilog_log_add(lctx, &root->lr_id);
 	} else if (root->lr_tree.it_embedded) {
+		// 如果当前root 下只有一条entry，那么 it_embedded 为 true
+		// 从代码看，这个值应该是一直为 false
 		bool	is_equal;
 
-		// 如果root 不为空，原地更新，is_equal 是lr_id 和id_in 的比较结果
+		// 2. 如果root 不为空，原地更新（即原地更新当前仅有的一条记录，新记录替换旧记录），is_equal 是lr_id 和id_in 的比较结果
+		// 22-1. 先保存树根信息（如果需要的话）
 		rc = update_inplace(lctx, &root->lr_id, id_in,
 				    opc, &is_equal);
 		if (rc != 0)
 			goto done;
 
+		// 如果新旧记录相同，即不需要实际的持久化数据到pmem，直接go out
 		if (is_equal) {
 			if (opc == ILOG_OP_ABORT) {
 				D_DEBUG(DB_TRACE, "Removing "DF_X64
@@ -977,12 +1069,20 @@ ilog_modify(daos_handle_t loh, const struct ilog_id *id_in,
 		/* Either this entry is earlier or prior entry is uncommitted
 		 * or either entry is a punch
 		 */
+		// todo: ilog 只有一条记录时，再次更新时变成两条记录，所以要转换为 b+树，所以执行这个迁移操作吗
 		rc = ilog_root_migrate(lctx, id_in);
 	} else {
 		/** Ok, we have a tree.  Do the operation in the tree */
+		// 3. 如果不是1，2场景，即root 不为空，且记录不止一条，即存储ilog 的是b+树结构，那么直接修改ilog tree 中对应的key
+		// 输入：构建的lctx，id，epoch range，op 类型
+		// epoch range 和op 都是上游传递来的
+		// id 保存了客户端传递的epoch 和分布式事务修改序列号
+		// epr 是上游传递来的max epr
+		// 33-1. 这种情况树根信息不需要更新，直接添加entry 到b+ 树
 		rc = ilog_tree_modify(lctx, id_in, epr, opc);
 	}
 done:
+	// 结束ilog 事务
 	rc = ilog_tx_end(lctx, rc);
 	D_DEBUG(DB_TRACE,
 		"%s in incarnation log " DF_X64 " status: rc=" DF_RC " tree_version: %d\n",
@@ -994,18 +1094,29 @@ done:
 		 *  invoke the callback, if applicable but without
 		 *  deregistration
 		 */
+		// todo: 如果op 类型是持久化或者撤销
 		ilog_log_del(lctx, id_in, false);
 	}
+
+	// 返回update 结果
 	return rc;
 }
 
+// ilog 更新，传入ilog hdl，最大epoch，epoch 1，epoch 2，false
+// minor_eph 最终会传递给ilog_id
+// epr 是上游的max epr
+// major 是客户端传递来的epoch
+// minor 是分布式事务的修改序列号
 int
 ilog_update(daos_handle_t loh, const daos_epoch_range_t *epr,
 	    daos_epoch_t major_eph, uint16_t minor_eph, bool punch)
 {
 	daos_epoch_range_t	 range = {0, DAOS_EPOCH_MAX};
+	// 构建ilog id，主要是 epoch range
+	// 这个id 最终要传递给保存ilog 信息的root 中的b+树中，类似一个set 结构
 	struct ilog_id		 id = {
 		.id_tx_id = 0,
+		// 1. 这是客户端传递来的epoch
 		.id_epoch = major_eph,
 	};
 
@@ -1016,10 +1127,11 @@ ilog_update(daos_handle_t loh, const daos_epoch_range_t *epr,
 		id.id_punch_minor_eph = minor_eph;
 		id.id_update_minor_eph = 0;
 	} else {
-		// 走这里
+		// 走这里，最终存储到ilog b+树结构中
 		// punch 小epoch 为0
 		id.id_punch_minor_eph = 0;
 		// update 小epoch 为 minor_eph
+		// 2. 这是分布式事务的修改序列号
 		id.id_update_minor_eph = minor_eph;
 	}
 
@@ -1027,7 +1139,8 @@ ilog_update(daos_handle_t loh, const daos_epoch_range_t *epr,
 		range = *epr;
 
 	// 更新ilog
-	// 传入 ilog 的hdl，id 和range
+	// 传入 ilog 的hdl，id，range，和op 类型，range 直接使用上游传递的max epr
+	// id 保存的是客户端传递来的epoch 和分布式事务的修改序列号
 	return ilog_modify(loh, &id, &range, ILOG_OP_UPDATE);
 
 }
@@ -1240,9 +1353,12 @@ ilog_fetch(struct umem_instance *umm, struct ilog_df *root_df,
 			priv->ip_log_version = ILOG_MAGIC;
 			return rc;
 		}
+
+		// 这里是 cache hit 场景，直接返回 0
 		return 0;
 	}
 
+	// 这里是cache miss 场景，创建并添加到cache
 	// 获取lctx
 	lctx = &priv->ip_lctx;
 	if (ilog_empty(root))

@@ -115,6 +115,7 @@ ds_obj_remote_update(struct dtx_leader_handle *dlh, void *data, int idx,
 	crt_req_addref(parent_req);
 	remote_arg->parent_req = parent_req;
 
+	// 构建转发请求 rpc
 	rc = obj_req_create(dss_get_module_info()->dmi_ctx, &tgt_ep,
 			    DAOS_OBJ_RPC_TGT_UPDATE, &req);
 	if (rc != 0) {

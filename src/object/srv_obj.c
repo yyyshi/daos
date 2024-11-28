@@ -78,6 +78,7 @@ obj_gen_dtx_mbs(uint32_t flags, uint32_t *tgt_cnt, struct daos_shard_tgt **p_tgt
 	if (mbs == NULL)
 		return -DER_NOMEM;
 
+	// 状态为非 ignore 的rank 所拥有的target 都将作为members 的target
 	for (i = 0, j = 0; i < *tgt_cnt; i++) {
 		if (tgts[i].st_rank == DAOS_TGT_IGNORE)
 			continue;
@@ -125,21 +126,26 @@ obj_rw_complete(crt_rpc_t *rpc, struct obj_io_context *ioc,
 	if (daos_handle_is_valid(ioh)) {
 		bool update = obj_rpc_is_update(rpc);
 
+		// update 任务complete 回调函数
 		if (update) {
 			uint64_t time;
 
+			// status 为rw opt任务执行结果
 			if (status == 0)
+				// todo: 这是在初始化啥
 				status = dtx_sub_init(dth, &orwi->orw_oid,
 						      orwi->orw_dkey_hash);
 			time = daos_get_ntime();
-			// 有查询oi table 的操作
+			// vos_obj_hold 中有查询oi table 的操作
 			rc = vos_update_end(ioh, ioc->ioc_map_ver,
 					    &orwi->orw_dkey, status,
 					    &ioc->ioc_io_size, dth);
 			if (rc == 0)
+				// 如果 vos_update_end 成功，更新延时打点信息
 				obj_update_latency(ioc->ioc_opc, VOS_LATENCY,
 						   daos_get_ntime() - time, ioc->ioc_io_size);
 		} else {
+			// vos fetch 场景end 
 			rc = vos_fetch_end(ioh, &ioc->ioc_io_size, status);
 		}
 
@@ -426,6 +432,7 @@ bulk_transfer_sgl(daos_handle_t ioh, crt_rpc_t *rpc, crt_bulk_t remote_bulk,
 			bulk_iovs += 1;
 		} else {
 			start = iov_idx;
+			// 通过 sgl 构建要发送的数据
 			sgl_sent.sg_iovs = &sgl->sg_iovs[start];
 
 			/*
@@ -449,6 +456,7 @@ bulk_transfer_sgl(daos_handle_t ioh, crt_rpc_t *rpc, crt_bulk_t remote_bulk,
 			sgl_sent.sg_nr = sgl_sent.sg_nr_out = iov_idx - start;
 			bulk_iovs += sgl_sent.sg_nr;
 
+			// 在 target 端根据daos sgl 创建对应的bulk = local_bulk，后面将在local_bulk 和remote_bulk 之间做rdma 传输数据
 			rc = crt_bulk_create(rpc->cr_ctx, &sgl_sent, bulk_perm,
 					     &local_bulk);
 			if (rc != 0) {
@@ -555,6 +563,8 @@ obj_bulk_transfer(crt_rpc_t *rpc, crt_bulk_op_t bulk_op, bool bulk_bind, crt_bul
 		}
 	}
 
+	// 遍历所有的biod
+	// todo: 外面 bio_iod_prep 中只是传递了一个biod
 	for (i = 0; i < sgl_nr; i++) {
 		d_sg_list_t	*sgl, tmp_sgl;
 
@@ -582,17 +592,20 @@ obj_bulk_transfer(crt_rpc_t *rpc, crt_bulk_op_t bulk_op, bool bulk_bind, crt_bul
 			struct bio_sglist *bsgl;
 
 			D_ASSERT(daos_handle_is_valid(ioh));
+			// 获取idx 对应的ioh 中biod 里用来存储实际数据的sgl
 			bsgl = vos_iod_sgl_at(ioh, i);
 			D_ASSERT(bsgl != NULL);
 
 			sgl = &tmp_sgl;
+			// bsgl 转化为dsgl
 			rc = bio_sgl_convert(bsgl, sgl);
 			if (rc)
 				break;
 		}
 
-		// 按sgl 进行bulk transfer
-		// todo: 这个remote bulk 是怎么来的
+		// 按daos sgl（cli 端封装数据也是这个数据结构） 进行bulk transfer
+		// 这个remote bulk 是客户端传来的
+		// crt_bulk_create 需要用到 daos sgl，内部是 HG_Bulk_create，将返回 bulk hdl
 		rc = bulk_transfer_sgl(ioh, rpc, remote_bulks[i + skip_nr],
 				       remote_offs ? remote_offs[i] : 0,
 				       bulk_op, bulk_bind, sgl, i, p_arg);
@@ -715,10 +728,14 @@ out:
  * Note: this is only needed for bulk transfer, for inline transfer,
  * it will pack the complete sgls inside the req/reply, see obj_shard_rw().
  */
+// 打包reply 中sgls 里的nrs，这样client 可以在返回到app 前更新sgls。
+// 在reply 中打包sgl 的data size，client fetch 操作以此更新sgl 的iov_len
 static int
 obj_set_reply_nrs(crt_rpc_t *rpc, daos_handle_t ioh, d_sg_list_t *echo_sgl, uint8_t *skips)
 {
+	// 输入参数
 	struct obj_rw_in	*orw = crt_req_get(rpc);
+	// 输出参数
 	struct obj_rw_out	*orwo = crt_reply_get(rpc);
 	uint32_t		*nrs;
 	daos_size_t		*data_sizes;
@@ -754,9 +771,11 @@ obj_set_reply_nrs(crt_rpc_t *rpc, daos_handle_t ioh, d_sg_list_t *echo_sgl, uint
 			data_sizes[i] = 0;
 			continue;
 		}
+		// 默认为 NULL
 		if (echo_sgl != NULL) {
 			nrs[i] = echo_sgl->sg_nr_out;
 		} else {
+			// 默认是这里
 			struct bio_sglist *bsgl;
 
 			bsgl = vos_iod_sgl_at(ioh, idx);
@@ -1167,10 +1186,13 @@ out:
 	return rc;
 }
 
+// inline 模式下，数据存储在 orw_sgls 中
 int
 obj_prep_fetch_sgls(crt_rpc_t *rpc, struct obj_io_context *ioc)
 {
+	// 输入参数
 	struct obj_rw_in	*orw = crt_req_get(rpc);
+	// 输出参数
 	struct obj_rw_out	*orwo = crt_reply_get(rpc);
 	d_sg_list_t		*sgls = orw->orw_sgls.ca_arrays;
 	int			nr = orw->orw_sgls.ca_count;
@@ -1179,11 +1201,13 @@ obj_prep_fetch_sgls(crt_rpc_t *rpc, struct obj_io_context *ioc)
 	int			j;
 	int			rc = 0;
 
+	// 判断是否能复用原来申请的空间
 	for (i = 0; i < nr; i++) {
 		for (j = 0; j < sgls[i].sg_nr; j++) {
 			// 读取rpc 输出参数中的 sgls 数据
 			d_iov_t *iov = &sgls[i].sg_iovs[j];
 
+			// 实际保存的数据的长度；已经申请的buffer 的长度
 			if (iov->iov_len < iov->iov_buf_len) {
 				need_alloc = true;
 				break;
@@ -1192,26 +1216,27 @@ obj_prep_fetch_sgls(crt_rpc_t *rpc, struct obj_io_context *ioc)
 	}
 
 	/* reuse input sgls */
-	// 复用输入的sgls
+	// 直接复用输入的sgls
 	orwo->orw_sgls.ca_count = orw->orw_sgls.ca_count;
 	orwo->orw_sgls.ca_arrays = orw->orw_sgls.ca_arrays;
-	// 如果不需要重新申请空间，直接返回
+	// 如果不需要重新申请空间，直接返回，完全复用原来的空间
 	if (!need_alloc)
 		return 0;
 
 	/* Reset the iov first, easier for error cleanup */
-	// 清空原有的sgls
+	// 1. 先清空原有的sgls
 	for (i = 0; i < nr; i++) {
 		for (j = 0; j < sgls[i].sg_nr; j++)
 			sgls[i].sg_iovs[j].iov_buf = NULL;
 	}
 
-	// 重新申请资源
+	// 2. 重新申请新资源到输出参数的sgls 中
 	sgls = orwo->orw_sgls.ca_arrays;
 	for (i = 0; i < nr; i++) {
 		for (j = 0; j < sgls[i].sg_nr; j++) {
 			d_iov_t *iov = &sgls[i].sg_iovs[j];
 
+			// 给输出参数的sgls 里重新申请buffer 资源
 			D_ALLOC(iov->iov_buf, iov->iov_buf_len);
 			if (iov->iov_buf == NULL)
 				D_GOTO(out, rc = -DER_NOMEM);
@@ -1350,13 +1375,14 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		      uint32_t iods_nr, struct dtx_handle *dth)
 {
 	// rpc 入参，出参
+	// rdma 场景，bulks handls从rpc 从origin 端传递给target，包含对bulk 对应的mem 的访问权限，target 端通过HG_Bulk_transfer 来启动数据传输
 	struct obj_rw_in		*orw = crt_req_get(rpc);
 	struct obj_rw_out		*orwo = crt_reply_get(rpc);
 	uint32_t			tag = dss_get_module_info()->dmi_tgt_id;
 	// daos hdl，object 等都用这个结构
 	// 在这里新建的daos hdl
 	daos_handle_t			ioh = DAOS_HDL_INVAL;
-	// biod 构建，后面读写调用spdk bio 读写接口会用到
+	// 服务端开始 biod 构建，后面  ----> dma bulk map ----> 最终读写调用spdk bio 读写接口都会用到
 	struct bio_desc			*biod;
 	daos_key_t			*dkey;
 	crt_bulk_op_t			bulk_op;
@@ -1442,6 +1468,7 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		// 这里会构建后面buffer map 时候用到的vos io ctx，这个ctx 就是在这里和ioh 关联上的
 		// 注意区分daos iods 和biods
 		// ！！！这里会通过vea 模块预留资源offset，后面 bio_iod_prep 里面会用到预留的offset（nvme 场景）
+		// todo: vos_update_end 里会操作ilog (dkey、akey都会各自操作ilog)
 		rc = vos_update_begin(ioc->ioc_vos_coh, orw->orw_oid,
 			      orw->orw_epoch, cond_flags, dkey,
 			      iods_nr, iods, iod_csums,
@@ -1573,17 +1600,17 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 			goto out;
 
 		// fetch 场景（1，2两种情况）
-		// 1. 如果是bulk 传输的话
 		if (rma) {
 			// 先重置orw_sgls 结构
 			orwo->orw_sgls.ca_count = 0;
 			orwo->orw_sgls.ca_arrays = NULL;
+			// 1. 如果是bulk 传输的话
 			// 再进一步填充reply 信息
 			rc = obj_set_reply_nrs(rpc, ioh, NULL, skips);
 			if (rc != 0)
 				goto out;
 		} else {
-			// 2. 如果是inline 传输的话，申请一些sgls 的空间，用于提供rpc 响应数据
+			// 2. 如果是inline 传输的话，优先复用原有资源，不能复用的话重新申请一些sgls 的空间，用于提供rpc 响应数据
 			rc = obj_prep_fetch_sgls(rpc, ioc);
 			if (rc)
 				goto out;
@@ -1628,16 +1655,20 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		}
 	}
 
+	// 开始进到bio 层处理
 	if (orw->orw_flags & ORF_CHECK_EXISTENCE)
 		goto out;
 
 	time = daos_get_ntime();
 	// 根据ioh 获取biod，biod 里面有biov，存储要读写的数据
-	// ioh 和vos ioc 有关联，vos ioc 里面有biod
+	// ioh 和vos ioc 有关联，vos ioc 里面有biod：这里是准备要构建ioc 里面的biod
+	// vos container 也是从ioh 中获取的
 	biod = vos_ioh2desc(ioh);
 	// 这里会设置dma buffer 和regions
+
 	// 如果当前是fetch 请求，那么这里面会直接调用 dma_rw，完成读的功能
 	// 如果当前是update 请求，那么会继续执行后面直到 bio_iod_post_async ，再进入到 dma_rw 里完成写
+
 	// 当前功能是：构建biod 里的dma buffer region们，最后调用spdk bio 读写接口时候会使用
 	// 特别注意region 的构建：brr_off 和 brr_end 等成员的赋值
 	// biod 构建
@@ -1648,6 +1679,11 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 	// 如果rma == true，将rpc->cr_ctx 作为bulk ctx 传递出去
 	// 上面 vos_update_begin 中会预留offset，这里会使用offset 完成dma_map_one/bulk_map_one 映射
 	// map完成后，offset 将被设置到reserved dma 的region 中。后续使用spdk_blob_io_write 接口时候，直接使用对应region 里的offset
+	// 将biov 中保存的元数据信息，和dma buffer 关联
+	// 1. fetch 场景，biov 中数据是查询出来的
+	// 2. update 场景，biov 中数据是新申请出来的
+	// a. 如果是fetch，先在 bio_iod_prep 里 dma_rw 完成从nvme 读取数据到内存，再调用 obj_bulk_transfer 进行rdma
+	// b. 如果是update，先调用 obj_bulk_transfer 进行rdma，再将元数据flush 后通过 dma_rw 将内存中数据异步写到nvme
 	rc   = bio_iod_prep(biod, BIO_CHK_TYPE_IO, rma ? rpc->cr_ctx : NULL, CRT_BULK_RW);
 	if (rc) {
 		D_ERROR(DF_UOID " bio_iod_prep failed: " DF_RC "\n", DP_UOID(orw->orw_oid),
@@ -1705,15 +1741,15 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		// bulk 传输，大块数据直接rdma，不走dma_rw 接口
 		// todo: 是否绑定有什么区别吗？
 		bulk_bind = orw->orw_flags & ORF_BULK_BIND;
-		// orw->orw_bulks.ca_arrays 这个是remote 的bulk 资源，里面有本地和远端的内存信息
-		// todo: 如果是读的话，那不是应该提供客户端的内存给服务端吗
-		// todo: 如果是写的话，应该是服务端把自己的内存提供给客户端吗？
-		// 是通过初始化时候的类似的协商的流程来实现的吗？
+		// orw->orw_bulks.ca_arrays 这个是remote 的bulk 资源，里面origin 创建的bulk 信息
+		// 1. 如果是读的话，server 负责主动写数据到client 的授权的mem。client mem 权限为读写：读到client 的bulk hdl，类似posix write fd，在内存中会有对应的缓冲区
+		// 2. 如果是写的话，server 负责主动从client 授权的mem 读数据。client mem 权限为只读：写到server 的bulk hdl，类似posix write fd，在内存中会有对应的缓冲区
+		// 数据将在bulk hdl 之间传递
 		rc = obj_bulk_transfer(rpc, bulk_op, bulk_bind, orw->orw_bulks.ca_arrays, offs,
 				       skips, ioh, NULL, iods_nr, NULL, ioc->ioc_coh);
-		// 传输成功
+		// rdma 传输成功（非阻塞接口）
 		if (rc == 0) {
-			// todo: flush
+			// 每次写入成功，都要强制执行 flush 元数据到设备（scm 设备）
 			bio_iod_flush(biod);
 
 			/* Timeout for the update RPC from client to server is
@@ -1722,6 +1758,7 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 			 * blocked during bulk data transfer, then client will
 			 * get RPC timeout and trigger resend.
 			 */
+			// 如果是update 等待3s bulk transfer
 			if (obj_rpc_is_update(rpc) &&
 			    !(orw->orw_flags & ORF_RESEND) &&
 			    DAOS_FAIL_CHECK(DAOS_DTX_RESEND_DELAY1))
@@ -1731,10 +1768,10 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		// 小块数据才走这里
 		// inline 传输（在biod 的sgls 和用户指定的sgls 之间拷贝数据）
 		// 用户指定的sgls 是d_sgls_list，在入参里
+		// 将biod 中的数据拷贝到 sgls 里
 		rc = bio_iod_copy(biod, orw->orw_sgls.ca_arrays, iods_nr);
 	}
 
-	// 现在biod 里面才有数据
 	if (rc) {
 		if (rc == -DER_OVERFLOW)
 			rc = -DER_REC2BIG;
@@ -1780,8 +1817,8 @@ obj_local_rw_internal(crt_rpc_t *rpc, struct obj_io_context *ioc, daos_iod_t *io
 		obj_log_csum_err();
 post:
 	time = daos_get_ntime();
-	// 执行更新操作，只有update 操作（并且是小块数据的update ）才会进入这个函数，并最终调用dma_rw 函数
-	// 大块数据的update 直接走的 obj_bulk_transfer
+	// 上边bulk transfer 后，数据只是到了内存（dma buffer），flush 只是update 场景下刷了元数据，而fetch 请求不会走到这里
+	// update 场景，将实际的数据通过spdk api 异步写到nvme
 	rc = bio_iod_post_async(biod, rc);
 	bio_post_latency = daos_get_ntime() - time;
 out:
@@ -1841,7 +1878,7 @@ out:
 	if (skips != NULL && orwo->orw_rels.ca_arrays != NULL && orw->orw_nr != iods_nr)
 		rc = obj_rw_recx_list_post(orw, orwo, skips, rc);
 
-	// 显式调用读写回调函数，如果是update 的话，会通过执行 vos_update_end 来查询vos oi table
+	// 显式调用读写回调函数，如果是update 的话，会通过执行 vos_update_end，如果是 fetch 执行 vos_fetch_end
 	rc = obj_rw_complete(rpc, ioc, ioh, rc, dth);
 	if (rc == 0) {
 		/* Update latency after getting fetch/update IO size by obj_rw_complete */
@@ -2070,8 +2107,7 @@ again:
 	// 接收rpc 后本地读写操作。需要传入checksum
 	// todo: iods csums offs 等是怎么生成的
 	rc = obj_local_rw_internal(rpc, ioc, iods, csums, offs, skips, nr, dth);
-	// todo: 先执行本地读写，之后才刷新dtx 相关
-	// todo: 不先刷新，再执行读写吗？
+	// 先执行本地读写，如果本地的操作成功，且存在需要检查的事务，那么执行事务刷新操作
 	if (dth != NULL && obj_dtx_need_refresh(dth, rc)) {
 		if (unlikely(++count % 10 == 3)) {
 			struct dtx_share_peer	*dsp;
@@ -2083,8 +2119,7 @@ again:
 			       dth->dth_share_tbd_count, count);
 		}
 
-		// 需要刷新dth
-		// todo: 先读后刷新？
+		// 本地操作成功，且存在需要检查的dtx，则刷新
 		rc = dtx_refresh(dth, ioc->ioc_coc);
 		if (rc == -DER_AGAIN)
 			goto again;
@@ -2193,6 +2228,7 @@ obj_ioc_init(uuid_t pool_uuid, uuid_t coh_uuid, uuid_t cont_uuid, crt_rpc_t *rpc
 		D_GOTO(failed, rc = -DER_STALE);
 
 	/* load VOS container on demand for rebuild */
+	// 查询cont child
 	rc = ds_cont_child_lookup(pool_uuid, cont_uuid, &coc);
 	if (rc) {
 		D_ERROR("Can not find the container "DF_UUID"/"DF_UUID"\n",
@@ -2207,6 +2243,7 @@ out:
 		D_GOTO(failed, rc);
 	D_ASSERT(coc->sc_pool != NULL);
 	ioc->ioc_map_ver = coc->sc_pool->spc_map_version;
+	// 返回child cont hdl
 	ioc->ioc_vos_coh = coc->sc_hdl;
 	ioc->ioc_coc	 = coc;
 	ioc->ioc_coh	 = coh;
@@ -2641,6 +2678,8 @@ out:
 	obj_ioc_end(&ioc, rc);
 }
 
+// DAOS_OBJ_RPC_TGT_UPDATE 类型rpc 处理函数
+// 用于处理remote update 场景
 void
 ds_obj_tgt_update_handler(crt_rpc_t *rpc)
 {
@@ -2734,6 +2773,7 @@ ds_obj_tgt_update_handler(crt_rpc_t *rpc)
 			D_GOTO(out, rc);
 	}
 
+	// 客户端传递来的epoch
 	epoch.oe_value = orw->orw_epoch;
 	epoch.oe_first = orw->orw_epoch_first;
 	epoch.oe_flags = orf_to_dtx_epoch_flags(orw->orw_flags);
@@ -2741,6 +2781,7 @@ ds_obj_tgt_update_handler(crt_rpc_t *rpc)
 	if (orw->orw_flags & ORF_DTX_SYNC)
 		dtx_flags |= DTX_SYNC;
 
+	// leader 传递来的cos list
 	rc = dtx_begin(ioc.ioc_vos_coh, &orw->orw_dti, &epoch, 1,
 		       orw->orw_map_ver, &orw->orw_oid,
 		       orw->orw_dti_cos.ca_arrays,
@@ -2775,6 +2816,7 @@ out:
 	obj_ioc_end(&ioc, rc);
 }
 
+// dlh 在这里处理
 static int
 obj_tgt_update(struct dtx_leader_handle *dlh, void *arg, int idx,
 	       dtx_sub_comp_cb_t comp_cb)
@@ -2862,25 +2904,27 @@ static int
 process_epoch(uint64_t *epoch, uint64_t *epoch_first, uint32_t *flags)
 {
 	// simple test 里默认设置的是max
-	// todo: 什么叫做 chosen TX epoch
+	// todo: 什么叫做 chosen TX epoch = 大概等于有效的epoch，不为 0且不为 MAX 的tx epoch 为有效的值
 	if (*epoch == 0 || *epoch == DAOS_EPOCH_MAX)
 		/*
 		 * *epoch is not a chosen TX epoch. Choose the current HLC
 		 * reading as the TX epoch.
 		 */
-		// 设置为当前最新的时间戳
+		// epoch 为0 或者MAX 说明客户端传递的 epoch 没有实际意义，服务端重新设置为当前最新的时间戳
 		// todo: 那不是每次都是读取的最新的数据了？
 		// todo: 这个epoch 为什么不由客户端生成
 		*epoch = d_hlc_get();
 	else
 		/* *epoch is already a chosen TX epoch. */
+		// 客户端使用的epoch 是一个服务端生成的旧的epoch
 		return PE_OK_REMOTE;
 
+	// 如果是被服务端重新设置的值，覆盖epoch_first（如果epoch_first 没有被赋值）
 	/* If this is the first epoch chosen, assign it to *epoch_first. */
 	if (epoch_first != NULL && *epoch_first == 0)
 		*epoch_first = *epoch;
 
-	// todo: 覆盖客户端的epoch，什么情况不覆盖
+	// todo: 覆盖客户端的epoch，什么情况不覆盖（客户端使用了一个epoch，这个epoch 是之前通过服务端由 d_hlc_get 设置的）
 	D_DEBUG(DB_IO, "overwrite epoch "DF_X64"\n", *epoch);
 	return PE_OK_LOCAL;
 }
@@ -2890,15 +2934,18 @@ process_epoch(uint64_t *epoch, uint64_t *epoch_first, uint32_t *flags)
 // 写场景，就是将客户端本地内存的数据push 到远端内存
 // dtx_begin 和dtx_leader_begin 的实现
 // 读请求：obj_ioc_begin --> process_epoch --> dtx_begin --> obj_local_rw  --> dtx_end
-// 写请求：obj_ioc_begin --> process_epoch --> dtx_leader_begin --> dtx_leader_exec_ops  --> obj_tgt_update -->  dtx_leader_end
+// 写请求：obj_ioc_begin --> process_epoch --> dtx_leader_begin --> dtx_leader_exec_ops  --> obj_tgt_update --> obj_local_rw -->  dtx_leader_end
+// todo: 服务端收到请求后，不会塞进一个队列中吗？如果大量的请求到来，怎么限流和调度
 void
 ds_obj_rw_handler(crt_rpc_t *rpc)
 {
 	// 这个rpc 的结构其实和rpc priv 的pub 是一样的
 	struct obj_rw_in		*orw = crt_req_get(rpc);
 	struct obj_rw_out		*orwo = crt_reply_get(rpc);
+	// cos list 会填充到leader hdl 里
 	struct dtx_leader_handle	*dlh = NULL;
 	struct ds_obj_exec_arg		exec_arg = { 0 };
+	// 服务端构建io ctx
 	struct obj_io_context		ioc = { 0 };
 	uint32_t			flags = 0;
 	uint32_t			dtx_flags = 0;
@@ -2911,7 +2958,7 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 	int				dti_cos_cnt;
 	uint32_t			tgt_cnt;
 	uint32_t			version = 0;
-	// todo: 服务端也创建了一个epoch 变量
+	// todo: 服务端自己也创建了一个epoch 变量
 	struct dtx_epoch		epoch = {0};
 	int				rc;
 	bool				need_abort = false;
@@ -2919,7 +2966,6 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 	D_ASSERT(orw != NULL);
 	D_ASSERT(orwo != NULL);
 
-	// todo: 这个是做了什么事情，就是把一系列的信息添加到ioc 中
 	// 构建io contex
 	rc = obj_ioc_begin(orw->orw_oid.id_pub, orw->orw_map_ver,
 			   orw->orw_pool_uuid, orw->orw_co_hdl,
@@ -2941,7 +2987,7 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 	    (orw->orw_epoch != 0 && orw->orw_epoch != DAOS_EPOCH_MAX))
 		ioc.ioc_fetch_snap = 1;
 
-	// todo: 这个是做了什么事情。epoch 是在cli_object.c 的 obj_req_valid 里初始化的
+	// epoch 是在cli_object.c 的 obj_req_valid 里初始化的
 	// 在cli_shard.c 的 dc_obj_shard_rw 里构造rpc 入参的
 	// &orw->orw_epoch, &orw->orw_epoch_first, 可能被重新赋值
 	rc = process_epoch(&orw->orw_epoch, &orw->orw_epoch_first,
@@ -2950,7 +2996,6 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 		orw->orw_flags &= ~ORF_EPOCH_UNCERTAIN;
 
 	if (obj_rpc_is_fetch(rpc)) {
-		// todo: 只有fetch 才会用到吗？
 		struct dtx_handle	*dth;
 
 		if (orw->orw_flags & ORF_CSUM_REPORT) {
@@ -2963,6 +3008,7 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 
 		// 客户端传递过来的epoch，fetch 场景说明epoch 是有效的
 		// 虽然是客户端传递来的，但是可能在服务端被重新赋值了
+		// 这个是服务端真正使用的epoch
 		epoch.oe_value = orw->orw_epoch;
 		epoch.oe_first = orw->orw_epoch_first;
 		epoch.oe_flags = orf_to_dtx_epoch_flags(orw->orw_flags);
@@ -2975,7 +3021,7 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 			       &orw->orw_oid, NULL, 0, dtx_flags, NULL, &dth);
 		if (rc == 0) {
 			// 事务包围的本地读写操作，其实只是fetch。update 场景到后面的 obj_tgt_update 里面处理
-			// todo: 本地读写是什么意思
+			// dth 里有epoch
 			rc = obj_local_rw(rpc, &ioc, dth);
 			// 事务结束
 			rc = dtx_end(dth, ioc.ioc_coc, rc);
@@ -2992,8 +3038,7 @@ ds_obj_rw_handler(crt_rpc_t *rpc)
 	// 判断dti 是否为0，0是无效的dti
 	// todo: tgt_cnt 是参与此次io opt 的所有target 节点吗？包括leader 节点和转发节点？
 	if (!daos_is_zero_dti(&orw->orw_dti) && tgt_cnt != 0) {
-		// 生成dtx members们
-		// todo: dtx members 是干啥的，什么作用
+		// 根据targets 填充mem 的target，生成dtx members们
 		rc = obj_gen_dtx_mbs(orw->orw_flags, &tgt_cnt, &tgts, &mbs);
 		if (rc != 0)
 			D_GOTO(out, rc);
@@ -3054,9 +3099,15 @@ again2:
 	// 非leader 节点在真正修改之前提交这些dtx，以此来避免可能存在的问题
 	// todo: 里面调用涉及的add cos 的都是冲突的吗？所以才需要再添加到别的replica的缓存？
 	D_FREE(dti_cos);
+	// 当要开启一个leader dtx 时，先去dbtree 里根据dkey hash获取cos list
+	// todo: 这个dbtree 是全局的吗？还是本地的
+	// todo: 第一次查询，这个list 是空的，那后面是要处理什么呢？
+	// dtx_update_end 中会将当前的dtx 添加到cos 列表里，并设置为committable 状态，这里获取cos 列表
+	// 在 vos_update_end 中会去处理 cos list（obj_tgt_update --> obj_local_rw_internal --> obj_rw_complete --> vos_update_end）
 	dti_cos_cnt = dtx_list_cos(ioc.ioc_coc, &orw->orw_oid,
 				   orw->orw_dkey_hash, DTX_THRESHOLD_COUNT,
 				   &dti_cos);
+	// 如果没有CoS 元素，那么直接 out，因为要处理的就是CoS 里的dtx 们
 	if (dti_cos_cnt < 0)
 		D_GOTO(out, rc = dti_cos_cnt);
 
@@ -3091,6 +3142,9 @@ again2:
 	// 需要传入tx mems
 	// 会将epoch 添加到dlh 中
 	// dlh 中 dlh_subs 数组将对应客户端传递来的targets 数组
+	// 将从dbtree 中查询出来的list 传到leader begin 中构造dth
+	// mbs 也是根据targets 构建的，这里又被传入用来构造dlh_subs
+	// 冲突列表和 dti_cos_cnt 会被填充到 dlh 里
 	rc = dtx_leader_begin(ioc.ioc_vos_coh, &orw->orw_dti, &epoch, 1,
 			      version, &orw->orw_oid, dti_cos, dti_cos_cnt,
 			      tgts, tgt_cnt, dtx_flags, mbs, &dlh);
@@ -3101,7 +3155,7 @@ again2:
 	}
 
 	// 构建leader 将要执行的操作的参数信息
-	// 直接使用cli 发来的rpc
+	// 直接使用cli 发来的rpc，这个rpc 将会从leader 发送给其余涉及update 的replicas
 	exec_arg.rpc = rpc;
 	// 上边构建的ioc
 	exec_arg.ioc = &ioc;
@@ -3117,6 +3171,8 @@ again2:
 
 	/* Stop the distributed transaction */
 	// 结束分布式事务。这里面会涉及 cos add dtx。有item 被添加到rbd tree 中
+	// todo: 这里为啥在end 的时候才出现add dtx，第一次begin 的时候cos list 为空吗？
+	// todo: 按照当前的处理逻辑，此次 update 请求在 dtx_leader_end 时被放到list 中，需要再下一个 update 请求到来时才会处理list
 	rc = dtx_leader_end(dlh, ioc.ioc_coh, rc);
 	switch (rc) {
 	case -DER_TX_RESTART:
@@ -5255,6 +5311,7 @@ out:
 	return rc;
 }
 
+// todo: 这个是干啥的
 void
 ds_obj_cpd_handler(crt_rpc_t *rpc)
 {

@@ -646,6 +646,7 @@ struct vos_pool_arg {
 };
 
 // engine 下的每个target 会在pmem 上生成一个vos-tgtid 的文件
+// 配置信息中的scm 和nvme 设备信息是均匀分配到多个target 上的
 static int
 tgt_vos_create_one(void *varg)
 {
@@ -655,6 +656,7 @@ tgt_vos_create_one(void *varg)
 	int			 rc;
 
 	// todo: 为啥这里是 newborn dir
+	// vos pool 的id 是根据target id来的
 	rc = path_gen(vpa->vpa_uuid, newborns_path, VOS_FILE, &info->dmi_tgt_id,
 		      &path);
 	if (rc)
@@ -663,6 +665,8 @@ tgt_vos_create_one(void *varg)
 	// 内部会创建memobj，进而wal open，进而 flush wal
 	// scm_sz = 0
 	// 创建vos-tgtid 文件对应的pmem obj
+	// 每个target 会有自己的vos pool，以id 区分
+	// todo: 这里只设置了scm 和nvme 的大小，具体的内部空间划分是在哪里设置的，比如target 1可访问的nvme 地址是哪个范围
 	rc = vos_pool_create(path, (unsigned char *)vpa->vpa_uuid,
 			     vpa->vpa_scm_size, vpa->vpa_nvme_size, 0, NULL);
 	if (rc)
@@ -680,6 +684,7 @@ tgt_vos_preallocate(uuid_t uuid, daos_size_t scm_size, int tgt_id)
 	int				 fd = -1, rc;
 
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	// 创建 "vos-id" 文件
 	rc = path_gen(uuid, newborns_path, VOS_FILE, &tgt_id, &path);
 	if (rc)
 		goto out;
@@ -1013,7 +1018,9 @@ static int tgt_destroy(uuid_t pool_uuid, char *path);
 void
 ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 {
+	// daos_server 发送过来的drpc 请求带来的target create 参数
 	struct mgmt_tgt_create_in	*tc_in;
+	// drpc 出参
 	struct mgmt_tgt_create_out	*tc_out;
 	struct tgt_create_args		 tca = {0};
 	d_rank_t			*rank = NULL;
@@ -1058,6 +1065,7 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 	D_DEBUG(DB_MGMT, DF_UUID": record inserted to dpt_creates_ht\n",
 		DP_UUID(tca.tca_ptrec->dptr_uuid));
 
+	// todo: 这里是配置文件中集群所有容量吗
 	tca.tca_scm_size  = tc_in->tc_scm_size;
 	tca.tca_nvme_size = tc_in->tc_nvme_size;
 	tca.tca_dx = dss_current_xstream();
@@ -1120,6 +1128,8 @@ ds_mgmt_hdlr_tgt_create(crt_rpc_t *tc_req)
 
 		D_ASSERT(dss_tgt_nr > 0);
 		uuid_copy(vpa.vpa_uuid, tc_in->tc_pool_uuid);
+		// vos pool 指的是每个target 各自的
+		// 配置文件中的scm 和nvme 列表将被均分提供给多个target
 		/* A zero size accommodates the existing file */
 		// todo: 这里为啥设置为 0呢
 		vpa.vpa_scm_size = 0;

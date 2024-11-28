@@ -272,6 +272,7 @@ bio_iod_sgl(struct bio_desc *biod, unsigned int idx)
 	bsgl = &biod->bd_sgls[idx];
 	D_ASSERT(bsgl != NULL);
 
+	// 返回每个biod 中用来存储实际数据的sgl
 	return bsgl;
 }
 
@@ -564,6 +565,7 @@ iterate_biov(struct bio_desc *biod,
 	int i, j, rc = 0;
 
 	// 遍历所有的sgl list的数组，每个元素都是一个sgl list
+	// biod: 保存的是bio 描述信息，即元数据的地址信息，遍历biod 就是遍历所有的地址
 	for (i = 0; i < biod->bd_sgl_cnt; i++) {
 		// 遍历里面所有的bio sgls 下面的biov
 		// 在这之前所有的数据都是存储在d_sgls 的d_iov 里面的
@@ -601,7 +603,7 @@ iterate_biov(struct bio_desc *biod,
 			// 本质是rdma vs inline 传输方式
 			// biov 也是从biod 的sgl 里面获取的
 			// 此时biov 里面已经存在了后面dma_map_one 需要的off 信息，也是后面spdk_blob_io_write 需要的off 信息
-			// 这里的biov 是在 iod_fetch 中获取的\
+			// 这里的biov 是在 iod_fetch 中获取的元数据---vos 中对应的设备地址信息
 			rc = cb_fn(biod, biov, data);
 			if (rc)
 				break;
@@ -713,6 +715,7 @@ iod_add_chunk(struct bio_desc *biod, struct bio_dma_chunk *chk)
 	return 0;
 }
 
+// todo: biod 是在什么时候创建的（是在rw_local_internal 中创建的），跟xs ，以及读写io 的对应关系是什么？
 int
 iod_add_region(struct bio_desc *biod, struct bio_dma_chunk *chk,
 	       unsigned int chk_pg_idx, unsigned int chk_off, uint64_t off,
@@ -722,8 +725,9 @@ iod_add_region(struct bio_desc *biod, struct bio_dma_chunk *chk,
 	struct bio_rsrvd_dma *rsrvd_dma = &biod->bd_rsrvd;
 	unsigned int max, cnt;
 
+	// 支持的对多regions 数
 	max = rsrvd_dma->brd_rg_max;
-	// 当前数组的个数
+	// 当前已经存在的 regions 个数
 	cnt = rsrvd_dma->brd_rg_cnt;
 
 	// 预留dma buffer 数量满了
@@ -750,7 +754,7 @@ iod_add_region(struct bio_desc *biod, struct bio_dma_chunk *chk,
 	}
 
 	// ---填充rsrvd_dma 结构，扩展一个region 到当前数组---
-	// 直接在尾巴填充新创建的region
+	// 如果没满，直接在 brd_regions 尾巴上占用一个预留region
 	// 这些信息在最终读写nvme 的时候要用来决定读写地址
 	rsrvd_dma->brd_regions[cnt].brr_chk = chk;
 	// spdk_blob_io_read/write 会使用到 brr_pg_idx 来确定要读写的数据的buffer 地址，同时要用到off 来决定数据要写到blob 的哪里
@@ -762,6 +766,7 @@ iod_add_region(struct bio_desc *biod, struct bio_dma_chunk *chk,
 	// todo: 这个预留出来的空间有什么说法，为啥这个object 要存在这里，而那个object 要存在那里？
 	// 当前数据需要存储到的blob 的offset
 	// off 在函数 nvme_rw 中会用到
+	// 在后续调用spdk 读写接口时：brr_chk 将被用来构造 payload，brr_off 将被作为io 地址参数传递
 	rsrvd_dma->brd_regions[cnt].brr_off = off;
 	rsrvd_dma->brd_regions[cnt].brr_end = end;
 	rsrvd_dma->brd_regions[cnt].brr_media = media;
@@ -1337,6 +1342,7 @@ nvme_rw(struct bio_desc *biod, struct bio_rsrvd_region *rg)
 	}
 }
 
+// 将bulk transfer 函数通过 rdma 写到内存的数据通过spdk api刷到磁盘
 static void
 dma_rw(struct bio_desc *biod)
 {
@@ -1357,7 +1363,8 @@ dma_rw(struct bio_desc *biod)
 	// 每个rg 是rsrvd_dma 的一个元素，是一个dma buffer region
 	// 这些region 是在map 的时候构建的
 	for (i = 0; i < rsrvd_dma->brd_rg_cnt; i++) {
-		// 依次按region 完成读写
+		// 获取当前biod 下的dma buffer，遍历其所有的buffer region，完成读写（nvme/scm 数据  <----> dma buffer）
+		// 即如果是读的话，就从nvme/scm 加载数据到dma buffer；如果是写的话，将dma buffer 中的数据写到nvme/scm 中
 		rg = &rsrvd_dma->brd_regions[i];
 
 		D_ASSERT(rg->brr_chk != NULL);
@@ -1374,6 +1381,7 @@ dma_rw(struct bio_desc *biod)
 	D_ASSERT(biod->bd_inflights > 0);
 	biod->bd_inflights -= 1;
 
+	// 如果不是异步的，等待
 	if (!biod->bd_async_post) {
 		iod_dma_wait(biod);
 		D_DEBUG(DB_IO, "Wait DMA done, type:%d\n", biod->bd_type);
@@ -1503,7 +1511,6 @@ dump_dma_info(struct bio_dma_buffer *bdb)
 	D_EMIT("bulk_grps:%d, bulk_chunks:%d\n", bulk_grps, bulk_chunks);
 }
 
-// todo: map 是指做什么映射 ？
 // arg 是bulk 数据的参数，非rdma 的arg 为NULL
 static int
 iod_map_iovs(struct bio_desc *biod, void *arg)
@@ -1652,9 +1659,11 @@ iod_prep_internal(struct bio_desc *biod, unsigned int type, void *bulk_ctxt,
 	if (biod->bd_buffer_prep)
 		return -DER_INVAL;
 
+	// 构建biod：设置type = BIO_CHK_TYPE_IO
 	biod->bd_chk_type = type;
 	/* For rebuild pull, the DMA buffer will be used as RDMA client */
 	// 当前biod是否需要rdma传输（有bulk 数据就需要rdma 传输，否则直接inline transport）
+	// 构建biod：设置传输方式（inline or rdma）
 	biod->bd_rdma = (bulk_ctxt != NULL) || (type == BIO_CHK_TYPE_REBUILD);
 
 	// 如果是大块数据传输，那么构造对应的task 的参数
@@ -1668,7 +1677,7 @@ iod_prep_internal(struct bio_desc *biod, unsigned int type, void *bulk_ctxt,
 	}
 
 	// 根据biod 里面的biov，构建dma buffer 和region等信息
-	// map 映射说的是将biov 中的数据（保存的是从vos 中取出来的scm/nmve 的设备地址）映射到boid 里面rsrvd_dma 中的bulk，chunk 或者region中
+	// map 映射说的是将biod->biov 中的数据（保存的是从vos 中取出来的scm/nmve 的设备地址--元数据）映射到biod 里面rsrvd_dma 中的bulk，chunk 或者region中
 	// 实际就是根据biod 中的 sgl 里的 biov 构建biod 中 dma buffer 里的regions
 	rc = iod_map_iovs(biod, arg);
 	if (rc)
@@ -1722,6 +1731,7 @@ bio_iod_prep(struct bio_desc *biod, unsigned int type, void *bulk_ctxt,
 	     unsigned int bulk_perm)
 {
 	// 如果传输的有大块数据，那么bulk_ctx 不为空，否则bulk_ctx 为NULL
+	// bulk_perm 为权限类型，ro 和rw
 	return iod_prep_internal(biod, type, bulk_ctxt, bulk_perm);
 }
 
@@ -1756,7 +1766,7 @@ bio_iod_post(struct bio_desc *biod, int err)
 
 	/* Land data from buffer to media on write */
 	// 将buffer 中的数据落地到设备
-	// todo: fetch 走哪里？
+	// fetch 场景走 bio_iod_prep 中的dma_rw 函数
 	if (err == 0 && biod->bd_type == BIO_IOD_TYPE_UPDATE)
 		dma_rw(biod);
 
@@ -1776,21 +1786,26 @@ int
 bio_iod_post_async(struct bio_desc *biod, int err)
 {
 	/* Async post is for UPDATE only */
+	// 如果不是update 请求，直接 out。读操作是同步的，直接在 bio_iod_prep 里完成spdk api 读接口调用。只有写可能是异步的
 	if (biod->bd_type != BIO_IOD_TYPE_UPDATE)
 		goto out;
 
 	/* Async post is only for MD on SSD */
+	// 如果没有meta 设备，直接 out
 	if (!bio_nvme_configured(SMD_DEV_TYPE_META))
 		goto out;
 	/*
 	 * When the value on data blob is too large, don't do async post to
 	 * avoid calculating checksum for large values.
 	 */
+	// 异步 post 有最大数据量限制，超过了也直接 out
 	if (biod->bd_nvme_bytes > bio_max_async_sz)
 		goto out;
 
+	// 上面三个逻辑判断都是为了设置这个flag
 	biod->bd_async_post = 1;
 out:
+	// 开始post
 	return bio_iod_post(biod, err);
 }
 
@@ -1806,6 +1821,7 @@ bio_iod_copy(struct bio_desc *biod, d_sg_list_t *sgls, unsigned int nr_sgl)
 		return -DER_INVAL;
 
 	// 这里是d_sgls 和d_iov
+	// sgls 下存在多个biov
 	arg.ca_sgls = sgls;
 	arg.ca_sgl_cnt = nr_sgl;
 
@@ -1818,6 +1834,7 @@ bio_iod_copy(struct bio_desc *biod, d_sg_list_t *sgls, unsigned int nr_sgl)
 static int
 flush_one(struct bio_desc *biod, struct bio_iov *biov, void *arg)
 {
+	// 获取scm 实例
 	struct umem_instance *umem = biod->bd_umem;
 
 	D_ASSERT(arg == NULL);
@@ -1834,6 +1851,7 @@ flush_one(struct bio_desc *biod, struct bio_iov *biov, void *arg)
 		return 0;
 
 	D_ASSERT(bio_iov2raw_buf(biov) != NULL);
+	// 只是flush 元数据（scm 中数据）
 	umem_atomic_flush(umem, bio_iov2req_buf(biov),
 		      bio_iov2req_len(biov));
 	return 0;

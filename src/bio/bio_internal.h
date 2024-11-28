@@ -387,9 +387,11 @@ struct bio_xs_blobstore {
 };
 
 /* Per-xstream NVMe context */
+// 每个xs 的nvme ctx
 struct bio_xs_context {
 	int			 bxc_tgt_id;
 	struct spdk_thread	*bxc_thread;
+	// 对应三种类型的设备：meta，wal 和data
 	struct bio_xs_blobstore	*bxc_xs_blobstores[SMD_DEV_TYPE_MAX];
 	struct bio_dma_buffer	*bxc_dma_buf;
 	unsigned int		 bxc_ready:1,		/* xstream setup finished */
@@ -472,10 +474,11 @@ struct bio_desc {
 	// 对应scm 设备
 	struct umem_instance	*bd_umem;
 	// 对应nvme 设备。bio ctx，里面有xs 的ctx
+	// 这里面有spdk_blob
 	struct bio_io_context	*bd_ctxt;
 	/* DMA buffers reserved by this io descriptor */
 	// 当前biod 拥有的dma buffers，又会按照region 来拆分
-	// todo: 这里存储的是当前已经预留的所有资源，包括scm 和nvme 的资源，这个将决定哪个object 将被写到哪个硬盘上
+	// 为了减少io 操作的缓冲区，每个biod 有各自的
 	struct bio_rsrvd_dma	 bd_rsrvd;
 	/* Report blob i/o completion */
 	ABT_eventual		 bd_dma_done;
@@ -496,7 +499,7 @@ struct bio_desc {
 				 bd_async_post:1,
 				 bd_non_blocking:1;
 	/* Cached bulk handles being used by this IOD */
-	// 当前iod 缓存的bulk hdls
+	// 当前iod 缓存的bulk hdls。每map 一次，占用一个bulk
 	struct bio_bulk_hdl    **bd_bulk_hdls;
 	unsigned int		 bd_bulk_max;
 	unsigned int		 bd_bulk_cnt;
@@ -642,7 +645,7 @@ dma_biov2pg(struct bio_iov *biov, uint64_t *off, uint64_t *end,
 	    unsigned int *pg_cnt, unsigned int *pg_off)
 {
 	// biov 的头尾。中间包含的是当前biov 这些数据
-	// todo: 这里内部又是根据什么转化的，即 bi_addr.ba_off 是怎么来的
+	// 这里的off 是1. fetch 场景查询出来的 2. update 场景新预留出来的。保存到biov 中
 	*off = bio_iov2raw_off(biov);
 	*end = bio_iov2raw_off(biov) + bio_iov2raw_len(biov);
 

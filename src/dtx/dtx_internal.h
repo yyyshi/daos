@@ -158,6 +158,7 @@ struct dtx_pool_metrics {
 /*
  * DTX TLS
  */
+// = thread local storage
 struct dtx_tls {
 	struct d_tm_node_t	*dt_committable;
 	struct d_tm_node_t	*dt_dtx_leader_total;

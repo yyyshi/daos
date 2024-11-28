@@ -251,6 +251,7 @@ struct shard_rw_args {
 	d_sg_list_t		*sgls_dup;
 	struct dtx_id		 dti;
 	// 用于rdma 的bulk 信息，这里保存了remote 的内存信息
+	// mercury bulk layer 的 HG_Bulk_transfer 中作为 origin_handle 参数传递
 	crt_bulk_t		*bulks;
 	struct obj_io_desc	*oiods;
 	uint64_t		*offs;
@@ -437,7 +438,9 @@ struct obj_auxi_args {
 	/* one shard_args embedded to save one memory allocation if the obj
 	 * request only targets for one shard.
 	 */
+	// 不同类型opt 场景下对应不同args 数据结构
 	union {
+		// fetch + update 场景
 		struct shard_rw_args		rw_args;
 		struct shard_punch_args		p_args;
 		struct shard_list_args		l_args;
@@ -745,6 +748,7 @@ uint32_t dc_obj_retry_delay(tse_task_t *task, int err, uint16_t *retry_cnt,
 			    uint16_t *inprogress_cnt);
 
 /* handles, pointers for handling I/O */
+// todo: ioc 是来描述什么的
 struct obj_io_context {
 	struct ds_cont_hdl	*ioc_coh;
 	struct ds_cont_child	*ioc_coc;

@@ -296,6 +296,7 @@ vos_oi_find_alloc(struct vos_container *cont, daos_unit_oid_t oid,
 	}
 	obj = val_iov.iov_buf;
 	/** Since we just allocated it, we can save a tx_add later to set this */
+	// todo: 什么作用
 	obj->vo_max_write = epoch;
 
 	vos_ilog_ts_ignore(vos_cont2umm(cont), &obj->vo_ilog);
@@ -310,6 +311,7 @@ do_log:
 	if (rc != 0)
 		return rc;
 
+	// todo: ilog 里也传入 epoch
 	rc = ilog_update(loh, NULL, epoch,
 			 dtx_is_valid_handle(dth) ? dth->dth_op_seq : 1, false);
 

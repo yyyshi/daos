@@ -62,6 +62,7 @@ struct dtx_handle {
 	 * The object ID is used to elect the DTX leader,
 	 * mainly used for CoS (for single RDG case) and DTX recovery.
 	 */
+	// todo: dtx 的leader，跟池的leader 有啥关系
 	daos_unit_oid_t			 dth_leader_oid;
 
 	uint32_t			 dth_sync:1, /* commit synchronously. */
@@ -104,7 +105,7 @@ struct dtx_handle {
 	/* The array of the DTXs for Commit on Share (conflcit). */
 	struct dtx_id			*dth_dti_cos;
 	/** Pointer to the DTX entry in DRAM. */
-	// 指向 dram 中dtx 的记录
+	// 指向当前dth 的dtx entry数组
 	void				*dth_ent;
 	/** The flags, see dtx_entry_flags. */
 	uint32_t			 dth_flags;
@@ -114,6 +115,7 @@ struct dtx_handle {
 	/** The total sub modifications count. */
 	uint16_t			 dth_modification_cnt;
 	/** Modification sequence in the distributed transaction. */
+	// 分布式事务中的修改序列号
 	uint16_t			 dth_op_seq;
 
 	/** The count of objects that are modified by this DTX. */
@@ -146,7 +148,7 @@ struct dtx_handle {
 	// 待检查的dtx 列表
 	/* DTX list to be checked */
 	d_list_t			 dth_share_tbd_list;
-	// 需要刷新的个数
+	// 需要检查的个数
 	int				 dth_share_tbd_count;
 };
 

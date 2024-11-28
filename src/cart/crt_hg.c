@@ -1617,6 +1617,9 @@ crt_hg_bulk_create(struct crt_hg_context *hg_ctx, d_sg_list_t *sgl,
 	D_ASSERT(sgl != NULL && bulk_hdl != NULL);
 	D_ASSERT(bulk_perm == CRT_BULK_RW || bulk_perm == CRT_BULK_RO);
 
+	// 标记bulks 读写权限
+	// 1. rw 对应fetch 请求
+	// 2. ro 对应update 请求
 	flags = (bulk_perm == CRT_BULK_RW) ? HG_BULK_READWRITE : HG_BULK_READ_ONLY;
 
 	if (sgl->sg_nr <= CRT_HG_IOVN_STACK) {

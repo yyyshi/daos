@@ -357,7 +357,8 @@ func (sb *spdkBackend) Scan(req storage.BdevScanRequest) (*storage.BdevScanRespo
 
 	// 发现的设备
 	// func (n *NvmeImpl) Discover spdk 的c 语言封装类
-	// struct ret_t *nvme_discover(void)
+	// struct ret_t *
+	// nvme_discover(void)
 	foundDevs, err := sb.binding.Discover(sb.log)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to discover nvme")

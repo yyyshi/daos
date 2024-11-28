@@ -319,6 +319,7 @@ typedef enum {
 
 typedef void *crt_bulk_opid_t;
 
+// bulk 类型传输许可
 /** Bulk transfer permissions */
 typedef enum {
 	/** read/write */

@@ -144,7 +144,8 @@ bio_addr_set(bio_addr_t *addr, uint16_t type, uint64_t off)
 	addr->ba_type = type;
 	// 对于scm 来说，是内存实际地址
 	// 对于nvme 来说，是spdk blob 的offset，最后调用spdk_blob_io_write 接口时候是用的这个offset
-	// todo: 那么这个off 是从哪里来的呢: 预留资源的时候设置的
+	// 这里的off 是在预留资源的时候，通过pmdk 或者spdk 返回的地址
+	// 这里传递给ba_off ，后面将在 bulk_map_one 时候使用
 	addr->ba_off = umem_off2offset(off);
 }
 
@@ -278,6 +279,7 @@ bio_sgl_init(struct bio_sglist *sgl, unsigned int nr)
 		return 0;
 	}
 
+	// 初始化sgl 中的 nr 个biov
 	D_ALLOC_ARRAY(sgl->bs_iovs, nr);
 
 	return sgl->bs_iovs == NULL ? -DER_NOMEM : 0;

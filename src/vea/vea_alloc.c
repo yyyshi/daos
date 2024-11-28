@@ -428,6 +428,7 @@ reserve_small(struct vea_space_info *vsi, uint32_t blk_cnt,
 	return reserve_size_tree(vsi, blk_cnt, resrvd);
 }
 
+// nvme 资源的预留。按extend 为单位。一个extend 包含多个blk
 int
 reserve_single(struct vea_space_info *vsi, uint32_t blk_cnt,
 	       struct vea_resrvd_ext *resrvd)

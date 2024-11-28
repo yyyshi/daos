@@ -682,10 +682,12 @@ static int
 svt_check_availability(struct btr_instance *tins, struct btr_record *rec,
 		       uint32_t intent)
 {
+	// todo: hash key为啥转成epoch
 	daos_epoch_t		*epc = (daos_epoch_t *)&rec->rec_hkey[0];
 	struct vos_irec_df	*svt;
 
 	svt = umem_off2ptr(&tins->ti_umm, rec->rec_off);
+	// 检查available 状态的dtx
 	return vos_dtx_check_availability(tins->ti_coh, svt->ir_dtx, *epc,
 					  intent, DTX_RT_SVT, true);
 }
@@ -705,6 +707,7 @@ static btr_ops_t singv_btr_ops = {
 	.to_rec_free		= svt_rec_free,
 	.to_rec_fetch		= svt_rec_fetch,
 	.to_rec_update		= svt_rec_update,
+	// 检查vos dtx available 状态列表
 	.to_check_availability	= svt_check_availability,
 	.to_node_alloc		= svt_node_alloc,
 };
@@ -972,6 +975,7 @@ key_tree_prepare(struct vos_object *obj, daos_handle_t toh,
 	// 为了避免将参数传递到多嵌套树的复杂性，树操作不嵌套，而是：
 	// 1. fetch 场景，我们存储加载在父树叶子中的子树根
 	// 2. update/insert 场景，我们调用dbtree_update()，它可以为子树创建根，或者如果已经存在将直接返回
+	// todo: 如果查不到，riov 会返回一个吗？
 	rc = dbtree_fetch(toh, BTR_PROBE_EQ, intent, key,
 			  NULL, &riov);
 	switch (rc) {

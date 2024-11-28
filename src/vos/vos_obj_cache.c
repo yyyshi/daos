@@ -50,6 +50,7 @@ init_object(struct vos_object *obj, daos_unit_oid_t oid, struct vos_container *c
 	obj->obj_id	= oid;
 	obj->obj_cont	= cont;
 	vos_cont_addref(cont);
+	// 初始化vos ilog
 	vos_ilog_fetch_init(&obj->obj_ilog_info);
 }
 
@@ -300,7 +301,7 @@ cache_object(struct daos_lru_cache *occ, struct vos_object **objp)
 }
 
 // 内部调用的是 vos_oi_find 和 vos_oi_find_alloc
-// 在 vos_fetch_begin 和 vos_update_end 里面会调用
+// 在 vos_fetch_begin 和 vos_update_end 里面都会调用 vos_obj_hold
 // 有两级：内存的lru 和pmem 的oi table tree
 // obj_p 里面有df，是 obj 在pmem 中的地址
 int
@@ -351,12 +352,14 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 
 	// 先从lru cache 里查询，如果没查到就insert 进去
 	// todo: 没查到直接加进去，但是pmem 中没有，还不是没用，应该和pmem 中保持一致吧？
+	// todo: 这里查询不传入epoch 的吗：因为这里是查询obj，所以不用epoch，akey 或者value的时候才会用到么？
 	rc = daos_lru_ref_hold(occ, &lkey, sizeof(lkey), create_flag, &lret);
 	if (rc == -DER_NONEXIST) {
 		D_ASSERT(obj_local.obj_cont == NULL);
 		// todo: 用法
 		// cache 里面没有，设置为 obj_local ??
 		obj = &obj_local;
+		// 这里面会初始化obj 的ilog
 		init_object(obj, oid, cont);
 	} else if (rc != 0) {
 		D_GOTO(failed_2, rc);
@@ -411,6 +414,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		// 传入cont 和oid 去该container 下的b+ 树中查询object 元数据信息
 		// 这个地址对应的其实就是object 的元数据信息，因为pmem 本来就是存储元数据和小容量数据的
 		// df 为查询命中的出参，如果没查到就报错
+		// todo: 查询的时候不带 epoch
 		rc = vos_oi_find(cont, oid, &obj->obj_df, ts_set);
 		if (rc == -DER_NONEXIST) {
 			D_DEBUG(DB_TRACE, "non exist oid "DF_UOID"\n",
@@ -422,6 +426,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 		// 如果是update 操作，先去oi table 中查询，查到了返回
 		// 没查到则将在oi table 中创建并返回
 		// df 为新创建的出参
+		// todo: 创建的时候带 epoch
 		rc = vos_oi_find_alloc(cont, oid, epr->epr_hi, false,
 				       &obj->obj_df, ts_set);
 		D_ASSERT(rc || obj->obj_df);
@@ -439,6 +444,7 @@ vos_obj_hold(struct daos_lru_cache *occ, struct vos_container *cont,
 	}
 
 	// todo: 如果获取到了有效的df，那么会处理ilog 相关的操作
+	// todo: fetch 和update 场景都会走 check_object 逻辑
 check_object:
 	if (obj->obj_discard && (create || (flags & VOS_OBJ_DISCARD) != 0)) {
 		/** Cleanup before assert so unit test that triggers doesn't corrupt the state */
@@ -459,6 +465,7 @@ check_object:
 		// 上面获取到了df，这里使用从df 里获取到的ilog 信息--ilog 的tree root
 		// vo_ilog 是从lru 或者oit 中查询出来的，vos_ilog_fetch 查询结果保存在 obj_ilog_info 中
 		// ilog 信息和obj 的df 信息是存在一块的
+		// todo: 这里的vos container 和target 是一一对应的吗？
 		rc = vos_ilog_fetch(vos_cont2umm(cont), vos_cont2hdl(cont),
 				    intent, &obj->obj_df->vo_ilog, epr->epr_hi,
 				    bound, false, /* has_cond: no object level condition. */

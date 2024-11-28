@@ -706,6 +706,7 @@ vos_ts_rh_update(struct vos_ts_entry *entry, daos_epoch_t read_time,
 }
 
 /** Internal API to check read conflict of a given entry */
+// 检查给定的entry 是否存在read 冲突
 bool
 vos_ts_check_read_conflict(struct vos_ts_set *ts_set, int idx,
 			   daos_epoch_t write_time);
@@ -718,6 +719,7 @@ vos_ts_check_read_conflict(struct vos_ts_set *ts_set, int idx,
  * \return	true		Conflict
  *		false		No conflict (or no timestamp set)
  */
+// 检查给定的set 是否存在读写冲突
 static inline int
 vos_ts_set_check_conflict(struct vos_ts_set *ts_set, daos_epoch_t write_time)
 {

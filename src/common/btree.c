@@ -1025,6 +1025,8 @@ btr_check_availability(struct btr_context *tcx, struct btr_check_alb *alb)
 		return PROBE_RC_OK;
 
 	rec = btr_node_rec_at(tcx, alb->nd_off, alb->at);
+	// 查询是否存在需要check 的dtx
+	// == svt_check_availability
 	rc = btr_ops(tcx)->to_check_availability(&tcx->tc_tins, rec,
 						 alb->intent);
 	if (rc == -DER_INPROGRESS) /* Uncertain */
@@ -1684,7 +1686,7 @@ btr_probe_key(struct btr_context *tcx, dbtree_probe_opc_t probe_opc,
 	char hkey[DAOS_HKEY_MAX];
 
 	btr_hkey_gen(tcx, key, hkey);
-	// 根据hash key 探针
+	// 根据hash key 探针。每次查询都会在内部执行： btr_check_availability
 	return btr_probe(tcx, probe_opc, intent, key, hkey);
 }
 
@@ -1846,6 +1848,7 @@ dbtree_fetch(daos_handle_t toh, dbtree_probe_opc_t opc, uint32_t intent,
 	// 探测key，设置探针。opc 为小于等于，intent 为fetch 操作，key 为要查询的key
 	// todo: 这里key 中也没存储什么有用信息呢，为什么最后可以按key 查询
 	// 如果查到了，会存储到 tcx::tc_traces 里
+	// 这里会查询vos 中存储dtx 相关的信息，比如能获取到需要做检查的dtx 列表，这个列表在dtx_refresh 中会用到
 	rc = btr_probe_key(tcx, opc, intent, key);
 	switch (rc) {
 	case PROBE_RC_INPROGRESS:

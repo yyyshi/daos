@@ -49,6 +49,7 @@ int ds_cont_tgt_open(uuid_t pool_uuid, uuid_t cont_hdl_uuid,
  * handle. N.B. sc_uuid and sc_pool_uuid must be contiguous in memory,
  * used as a 256 bit key in tls dt_cont_cache.
  */
+// 每个thread 各自的container 信息
 struct ds_cont_child {
 	struct daos_llink	 sc_list;
 	daos_handle_t		 sc_hdl;	/* vos_container handle */

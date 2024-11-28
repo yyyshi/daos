@@ -343,15 +343,17 @@ pool_child_add_one(void *varg)
 	D_INIT_LIST_HEAD(&child->spc_list);
 	D_INIT_LIST_HEAD(&child->spc_cont_list);
 
+	// 启动gc
 	rc = start_gc_ult(child);
 	if (rc != 0)
 		goto out_eventual;
 
+	// 启动flush
 	rc = start_flush_ult(child);
 	if (rc != 0)
 		goto out_gc;
 
-	// 开始scrub
+	// 启动scrub
 	rc = ds_start_scrubbing_ult(child);
 	if (rc != 0)
 		goto out_flush;
@@ -363,6 +365,7 @@ pool_child_add_one(void *varg)
 	d_list_add(&child->spc_list, &tls->dt_pool_list);
 
 	/* Load all containers */
+	// 加载所有的containers
 	rc = ds_cont_child_start_all(child);
 	if (rc)
 		goto out_list;
@@ -517,6 +520,7 @@ pool_alloc_ref(void *key, unsigned int ksize, void *varg,
 	collective_arg.pla_pool = pool;
 	collective_arg.pla_uuid = key;
 	collective_arg.pla_map_version = arg->pca_map_version;
+	// todo: pool child 是什么概念
 	rc = dss_thread_collective(pool_child_add_one, &collective_arg, DSS_ULT_DEEP_STACK);
 	if (rc != 0) {
 		D_ERROR(DF_UUID": failed to add ES pool caches: "DF_RC"\n",

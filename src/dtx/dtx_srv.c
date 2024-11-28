@@ -187,11 +187,13 @@ dtx_handler(crt_rpc_t *rpc)
 		if (unlikely(din->di_epoch == 1))
 			D_GOTO(out, rc = -DER_IO);
 
+		// 遍历list 并提交
 		while (i < din->di_dtx_array.ca_count) {
 			if (i + count > din->di_dtx_array.ca_count)
 				count = din->di_dtx_array.ca_count - i;
 
 			dtis = (struct dtx_id *)din->di_dtx_array.ca_arrays + i;
+			// 提交
 			rc1 = vos_dtx_commit(cont->sc_hdl, dtis, count, NULL);
 			if (rc1 > 0)
 				committed += rc1;
@@ -254,6 +256,7 @@ dtx_handler(crt_rpc_t *rpc)
 
 		break;
 	case DTX_REFRESH:
+		// 当前主要关注的是 refresh
 		count = din->di_dtx_array.ca_count;
 		if (count == 0)
 			D_GOTO(out, rc = 0);
@@ -278,9 +281,11 @@ dtx_handler(crt_rpc_t *rpc)
 
 		flags = din->di_flags.ca_arrays;
 
+		// 遍历
 		for (i = 0, rc1 = 0; i < count; i++) {
 			ptr = (int *)dout->do_sub_rets.ca_arrays + i;
 			dtis = (struct dtx_id *)din->di_dtx_array.ca_arrays + i;
+			// todo: dtx 的状态都是在这里切换的吗？
 			*ptr = vos_dtx_check(cont->sc_hdl, dtis, NULL, &vers[i], &mbs[i], &dcks[i],
 					     true);
 			if (*ptr == -DER_NONEXIST && !(flags[i] & DRF_INITIAL_LEADER)) {
@@ -291,6 +296,7 @@ dtx_handler(crt_rpc_t *rpc)
 				 * has been aggregated, then it may has been removed by
 				 * DTX aggregation. Under such case, return -DER_TX_UNCERTAIN.
 				 */
+				// dtx_id::dti_hlc 是客户端发来的时间戳
 				vos_dtx_stat(cont->sc_hdl, &stat, DSF_SKIP_BAD);
 				if (dtis->dti_hlc <= stat.dtx_newest_aggregated) {
 					D_WARN("Not sure about whether the old DTX "
@@ -325,6 +331,7 @@ out:
 
 	dout->do_status = rc;
 	/* For DTX_COMMIT, it is the count of real committed DTX entries. */
+	// 对于提交请求，这个值为实际已提交的记录个数
 	dout->do_misc = committed;
 	rc = crt_reply_send(rpc);
 	if (rc != 0)
@@ -360,6 +367,7 @@ out:
 		/* Commit the DTX after replied the original refresh request to
 		 * avoid further query the same DTX.
 		 */
+		// 2pc 的实现函数。另外一个函数叫 vos_dtx_commit
 		rc = dtx_commit(cont, pdte, dcks, j);
 		if (rc < 0)
 			D_WARN("Failed to commit DTX "DF_DTI", count %d: "
@@ -431,6 +439,7 @@ dtx_setup(void)
 {
 	int	rc;
 
+	// 启动 dtx 批量提交
 	rc = dss_ult_create_all(dtx_batched_commit, NULL, true);
 	if (rc != 0) {
 		D_ERROR("Failed to create DTX batched commit ULT: "DF_RC"\n", DP_RC(rc));

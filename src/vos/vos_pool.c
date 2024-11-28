@@ -567,6 +567,7 @@ vos2mc_flags(unsigned int vos_flags)
 }
 
 // MD-on-SSD
+// todo: 配置文件中的scm 和nvme 设备是如何分配给多个xs 的
 static int
 vos_pmemobj_create(const char *path, uuid_t pool_id, const char *layout,
 		   size_t scm_sz, size_t nvme_sz, size_t wal_sz, unsigned int flags,
@@ -1056,11 +1057,13 @@ end:
 		goto open;
 
 	/* Format SPDK blob header */
+	// 格式化spdk blob 头
 	blob_hdr.bbh_blk_sz = VOS_BLK_SZ;
 	blob_hdr.bbh_hdr_sz = VOS_BLOB_HDR_BLKS;
 	uuid_copy(blob_hdr.bbh_pool, uuid);
 
 	/* Format SPDK blob*/
+	// 格式化spdk blob
 	rc = vea_format(&umem, vos_txd_get(flags & VOS_POF_SYSDB), &pool_df->pd_vea_df,
 			VOS_BLK_SZ, VOS_BLOB_HDR_BLKS, nvme_sz, vos_blob_format_cb,
 			&blob_hdr, false);
@@ -1091,6 +1094,7 @@ close:
 	return rc;
 }
 
+// 创建vos pool
 int
 vos_pool_create(const char *path, uuid_t uuid, daos_size_t scm_sz,
 		daos_size_t nvme_sz, unsigned int flags, daos_handle_t *poh)
@@ -1299,6 +1303,7 @@ pool_open(void *ph, struct vos_pool_df *pool_df, unsigned int flags, void *metri
 
 	pool->vp_metrics = metrics;
 	// 如果配置了nvme 的信息，加载到vea 模块。vea 是专门为了管理blk 设备资源的
+	// todo: 每个target 负责哪个范围的nvme 设备空间，是怎么划分的
 	if (bio_nvme_configured(SMD_DEV_TYPE_DATA) && pool_df->pd_nvme_sz != 0) {
 		struct vea_unmap_context	 unmap_ctxt;
 		struct vos_pool_metrics		*vp_metrics = metrics;

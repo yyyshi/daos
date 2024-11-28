@@ -69,6 +69,7 @@ struct dtx_req_args {
 /* The record for the DTX classify-tree in DRAM.
  * Each dtx_req_rec contains one RPC (to related rank/tag) args.
  */
+// 保存在内存分类树上的dtx 记录
 struct dtx_req_rec {
 	/* All the records are linked into one global list,
 	 * used for travelling the classify-tree efficiently.
@@ -174,6 +175,7 @@ dtx_req_cb(const struct crt_cb_info *cb_info)
 
 		switch (*ret) {
 		case DTX_ST_PREPARED:
+			// 状态转换，添加一个active 的item
 			d_list_add_tail(&dsp->dsp_link, dra->dra_act_list);
 			break;
 		case DTX_ST_COMMITTABLE:
@@ -182,6 +184,7 @@ dtx_req_cb(const struct crt_cb_info *cb_info)
 			 * Fall through.
 			 */
 		case DTX_ST_COMMITTED:
+			// 状态转换，添加一个commit 的item
 			d_list_add_tail(&dsp->dsp_link, dra->dra_cmt_list);
 			break;
 		case DTX_ST_CORRUPTED:
@@ -193,6 +196,7 @@ dtx_req_cb(const struct crt_cb_info *cb_info)
 			d_list_add_tail(&dsp->dsp_link, dra->dra_act_list);
 			break;
 		case -DER_NONEXIST:
+			// 状态转换，添加一个abort 的item
 			d_list_add_tail(&dsp->dsp_link, dra->dra_abt_list);
 			break;
 		case -DER_INPROGRESS:
@@ -264,6 +268,7 @@ dtx_req_send(struct dtx_req_rec *drr, daos_epoch_t epoch)
 			D_ASSERTF(rc == 0, "crt_req_set_timeout failed: %d\n", rc);
 		}
 
+		// 发送dtx 的rpc，cb 函数 == dtx_req_cb
 		rc = crt_req_send(req, dtx_req_cb, drr);
 	}
 
@@ -398,12 +403,13 @@ dtx_req_list_send(struct dtx_common_args *dca, daos_epoch_t epoch, int len)
 
 	D_DEBUG(DB_TRACE, "DTX req for opc %x, future %p start.\n", dra->dra_opc, dra->dra_future);
 
-	// todo: 这个head 里的item 都是哪里来的
+	// 遍历dca 的head，发送rpc
 	d_list_for_each_entry(drr, &dca->dca_head, drr_link) {
 		drr->drr_parent = dra;
 		drr->drr_result = 0;
 
 		// 对应的处理rpc 的函数是：dtx_handler(crt_rpc_t *rpc)
+		// opc == DTX_REFRESH
 		if (unlikely(dra->dra_opc == DTX_COMMIT && i == 0 &&
 			     DAOS_FAIL_CHECK(DAOS_DTX_FAIL_COMMIT)))
 			rc = dtx_req_send(drr, 1);
@@ -610,6 +616,7 @@ dtx_rpc_internal(struct dtx_common_args *dca)
 	int			 rc;
 	int			 i;
 
+	// 非 refresh 走这里
 	if (dca->dca_dra.dra_opc != DTX_REFRESH) {
 		D_ASSERT(dca->dca_dtis != NULL);
 
@@ -641,6 +648,7 @@ dtx_rpc_internal(struct dtx_common_args *dca)
 		if (d_list_empty(&dca->dca_head))
 			return dca->dca_dra.dra_opc == DTX_CHECK ? DTX_ST_PREPARED : 0;
 	} else {
+		// 当前主要关注refresh
 		length = dca->dca_count;
 	}
 
@@ -670,9 +678,11 @@ dtx_rpc_prep(struct ds_cont_child *cont,d_list_t *dti_list,  struct dtx_entry **
 	     uint32_t count, int opc, daos_epoch_t epoch, d_list_t *cmt_list,
 	     d_list_t *abt_list, d_list_t *act_list, struct dtx_common_args *dca)
 {
+	// 构造 rpc 请求的参数
 	struct dtx_req_args	*dra;
 	int			 rc = 0;
 
+	// 构造dca
 	memset(dca, 0, sizeof(*dca));
 
 	D_INIT_LIST_HEAD(&dca->dca_head);
@@ -687,6 +697,7 @@ dtx_rpc_prep(struct ds_cont_child *cont,d_list_t *dti_list,  struct dtx_entry **
 
 	dra = &dca->dca_dra;
 	dra->dra_future = ABT_FUTURE_NULL;
+	// 三个列表
 	dra->dra_cmt_list = cmt_list;
 	dra->dra_abt_list = abt_list;
 	dra->dra_act_list = act_list;
@@ -695,6 +706,8 @@ dtx_rpc_prep(struct ds_cont_child *cont,d_list_t *dti_list,  struct dtx_entry **
 	uuid_copy(dra->dra_co_uuid, cont->sc_uuid);
 
 	if (dti_list != NULL) {
+		// 拼接两个list，结果存到后面这个list 里
+		// todo: dca 的head 是个啥
 		d_list_splice(dti_list, &dca->dca_head);
 		D_INIT_LIST_HEAD(dti_list);
 	} else {
@@ -713,6 +726,7 @@ dtx_rpc_prep(struct ds_cont_child *cont,d_list_t *dti_list,  struct dtx_entry **
 		rc = dss_ult_create(dtx_rpc_helper, dca, DSS_XS_IOFW, dca->dca_tgtid,
 				    DSS_DEEP_STACK_SZ, &dca->dca_helper);
 	else
+		// 根据dca 发送rpc 请求，将输入head 并返回三个list
 		rc = dtx_rpc_internal(dca);
 
 out:
@@ -722,6 +736,7 @@ out:
 static int
 dtx_rpc_post(struct dtx_common_args *dca, int ret, bool keep_head)
 {
+	// rpc 请求的记录
 	struct dtx_req_rec	*drr;
 	int			 rc;
 
@@ -772,7 +787,7 @@ dtx_commit(struct ds_cont_child *cont, struct dtx_entry **dtes,
 	int			 i;
 
 	// 发送dtx 的rpc 请求给参与者
-	// todo； 这个是2pc 中的p 吗？
+	// 这个是2pc 中的p
 	rc = dtx_rpc_prep(cont, NULL, dtes, count, DTX_COMMIT, 0, NULL, NULL, NULL, &dca);
 
 	/*
@@ -919,6 +934,7 @@ dtx_refresh_internal(struct ds_cont_child *cont, int *check_count, d_list_t *che
 {
 	struct ds_pool		*pool = cont->sc_pool->spc_pool;
 	struct pool_target	*target;
+	// todo: 怎么做到的批量提交
 	struct dtx_share_peer	*dsp;
 	struct dtx_share_peer	*tmp;
 	struct dtx_req_rec	*drr;
@@ -938,10 +954,12 @@ dtx_refresh_internal(struct ds_cont_child *cont, int *check_count, d_list_t *che
 	D_INIT_LIST_HEAD(&self);
 	crt_group_rank(NULL, &myrank);
 
+	// 1. 处理check list
 	d_list_for_each_entry_safe(dsp, tmp, check_list, dsp_link) {
 		count = 0;
 		drop = false;
 
+		// 如果没有dtx members，加载members
 		if (dsp->dsp_mbs == NULL) {
 			rc = vos_dtx_load_mbs(cont->sc_hdl, &dsp->dsp_xid, &dsp->dsp_mbs);
 			if (rc != 0) {
@@ -954,6 +972,7 @@ dtx_refresh_internal(struct ds_cont_child *cont, int *check_count, d_list_t *che
 		}
 
 again:
+		// 从membs 里找到dtx 的leader target
 		rc = dtx_leader_get(pool, dsp->dsp_mbs, &target);
 		if (rc < 0) {
 			/**
@@ -976,9 +995,12 @@ again:
 		 * 1. In DTX resync, the status may be resolved sometime later.
 		 * 2. The DTX resync is done, but failed to handle related DTX.
 		 */
+		// 如果当前就是leader
 		if (myrank == target->ta_comp.co_rank &&
 		    dss_get_module_info()->dmi_tgt_id == target->ta_comp.co_index) {
+			// 移除当前记录
 			d_list_del(&dsp->dsp_link);
+			// 将当前记录 dsp->dsp_link 添加到 self 尾部
 			d_list_add_tail(&dsp->dsp_link, &self);
 			if (--(*check_count) == 0)
 				break;
@@ -990,6 +1012,7 @@ again:
 		 * then pool map may be refreshed during that. Let's retry
 		 * to find out the new leader.
 		 */
+		// 如果leader 不是up状态，并且不是upin（在get leader 后状态发生了更新），需要重新选择dtx leader
 		if (target->ta_comp.co_status != PO_COMP_ST_UP &&
 		    target->ta_comp.co_status != PO_COMP_ST_UPIN) {
 			if (unlikely(++count % 10 == 3))
@@ -1006,6 +1029,7 @@ again:
 		else
 			flags = 0;
 
+		// 构造 dtx req record
 		d_list_for_each_entry(drr, &head, drr_link) {
 			if (drr->drr_rank == target->ta_comp.co_rank &&
 			    drr->drr_tag == target->ta_comp.co_index) {
@@ -1035,6 +1059,8 @@ again:
 		drr->drr_dti[0] = dsp->dsp_xid;
 		drr->drr_flags[0] = flags;
 		drr->drr_cb_args[0] = dsp;
+		// 添加到head 末尾
+		// todo: head 中存的什么
 		d_list_add_tail(&drr->drr_link, &head);
 		len++;
 
@@ -1046,9 +1072,12 @@ next:
 			break;
 	}
 
+	// 处理 head 列表。根据head 表通过rpc 获取三个list 的信息
 	if (len > 0) {
+		// 构造dtx refresh rpc，请求cmt，abt，act 三个list
 		rc = dtx_rpc_prep(cont, &head, NULL, len, DTX_REFRESH, 0,
 				  cmt_list, abt_list, act_list, &dca);
+		// 等待上边rpc 处理结果
 		rc = dtx_rpc_post(&dca, rc, for_io);
 
 		/*
@@ -1084,11 +1113,14 @@ next2:
 			rc = 0;
 		}
 
+		// 2. 处理commit list--从rpc 请求获取的
 		d_list_for_each_entry_safe(dsp, tmp, cmt_list, dsp_link) {
 			/*
 			 * It has been committed/committable on leader, we may miss
 			 * related DTX commit request, so let's commit it locally.
 			 */
+			// 已经在leader 上提交/可提交的记录。我们可能会错过相关的dtx 提交请求，所以让我们本地提交
+			// todo: 如果重复提交了会有影响吗？
 			rc1 = vos_dtx_commit(cont->sc_hdl, &dsp->dsp_xid, 1, NULL);
 			if (rc1 == 0 || rc1 == -DER_NONEXIST || !for_io /* cleanup case */) {
 				d_list_del(&dsp->dsp_link);
@@ -1096,6 +1128,7 @@ next2:
 			}
 		}
 
+		// 3. 处理 abort list--从rpc 请求获取的
 		d_list_for_each_entry_safe(dsp, tmp, abt_list, dsp_link) {
 			/*
 			 * The leader does not have related DTX info, we may miss
@@ -1111,6 +1144,7 @@ next2:
 			 * RPC sponsor. Let's check such case to avoid confused abort failure.
 			 */
 
+			// 类似处理commit 列表，本地执行abort 操作
 			rc1 = vos_dtx_check(cont->sc_hdl, &dsp->dsp_xid,
 					    NULL, NULL, NULL, NULL, false);
 			if (rc1 == DTX_ST_COMMITTED || rc1 == DTX_ST_COMMITTABLE ||
@@ -1128,6 +1162,7 @@ next2:
 			}
 		}
 
+		// 4. 处理active list--从rpc 请求获取的
 		d_list_for_each_entry_safe(dsp, tmp, act_list, dsp_link) {
 			if (dsp->dsp_status == -DER_TX_UNCERTAIN) {
 				rc1 = vos_dtx_set_flags(cont->sc_hdl, &dsp->dsp_xid, 1, DTE_ORPHAN);
@@ -1167,6 +1202,7 @@ next2:
 	}
 
 	/* Handle the entries whose leaders are on current server. */
+	// 5. 处理以当前节点为leader 的dtx 记录
 	d_list_for_each_entry_safe(dsp, tmp, &self, dsp_link) {
 		struct dtx_entry	dte;
 
@@ -1177,6 +1213,7 @@ next2:
 		dte.dte_refs = 1;
 		dte.dte_mbs = dsp->dsp_mbs;
 
+		// 按dte 循环处理
 		rc = dtx_status_handle_one(cont, &dte, dsp->dsp_epoch,
 					   NULL, NULL);
 		switch (rc) {
@@ -1255,6 +1292,8 @@ dtx_refresh(struct dtx_handle *dth, struct ds_cont_child *cont)
 		return -DER_IO;
 
 	// 多个list 一起去leader 刷新，从leader 同步数据
+	// dth_share_tbd_count++ 是在btree probe 操作时增加
+	// todo: cmt，dbt，act 都没有看到插入数据到list 的逻辑
 	rc = dtx_refresh_internal(cont, &dth->dth_share_tbd_count,
 				  &dth->dth_share_tbd_list,
 				  &dth->dth_share_cmt_list,

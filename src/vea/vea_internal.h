@@ -175,6 +175,7 @@ struct vea_metrics {
 
 /* In-memory compound index */
 // todo: vsi_free_btr 是持久内存中的btree 吧，不是dram
+// 
 struct vea_space_info {
 	/* Instance for the pmemobj pool on SCM */
 	struct umem_instance		*vsi_umem;

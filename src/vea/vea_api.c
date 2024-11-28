@@ -156,6 +156,7 @@ vea_format(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 	if (capacity < (blk_sz * 100))
 		return -DER_NOSPACE;
 
+	// 格式化成blk
 	tot_blks = capacity / blk_sz;
 	if (tot_blks <= hdr_blks)
 		return -DER_NOSPACE;
@@ -202,6 +203,7 @@ vea_format(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 	md->vsd_hdr_blks = hdr_blks;
 
 	/* Create free extent tree */
+	// 每个vos pool 有自己各自的tree们
 	uma.uma_id = umem->umm_id;
 	uma.uma_pool = umem->umm_pool;
 	rc = dbtree_create_inplace(DBTREE_CLASS_IFV, BTR_FEAT_DIRECT_KEY, VEA_TREE_ODR, &uma,
@@ -210,6 +212,7 @@ vea_format(struct umem_instance *umem, struct umem_tx_stage_data *txd,
 		goto out;
 
 	/* Insert the initial free extent */
+	// 将空闲逻辑块插入到tree
 	free_ext.vfe_blk_off = hdr_blks;
 	free_ext.vfe_blk_cnt = tot_blks;
 	free_ext.vfe_age = 0;	/* Not used */

@@ -71,11 +71,13 @@ dc_obj_shard_open(struct dc_object *obj, daos_unit_oid_t oid,
 	D_ASSERT(obj != NULL && shard != NULL);
 	D_ASSERT(shard->do_obj == NULL);
 
+	// 根据pool 和 do_target_id 获取pool target 信息，将获取到 shard 对应的rank 和target
 	rc = dc_pool_tgt_idx2ptr(obj->cob_pool, shard->do_target_id,
 				 &map_tgt);
 	if (rc)
 		return rc;
 
+	// 根据填充的pool target 信息填充 shard，设置其rank 和tgt id
 	shard->do_id = oid;
 	shard->do_target_rank = map_tgt->ta_comp.co_rank;
 	shard->do_target_idx = map_tgt->ta_comp.co_index;
@@ -973,7 +975,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 	struct dc_pool		*pool;
 	daos_key_t		*dkey = api_args->dkey;
 	unsigned int		 nr = api_args->nr;
-	// todo: 这个是什么数据，跟bulk 是什么关系
+	// 这个是客户端传递来的实际要写的数据，如果是inline 模式，会用这个。如果是bulk 模式，上游已经根据这个构建好了bulks 结构
 	d_sg_list_t		*sgls = api_args->sgls;
 	crt_rpc_t		*req = NULL;
 	struct obj_rw_in	*orw;
@@ -1118,7 +1120,9 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 		// todo: 输入带过来的数据？比如写场景，就表示要写的数据？
 		// bulk 方式传输，走rdma
 		// bulk 里有remote 内存地址信息
+		// 1. bulk 方式准备rpc 请求数据，存储在 orw_bulks 中
 		orw->orw_bulks.ca_count = nr;
+		// 这个bulks 会传入到 mercury bulk layer 的 HG_Bulk_transfer 接口中 作为 origin_handle 参数
 		orw->orw_bulks.ca_arrays = args->bulks;
 		// todo: 如果要是走rdma 的话，需要提供读写的本地和远程地址的呀，是在哪里处理的
 		if (fw_shard_tgts != NULL)
@@ -1138,6 +1142,7 @@ dc_obj_shard_rw(struct dc_obj_shard *shard, enum obj_rpc_opc opc,
 			else
 				orw->orw_sgls.ca_count = 0;
 			// 非bulk 数据，直接从slgs 里拷贝
+			// 2. inline 方式准备rpc 请求数据，存储在 orw_sgls 中
 			orw->orw_sgls.ca_arrays = sgls;
 		}
 		orw->orw_bulks.ca_count = 0;

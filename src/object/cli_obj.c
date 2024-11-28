@@ -365,6 +365,7 @@ obj_layout_create(struct dc_object *obj, unsigned int mode, bool refresh)
 		obj_shard = &obj->cob_shards->do_shards[i];
 		obj_shard->do_shard = layout->ol_shards[i].po_shard;
 		obj_shard->do_shard_idx = i;
+		// 设置shard 对应的target id
 		obj_shard->do_target_id = layout->ol_shards[i].po_target;
 		obj_shard->do_fseq = layout->ol_shards[i].po_fseq;
 		obj_shard->do_rebuilding = layout->ol_shards[i].po_rebuilding;
@@ -2095,6 +2096,7 @@ obj_bulk_prep(d_sg_list_t *sgls, unsigned int nr, bool bulk_bind,
 	      crt_bulk_perm_t bulk_perm, tse_task_t *task,
 	      crt_bulk_t **p_bulks)
 {
+	// 创建bulks
 	crt_bulk_t	*bulks;
 	int		 i = 0;
 	int		 rc = 0;
@@ -2111,13 +2113,14 @@ obj_bulk_prep(d_sg_list_t *sgls, unsigned int nr, bool bulk_bind,
 		    sgls[i].sg_iovs[0].iov_buf != NULL) {
 			// 根据sgls 创建多个bulks。即其实就是转化成bulk 方式的数据结构便于后续rdma 传输
 			// 每一个sgls 对应一个bulk
+			// sgls 里是客户端传来的实际要写的数据
 			rc = crt_bulk_create(daos_task2ctx(task), &sgls[i],
 					     bulk_perm, &bulks[i]);
 			if (rc < 0)
 				D_GOTO(out, rc);
 			if (!bulk_bind)
 				continue;
-			// 将bulk 和task 绑定
+			// 如果需要的话，将bulk 和task 绑定
 			rc = crt_bulk_bind(bulks[i], daos_task2ctx(task));
 			if (rc != 0)
 				D_GOTO(out, rc);
@@ -2166,6 +2169,7 @@ obj_rw_bulk_prep(struct dc_object *obj, daos_iod_t *iods, d_sg_list_t *sgls,
 		 tse_task_t *task, struct obj_auxi_args *obj_auxi)
 {
 	daos_size_t		sgls_size;
+	// bulk 类型传输许可
 	crt_bulk_perm_t		bulk_perm;
 	int			rc = 0;
 
@@ -2180,15 +2184,19 @@ obj_rw_bulk_prep(struct dc_object *obj, daos_iod_t *iods, d_sg_list_t *sgls,
 	// 用来决定用那种方式完成传输。inline 方式或者 rdma 方式
 	if (sgls_size >= DAOS_BULK_LIMIT ||
 	    (obj_is_ec(obj) && !obj_auxi->reasb_req.orr_single_tgt)) {
+		// 1. 如果是update 操作，那么client 将自己的mem 的只读权限给server，server 负责读取client 的mem 到server端。都是server 发起实际读写
+		// 2. 如果是fetch 请求，那么client 将自己的mem 的读写权限给server，server 负责写数据到client 的mem。都是server 发起实际读写
 		bulk_perm = update ? CRT_BULK_RO : CRT_BULK_RW;
 		// 根据sgl 填充bulks 成员
 		// 构建object 的bulk，用于rdma 传输
 		// 填充obj_auxi 的bulks
+		// sgls 里保存的实际要写的数据
+		// mercury bulk layer 中 HG_Bulk_transfer 接口中作为 origin_handle 参数
 		rc = obj_bulk_prep(sgls, nr, bulk_bind, bulk_perm, task,
 				   &obj_auxi->bulks);
 	}
 
-	// 不进if 的话会走inline 方式传输
+	// 如果不进if 的话会走inline 方式传输，bulks 为空，数据还是保存在 sgls 中
 	obj_auxi->reasb_req.orr_size_fetched = 0;
 
 	return rc;
@@ -3089,6 +3097,7 @@ shard_task_reset_param(tse_task_t *shard_task, void *arg)
 
 // todo: shard_rw_prep 是做啥
 // obj_req_fanout --> shard_rw_prep --> shard_io --> dc_obj_shard_rw --> ds_obj_rw_handler
+// bulk 存放在 obj_auxi 的rw_args 中，后面mercury bulk layer 接口会作为 HG_Bulk_transfer 参数 origin_handle 传递
 static int
 obj_req_fanout(struct dc_object *obj, struct obj_auxi_args *obj_auxi,
 	       uint32_t map_ver, struct dtx_epoch *epoch,
@@ -3212,7 +3221,8 @@ obj_req_fanout(struct dc_object *obj, struct obj_auxi_args *obj_auxi,
 	// 如果只有一个target，不需要单独的shard task。直接执行了就完事返回，也不用调度，不用绑定主task 和sub task
 	// xs 场景tgts_nr == 1，会走这里
 	if (tgts_nr == 1 && !require_shard_task) {
-		// 根据obj 获取shard
+		// 根据obj_auxi 获取shard_auxi
+		// 通过 shard_auxi 可以获得 shard_rw_args，shard_rw_args 里保存着 bulks，是 mercury bulk layer HG_Bulk_transfer 参数 
 		shard_auxi = obj_embedded_shard_arg(obj_auxi);
 		D_ASSERT(shard_auxi != NULL);
 		// 这里设置了shard_auxi 的shard 索引，后面shard_open 时获取的就是tgt->st_shard 索引的do_shards 元素
@@ -3227,6 +3237,7 @@ obj_req_fanout(struct dc_object *obj, struct obj_auxi_args *obj_auxi,
 		// shard_io 里面会执行 io_cb == dc_obj_shard_rw
 		shard_auxi->shard_io_cb = io_cb;
 		// io_prep_cb == shard_rw_prep
+		// shard_auxi 中保存着 mercury bulk layer 的 HG_Bulk_transfer 接口中参数 origin_handle
 		rc = io_prep_cb(shard_auxi, obj, obj_auxi, shard_auxi->grp_idx);
 		if (rc)
 			goto out_task;
@@ -5144,6 +5155,7 @@ shard_rw_prep(struct shard_auxi_args *shard_auxi, struct dc_object *obj,
 		dc_tx_get_dti(obj_auxi->th, &shard_arg->dti);
 
 	// shard_auxi 的bulk 是从object 透传来的
+	// mercury bulk layer 的 HG_Bulk_transfer 接口中 作为 origin_handle 参数
 	shard_arg->bulks = obj_auxi->bulks;
 	// todo: 都是什么场景
 	if (obj_auxi->req_reasbed) {
@@ -5769,6 +5781,7 @@ dc_obj_fetch_task(tse_task_t *task)
 
 	// 在dc 端fetch 和update 请求操作之前都要先执行此函数，准备bulk 数据，实际就是填充object 中的bulks 成员
 	// bulks 里面会有本地mem 地址和远端mem 地址的信息
+	// mercury bulk layer 的HG_Bulk_transfer 中作为 origin_handle 参数，保存在 obj_auxi 的rw_args 中
 	rc = obj_rw_bulk_prep(obj, args->iods, args->sgls, args->nr,
 			      false, false, task, obj_auxi);
 	if (rc != 0)
@@ -5884,6 +5897,8 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 
 	// todo: obj 能提供哪些信息？
 	// 根据obj 构建obj auxi。obj 添加到obj_auxi 里
+	// obj_auxi 和task 绑定，根据task 可以获得对应的客户端传递来的sgls 信息
+	// args = dc_task_get_args(*task)
 	rc = obj_task_init(task, DAOS_OBJ_RPC_UPDATE, map_ver, args->th,
 			   &obj_auxi, obj);
 	if (rc != 0) {
@@ -5899,6 +5914,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 	}
 
 	if (obj_auxi->tx_convert) {
+		// 不是ec
 		if (obj_auxi->is_ec_obj && obj_auxi->req_reasbed) {
 			args->iods = obj_auxi->reasb_req.orr_uiods;
 			args->sgls = obj_auxi->reasb_req.orr_usgls;
@@ -5976,6 +5992,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 	}
 
 	// todo: 这里的usgl 和上面的sgl有什么区别
+	// 不是ec obj，这个是根据obj class 判断的
 	if (obj_auxi->is_ec_obj && obj_auxi->req_reasbed && obj_auxi->reasb_req.orr_single_tgt)
 		args->sgls = obj_auxi->reasb_req.orr_usgls;
 
@@ -5987,6 +6004,8 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 
 	// 判断sgls 数据的大小是否超过bulk 限制，超过的话使用sgls 组装bulks 结构，bulks将采用rdma 传输（另外一种传输方式是inline传输，传统的直接拷贝rpc 中数据）
 	// 这里会创建bulks 里面会有本地mem 地址和远端mem 地址信息
+	// 如果不走bulk，obj_auxi 里的bulks 为空
+    // mercury bulk layer 的HG_Bulk_transfer 中作为 origin_handle 参数，保存在 obj_auxi 的rw_args 中
 	rc = obj_rw_bulk_prep(obj, args->iods, args->sgls, args->nr, true,
 			      obj_auxi->req_tgts.ort_srv_disp, task, obj_auxi);
 	if (rc != 0)
@@ -5999,6 +6018,7 @@ dc_obj_update(tse_task_t *task, struct dtx_epoch *epoch, uint32_t map_ver,
 	// 这里将传入的 task 在内部转化成了多个 sub_task 存储在 obj_auxi->shard_task_head 中
 	// dc_obj_shard_rw 将在shard_io 中执行
 	// epoch 是上游传递下来的
+	// 如果不走bulk，可以根据 task 获取sgls 数据；如果走 bulk，上面已经根据sgls 构建了bulk 信息
 	rc = obj_req_fanout(obj, obj_auxi, map_ver, epoch,
 			    shard_rw_prep, dc_obj_shard_rw, task);
 	return rc;
@@ -6049,6 +6069,7 @@ dc_obj_update_task(tse_task_t *task)
 	/* submit the update */
 	// 客户端的biod 和sgls 都在args 里
 	// layout 等信息在obj 里
+	// 客户端写入的实际数据存储在 args 的sgls 中
 	return dc_obj_update(task, &epoch, map_ver, args, obj);
 
 comp:

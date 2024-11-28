@@ -56,7 +56,8 @@ func (n *NvmeImpl) Discover(log logging.Logger) (storage.NvmeControllers, error)
 	}
 
 	// 执行spdk 的c 语言接口
-	// struct ret_t *nvme_discover(void)
+	// struct ret_t *
+	// nvme_discover(void)
 	ctrlrs, err := collectCtrlrs(C.nvme_discover(), "NVMe Discover(): C.nvme_discover")
 
 	pciAddrs := ctrlrPCIAddresses(ctrlrs)

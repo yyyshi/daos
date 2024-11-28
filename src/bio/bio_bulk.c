@@ -469,6 +469,7 @@ bulk_get_shared_hdl(struct bio_desc *biod, struct bio_iov *biov, unsigned int re
 	if (biod->bd_bulk_cnt == 0)
 		return NULL;
 
+	// 占用掉一个hdl
 	prev_hdl = biod->bd_bulk_hdls[biod->bd_bulk_cnt - 1];
 	if (prev_hdl == NULL || !prev_hdl->bbh_shareable ||
 	    (prev_hdl->bbh_remote_idx != remote_idx))
@@ -482,6 +483,7 @@ bulk_get_shared_hdl(struct bio_desc *biod, struct bio_iov *biov, unsigned int re
 	if (prev_hdl->bbh_used_bytes + bio_iov2len(biov) > bulk_hdl2len(prev_hdl))
 		return NULL;
 
+	// 上一个hdl 占用的空间，再加上本次bulk 占用的空间
 	prev_hdl->bbh_inuse++;
 	return prev_hdl;
 }
@@ -495,6 +497,7 @@ bulk_get_hdl(struct bio_desc *biod, struct bio_iov *biov, unsigned int pg_cnt,
 	struct bio_bulk_hdl	*hdl;
 	int			 rc;
 
+	// 获取一个缓存的bulk hdl返回
 	hdl = bulk_get_shared_hdl(biod, biov, arg->ba_sgl_idx);
 	if (hdl != NULL) {
 		D_DEBUG(DB_IO, "Reuse shared bulk handle %p\n", hdl);
@@ -605,12 +608,18 @@ roundup_pgs(unsigned int pgs)
 	return bio_chk_sz / (bio_chk_sz / pgs);
 }
 
+// biov 来自于从vos 中查询到的元数据信息--设备地址，其实是biod --> sgls 中的成员、
+// 这里map的含义是：将描述设备地址的 biov 与reserved dma buffer 结构bio_rsrvd_dma 中的region 做映射
+// 即将bio 映射到内存
+// 1. fetch 场景：在 vos_fetch_begin 中查询的biov 在这里做 map
+// 2. update 场景：在 akey_update_begin 中生成的biov 在这里做 map 
 int
 bulk_map_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 {
 	// data 表示的是当前处理的是否是bulk 数据
 	// bulk map one 里面可能会执行 dma map one
 	struct bio_bulk_args	*arg = data;
+	// 标识一个bulk
 	struct bio_bulk_hdl	*hdl = NULL;
 	uint64_t		 off, end;
 	unsigned int		 pg_cnt, pg_off;
@@ -641,9 +650,6 @@ bulk_map_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 
 	// biov 转化为page cnt 和page off。就是size 单元不同了
 	// 最后调用spdk bio 接口时还要将pg 转化 为io unit
-	// todo: 一个数据最终存储到硬盘中，是怎么决定存储在哪里的？一定是有特殊的规划和管理的，这个是在哪里确定的
-	// todo: 为啥这个object 要存到硬盘的这里，而那个object 要存到硬盘的那里？
-	// todo: 数据放在哪里了
 	dma_biov2pg(biov, &off, &end, &pg_cnt, &pg_off);
 
 	// todo: 当前iov 占用的数据很大（或者是hole，或者是scm 设备）
@@ -654,7 +660,8 @@ bulk_map_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 	}
 	D_ASSERT(!BIO_ADDR_IS_DEDUP(&biov->bi_addr));
 
-	// 获取bulk 的hdl
+	// 传入bulk data == arg，以及biov 对应的页地址（pg_cnt 和pg_off），输出bulk 的 hdl
+	// todo: 这里的bulk 和crt_bulk_transfer 中rwo 中的bulk array 是什么关系
 	hdl = bulk_get_hdl(biod, biov, roundup_pgs(pg_cnt), pg_off, arg);
 	if (hdl == NULL) {
 		if (biod->bd_retry)
@@ -664,10 +671,9 @@ bulk_map_one(struct bio_desc *biod, struct bio_iov *biov, void *data)
 		return -DER_NOMEM;
 	}
 
-	// 更新dma buffer 的地址
+	// 设置当前biov 在设备（scm/nvme）中的地址的值（按page 为单位）
 	bio_iov_set_raw_buf(biov, bulk_hdl2addr(hdl, pg_off));
-	// 添加region 到biod 的rsrvd_dma 里面的region 数组里
-	// todo: 具体到硬件注册memory region是在哪完成的
+	// 当前的biov 将占用biod 中预留的regions 中的一个，如果满了，动态更新
 	rc = iod_add_region(biod, hdl->bbh_chunk, hdl->bbh_pg_idx, hdl->bbh_used_bytes,
 			    off, end, bio_iov2media(biov));
 	if (rc) {

@@ -342,7 +342,7 @@ dtx_list_cos(struct ds_cont_child *cont, daos_unit_oid_t *oid,
 	d_iov_set(&kiov, &key, sizeof(key));
 	d_iov_set(&riov, NULL, 0);
 
-	// todo: 这些东西是存储在哪里的
+	// todo: 这些东西是存储在哪里的，访问都不加锁吗
 	// 通过dtx cos hdl 和key 来查询cos 信息
 	rc = dbtree_lookup(cont->sc_dtx_cos_hdl, &kiov, &riov);
 	if (rc != 0)
@@ -406,6 +406,7 @@ dtx_add_cos(struct ds_cont_child *cont, struct dtx_entry *dte,
 	key.dkey_hash = dkey_hash;
 	d_iov_set(&kiov, &key, sizeof(key));
 
+	// dte 里面有dti，以entry 为value
 	rbund.dte = dte;
 	rbund.epoch = epoch;
 	rbund.flags = flags;

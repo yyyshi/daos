@@ -245,6 +245,7 @@ struct vos_pool_metrics {
 /**
  * VOS pool (DRAM)
  */
+// 每个target 有自己各自的vos pool，对应 "vos-id" 文件
 struct vos_pool {
 	/** VOS uuid hash-link with refcnt */
 	struct d_ulink		vp_hlink;
@@ -264,6 +265,7 @@ struct vos_pool {
 	/** memory attribute of the @vp_umm */
 	struct umem_attr	vp_uma;
 	/** memory class instance of the pool */
+	// pool 的pmem 实例地址
 	struct umem_instance	vp_umm;
 	/** Size of pool file */
 	uint64_t		vp_size;
@@ -307,6 +309,7 @@ struct vos_pool {
 /**
  * VOS container (DRAM)
  */
+// todo: 这个container 和server层的container 关系
 struct vos_container {
 	/* VOS uuid hash with refcnt */
 	struct d_ulink		vc_uhlink;
@@ -315,23 +318,30 @@ struct vos_container {
 	/* Unique UID of VOS container */
 	uuid_t			vc_id;
 	/* DAOS handle for object index btree */
-	// 表示vos idx 的b+ 树的hdl
+	// 表示vos obj idx 的b+ 树的hdl
 	daos_handle_t		vc_btr_hdl;
 	/** Array for active DTX records */
 	// lru 数组存储active dtx
 	struct lru_array	*vc_dtx_array;
+
+	// 1. 有两个hdl，分别表示两棵树的hdl
 	/* The handle for active DTX table */
 	// active 的dtx b+ 树
 	daos_handle_t		vc_dtx_active_hdl;
 	/* The handle for committed DTX table */
 	// committed 的dtx b+ 树
 	daos_handle_t		vc_dtx_committed_hdl;
+
+	// 2. 有两棵树树根，存储active 和committed dtx
 	/** The root of the B+ tree for active DTXs. */
 	struct btr_root		vc_dtx_active_btr;
 	/** The root of the B+ tree for committed DTXs. */
 	struct btr_root		vc_dtx_committed_btr;
+
+	// active 状态的dtx，时间排序
 	/* The list for active DTXs, roughly ordered in time. */
 	d_list_t		vc_dtx_act_list;
+	// 已提交dtx 的个数
 	/* The count of committed DTXs. */
 	uint32_t		vc_dtx_committed_count;
 	/** Index for timestamp lookup */

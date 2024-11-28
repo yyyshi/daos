@@ -221,6 +221,7 @@ struct vos_dtx_blob_df {
 	/** The total (filled + free) slots in the blob. */
 	int					dbd_cap;
 	/** Already filled slots count. */
+	// blob 保存的元素个数
 	int					dbd_count;
 	/** The next available slot for active DTX entry in the blob. */
 	int					dbd_index;
@@ -229,6 +230,7 @@ struct vos_dtx_blob_df {
 	/** Next dtx_scm_blob. */
 	umem_off_t				dbd_next;
 	/** Append only DTX entries in the blob. */
+	// blob 中保存的dtx 记录信息
 	union {
 		struct vos_dtx_act_ent_df	dbd_active_data[0];
 		struct vos_dtx_cmt_ent_df	dbd_committed_data[0];

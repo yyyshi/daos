@@ -772,6 +772,7 @@ cont_child_lookup(struct daos_lru_cache *cache, const uuid_t co_uuid,
 		return rc;
 	}
 
+	// 返回查询到的cont child
 	*cont = cont_child_obj(llink);
 	return 0;
 }
@@ -880,6 +881,7 @@ cont_child_start(struct ds_pool_child *pool_child, const uuid_t co_uuid,
 		if (rc != 0)
 			goto out;
 
+		// 添加到dtx pool list 中
 		rc = dtx_cont_register(cont_child);
 		if (rc != 0) {
 			cont_stop_agg(cont_child);
@@ -1283,12 +1285,14 @@ ds_cont_tgt_destroy_aggregator(crt_rpc_t *source, crt_rpc_t *result, void *priv)
 /**
  * lookup ds_cont_child by pool/container uuid.
  **/
+// 通过pool 和cont uuid 查询cont child
 int
 ds_cont_child_lookup(uuid_t pool_uuid, uuid_t cont_uuid,
 		     struct ds_cont_child **ds_cont)
 {
 	struct dsm_tls		*tls = dsm_tls_get();
 
+	// 如果从当前的tls cache 中查询不到，就添加到当前tls 的cache 中
 	return cont_child_lookup(tls->dt_cont_cache, cont_uuid, pool_uuid,
 				 true /* create */, ds_cont);
 }
@@ -1297,6 +1301,7 @@ ds_cont_child_lookup(uuid_t pool_uuid, uuid_t cont_uuid,
  * ds_cont_child create and start. If the container is created,
  * it will return 1, otherwise return 0 or error code.
  **/
+// todo: 什么叫child
 static int
 cont_child_create_start(uuid_t pool_uuid, uuid_t cont_uuid, uint32_t pm_ver,
 			bool *started, struct ds_cont_child **cont_out)

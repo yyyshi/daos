@@ -272,7 +272,7 @@ enum daos_tx_flags {
 /** Epoch context of a DTX */
 struct dtx_epoch {
 	/** epoch */
-	// todo: 这个又是啥
+	// epoch 的实际数值
 	daos_epoch_t		oe_value;
 	/** first epoch chosen */
 	// todo: 这个是啥

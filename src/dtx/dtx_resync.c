@@ -147,6 +147,7 @@ dtx_leader_get(struct ds_pool *pool, struct dtx_memberships *mbs, struct pool_ta
 
 	D_ASSERT(mbs != NULL);
 	/* The first UPIN target is the leader of the DTX */
+	// 遍历members，第一个upin 状态的target 就是leader
 	for (i = 0; i < mbs->dm_tgt_cnt; i++) {
 		rc = ds_pool_target_status_check(pool, mbs->dm_tgts[i].ddt_id,
 						 (uint8_t)PO_COMP_ST_UPIN, p_tgt);

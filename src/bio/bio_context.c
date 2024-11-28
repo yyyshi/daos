@@ -607,6 +607,7 @@ bio_blob_create(uuid_t uuid, struct bio_xs_context *xs_ctxt, uint64_t blob_sz,
 	return rc;
 }
 
+// 根据spdk_blob_id 打开对应的blob
 static int
 __bio_ioctxt_open(struct bio_io_context **pctxt, struct bio_xs_context *xs_ctxt,
 		  uuid_t uuid, enum bio_mc_flags flags, enum smd_dev_type st,
@@ -669,6 +670,7 @@ default_wal_sz(uint64_t meta_sz)
 	return wal_sz;
 }
 
+// todo: 所有的scm 和nvme 设备是如何分配给多个xs 的
 int bio_mc_create(struct bio_xs_context *xs_ctxt, uuid_t pool_id, uint64_t meta_sz,
 		  uint64_t wal_sz, uint64_t data_sz, enum bio_mc_flags flags)
 {
@@ -817,6 +819,7 @@ delete_data:
 	return rc;
 }
 
+// 内部 spdk_blob open
 int
 bio_blob_open(struct bio_io_context *ctxt, bool async, enum bio_mc_flags flags,
 	      enum smd_dev_type st, spdk_blob_id open_blobid)

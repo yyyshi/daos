@@ -44,6 +44,7 @@ static char		modules[MAX_MODULE_OPTIONS + 1];
 /**
  * Number of target threads the user would like to start.
  */
+// target 个数
 static unsigned int	nr_threads;
 
 /** DAOS system name (corresponds to crt group ID) */
@@ -276,6 +277,7 @@ dss_tgt_nr_check(unsigned int ncores, unsigned int tgt_nr, bool oversubscribe)
 	D_ASSERT(ncores >= 1);
 
 	/* at most 2 helper XS per target */
+	// dss_tgt_offload_xs_nr 为helper 个数，设置的是 2，tgt_nr 为 20
 	if (dss_tgt_offload_xs_nr > 2 * tgt_nr) {
 		D_PRINT("#nr_xs_helpers(%d) cannot exceed 2 times #targets (2 x %d = %d).\n",
 			dss_tgt_offload_xs_nr, tgt_nr, 2 * tgt_nr);
@@ -310,6 +312,118 @@ out:
 static int
 dss_topo_init()
 {
+	// numa 0 的topo 如下，有26 个物理核，目前是设置了 20 个target 和 2个helper。同时绑定了pmem0 和4个nvme
+	/*
+	root@server01:/tmp# hwloc-ls
+	Machine (504GB total)
+	Package L#0
+		NUMANode L#0 (P#0 252GB)
+		L3 L#0 (39MB)
+		L2 L#0 (1280KB) + L1d L#0 (48KB) + L1i L#0 (32KB) + Core L#0
+			PU L#0 (P#0)
+			PU L#1 (P#52)
+		L2 L#1 (1280KB) + L1d L#1 (48KB) + L1i L#1 (32KB) + Core L#1
+			PU L#2 (P#1)
+			PU L#3 (P#53)
+		L2 L#2 (1280KB) + L1d L#2 (48KB) + L1i L#2 (32KB) + Core L#2
+			PU L#4 (P#2)
+			PU L#5 (P#54)
+		L2 L#3 (1280KB) + L1d L#3 (48KB) + L1i L#3 (32KB) + Core L#3
+			PU L#6 (P#3)
+			PU L#7 (P#55)
+		L2 L#4 (1280KB) + L1d L#4 (48KB) + L1i L#4 (32KB) + Core L#4
+			PU L#8 (P#4)
+			PU L#9 (P#56)
+		L2 L#5 (1280KB) + L1d L#5 (48KB) + L1i L#5 (32KB) + Core L#5
+			PU L#10 (P#5)
+			PU L#11 (P#57)
+		L2 L#6 (1280KB) + L1d L#6 (48KB) + L1i L#6 (32KB) + Core L#6
+			PU L#12 (P#6)
+			PU L#13 (P#58)
+		L2 L#7 (1280KB) + L1d L#7 (48KB) + L1i L#7 (32KB) + Core L#7
+			PU L#14 (P#7)
+			PU L#15 (P#59)
+		L2 L#8 (1280KB) + L1d L#8 (48KB) + L1i L#8 (32KB) + Core L#8
+			PU L#16 (P#8)
+			PU L#17 (P#60)
+		L2 L#9 (1280KB) + L1d L#9 (48KB) + L1i L#9 (32KB) + Core L#9
+			PU L#18 (P#9)
+			PU L#19 (P#61)
+		L2 L#10 (1280KB) + L1d L#10 (48KB) + L1i L#10 (32KB) + Core L#10
+			PU L#20 (P#10)
+			PU L#21 (P#62)
+		L2 L#11 (1280KB) + L1d L#11 (48KB) + L1i L#11 (32KB) + Core L#11
+			PU L#22 (P#11)
+			PU L#23 (P#63)
+		L2 L#12 (1280KB) + L1d L#12 (48KB) + L1i L#12 (32KB) + Core L#12
+			PU L#24 (P#12)
+			PU L#25 (P#64)
+		L2 L#13 (1280KB) + L1d L#13 (48KB) + L1i L#13 (32KB) + Core L#13
+			PU L#26 (P#13)
+			PU L#27 (P#65)
+		L2 L#14 (1280KB) + L1d L#14 (48KB) + L1i L#14 (32KB) + Core L#14
+			PU L#28 (P#14)
+			PU L#29 (P#66)
+		L2 L#15 (1280KB) + L1d L#15 (48KB) + L1i L#15 (32KB) + Core L#15
+			PU L#30 (P#15)
+			PU L#31 (P#67)
+		L2 L#16 (1280KB) + L1d L#16 (48KB) + L1i L#16 (32KB) + Core L#16
+			PU L#32 (P#16)
+			PU L#33 (P#68)
+		L2 L#17 (1280KB) + L1d L#17 (48KB) + L1i L#17 (32KB) + Core L#17
+			PU L#34 (P#17)
+			PU L#35 (P#69)
+		L2 L#18 (1280KB) + L1d L#18 (48KB) + L1i L#18 (32KB) + Core L#18
+			PU L#36 (P#18)
+			PU L#37 (P#70)
+		L2 L#19 (1280KB) + L1d L#19 (48KB) + L1i L#19 (32KB) + Core L#19
+			PU L#38 (P#19)
+			PU L#39 (P#71)
+		L2 L#20 (1280KB) + L1d L#20 (48KB) + L1i L#20 (32KB) + Core L#20
+			PU L#40 (P#20)
+			PU L#41 (P#72)
+		L2 L#21 (1280KB) + L1d L#21 (48KB) + L1i L#21 (32KB) + Core L#21
+			PU L#42 (P#21)
+			PU L#43 (P#73)
+		L2 L#22 (1280KB) + L1d L#22 (48KB) + L1i L#22 (32KB) + Core L#22
+			PU L#44 (P#22)
+			PU L#45 (P#74)
+		L2 L#23 (1280KB) + L1d L#23 (48KB) + L1i L#23 (32KB) + Core L#23
+			PU L#46 (P#23)
+			PU L#47 (P#75)
+		L2 L#24 (1280KB) + L1d L#24 (48KB) + L1i L#24 (32KB) + Core L#24
+			PU L#48 (P#24)
+			PU L#49 (P#76)
+		L2 L#25 (1280KB) + L1d L#25 (48KB) + L1i L#25 (32KB) + Core L#25
+			PU L#50 (P#25)
+			PU L#51 (P#77)
+		HostBridge
+		PCI 00:11.5 (SATA)
+		PCI 00:17.0 (SATA)
+		PCIBridge
+			PCIBridge
+			PCI 04:00.0 (VGA)
+		HostBridge
+		PCIBridge
+			PCI 17:00.0 (InfiniBand)
+			Net "ibs1"
+			OpenFabrics "mlx5_0"
+		HostBridge
+		PCIBridge
+			PCI 31:00.0 (RAID)
+			Block(Disk) "sda"
+		HostBridge
+		PCIBridge
+			PCI 65:00.0 (NVMExp)
+		PCIBridge
+			PCI 66:00.0 (NVMExp)
+		PCIBridge
+			PCI 67:00.0 (NVMExp)
+		PCIBridge
+			PCI 68:00.0 (NVMExp)
+		Block(NVDIMM) "pmem0"
+	Package L#1
+	*/
 	int		depth;
 	int		numa_node_nr;
 	int		num_cores_visited;
@@ -318,18 +432,23 @@ dss_topo_init()
 	hwloc_obj_t	corenode;
 	bool            tgt_oversub = false;
 
+	// apt install hwloc
+	// hwloc-ls 返回的信息和lstopo 返回的信息一摸一样
 	hwloc_topology_init(&dss_topo);
 	hwloc_topology_load(dss_topo);
 
 	dss_core_depth = hwloc_get_type_depth(dss_topo, HWLOC_OBJ_CORE);
 	dss_core_nr = hwloc_get_nbobjs_by_type(dss_topo, HWLOC_OBJ_CORE);
 	depth = hwloc_get_type_depth(dss_topo, HWLOC_OBJ_NUMANODE);
+	// 设置 numa 个数
 	numa_node_nr = hwloc_get_nbobjs_by_depth(dss_topo, depth);
 	d_getenv_bool("DAOS_TARGET_OVERSUBSCRIBE", &tgt_oversub);
+	// target 个数
 	dss_tgt_nr = nr_threads;
 
 	/* if no NUMA node was specified, or NUMA data unavailable */
 	/* fall back to the legacy core allocation algorithm */
+	// 未指定numa 的场景
 	if (dss_numa_node == -1 || numa_node_nr <= 0) {
 		D_PRINT("Using legacy core allocation algorithm\n");
 		if (dss_core_offset >= dss_core_nr) {
@@ -342,11 +461,13 @@ dss_topo_init()
 		return dss_tgt_nr_check(dss_core_nr, dss_tgt_nr, tgt_oversub);
 	}
 
+	// 指定的numa 不合法
 	if (dss_numa_node > numa_node_nr) {
 		D_ERROR("Invalid NUMA node selected. Must be no larger than %d\n", numa_node_nr);
 		return -DER_INVAL;
 	}
 
+	// dss_numa_node 合法，获取numa obj
 	numa_obj = hwloc_get_obj_by_depth(dss_topo, depth, dss_numa_node);
 	if (numa_obj == NULL) {
 		D_ERROR("NUMA node %d was not found in the topology\n", dss_numa_node);
@@ -364,12 +485,15 @@ dss_topo_init()
 	dss_num_cores_numa_node = 0;
 	num_cores_visited = 0;
 
+	// 遍历core
 	for (k = 0; k < dss_core_nr; k++) {
+		// 获取每个core
 		corenode = hwloc_get_obj_by_depth(dss_topo, dss_core_depth, k);
 		if (corenode == NULL)
 			continue;
 		if (hwloc_bitmap_isincluded(corenode->cpuset,
 					    numa_obj->cpuset) != 0) {
+			// 如果core 匹配，设置bit 标记位
 			if (num_cores_visited++ >= dss_core_offset) {
 				hwloc_bitmap_set(core_allocation_bitmap, k);
 				hwloc_bitmap_asprintf(&cpuset,
@@ -378,9 +502,10 @@ dss_topo_init()
 			dss_num_cores_numa_node++;
 		}
 	}
+	// 打印cpu bitmap
 	hwloc_bitmap_asprintf(&cpuset, core_allocation_bitmap);
 	free(cpuset);
-
+	// 第一个core 比numa 还大，非法
 	if (dss_core_offset >= dss_num_cores_numa_node) {
 		D_ERROR("invalid dss_core_offset %d (set by \"-f\" option), should within range "
 			"[0, %d]\n",
@@ -389,6 +514,9 @@ dss_topo_init()
 	}
 	D_PRINT("Using NUMA core allocation algorithm\n");
 
+	// 逻辑核指的是通过超线程技术，在同一个物理核模拟出来的核心，daos 中绑定target 的都是逻辑核
+	// 检查target num 和物理cores 分配是否够用
+	// 当前是每个engine 2 x 26 核。target 为 20 个
 	return dss_tgt_nr_check(dss_num_cores_numa_node, dss_tgt_nr, tgt_oversub);
 }
 
@@ -676,10 +804,12 @@ server_init(int argc, char *argv[])
 		return rc;
 
 	/** initialize server topology data - this is needed to set up the number of targets */
+	// 初始化topo 信息，即在服务器上架完成后，numa 架构的信息已经确定，即哪个numa 绑定了哪些pmem 设备，nvme 设备以及ib 网卡，需要与conf 保持一致
 	rc = dss_topo_init();
 	if (rc != 0)
 		D_GOTO(exit_debug_init, rc);
 
+	// 普罗米修斯相关初始化
 	rc = d_tm_init(dss_instance_idx, metrics_region_size(dss_tgt_nr), D_TM_SERVER_PROCESS);
 	if (rc != 0)
 		goto exit_debug_init;
@@ -998,6 +1128,21 @@ static int arg_strtoul(const char *str, unsigned int *value, const char *opt)
 static int
 parse(int argc, char **argv)
 {
+	// /opt/daos/bin/daos_engine -t 20 -x 2 -g daos_server -d /var/run/daos_server -T 2 -n /mnt/daos/2/daos_nvme.conf -p 1 -I 1 -r 20480 -H 2 -s /mnt/daos/2
+	// 每个engine 启动接受的参数，控制台看到的启动参数如上面展示：
+	// 绑定的核心
+	// drpc 对应的 sockst
+	// 第一个core
+	// 所属group
+	// 所属模块
+	// nvme 列表
+	// numa 索引
+	// pmem size
+	// 大页
+	// tgt 个数，也是线程数
+	// storage 保存元数据的pmem 设备挂载地址，/mnt/daos/1
+	// helper 个数
+	// 当前engine 实例索引
 	struct	option opts[] = {
 		{ "cores",		required_argument,	NULL,	'c' },
 		{ "socket_dir",		required_argument,	NULL,	'd' },
@@ -1023,9 +1168,11 @@ parse(int argc, char **argv)
 	/* load all of modules by default */
 	// 加载默认的模块们
 	sprintf(modules, "%s", MODULE_LIST);
+	// 传递上面参数，设置对应的值，都是些全局变量
 	while ((c = getopt_long(argc, argv, "c:d:f:g:hi:m:n:p:r:H:t:s:x:I:bT:",
 				opts, NULL)) != -1) {
 		switch (c) {
+		// 模块，没有这个参数
 		case 'm':
 			if (strlen(optarg) > MAX_MODULE_OPTIONS) {
 				rc = -DER_INVAL;
@@ -1035,19 +1182,24 @@ parse(int argc, char **argv)
 			// 加载的模块
 			snprintf(modules, sizeof(modules), "%s", optarg);
 			break;
+		// 核心，传参没有这个
 		case 'c':
 			printf("\"-c\" option is deprecated, please use \"-t\" "
 			       "instead.\n");
+		// 线程数，这个是不是和target 个数是一样的？
 		case 't':
 			rc = arg_strtoul(optarg, &nr_threads, "\"-t\"");
 			break;
+		// helper 个数
 		case 'x':
 			rc = arg_strtoul(optarg, &dss_tgt_offload_xs_nr,
 					 "\"-x\"");
 			break;
+		// 第一个core
 		case 'f':
 			rc = arg_strtoul(optarg, &dss_core_offset, "\"-f\"");
 			break;
+		// 所属group，group 是 'daos_server'
 		case 'g':
 			if (strnlen(optarg, DAOS_SYS_NAME_MAX + 1) >
 			    DAOS_SYS_NAME_MAX) {
@@ -1058,21 +1210,28 @@ parse(int argc, char **argv)
 			}
 			daos_sysname = optarg;
 			break;
+		// storage 路径，保存元数据的pmem 设备挂载路径
 		case 's':
 			dss_storage_path = optarg;
 			break;
+		// socket 目录，是 /var/run/daos_server
 		case 'd':
 			dss_socket_dir = optarg;
 			break;
+		// 是 /mnt/daos/1/daos_nvme.conf
 		case 'n':
 			dss_nvme_conf = optarg;
 			break;
+		// numa 索引，使用lstopo 可以看到numa 绑定的ib网卡，pmem 设备和nvme 设备信息
+		// 服务器上架完成后，numa 和其他设备的绑定就已经确定了，后续的daos_server.yml 中需要按照numa 绑定来配置
 		case 'p':
 			dss_numa_node = atoi(optarg);
 			break;
+		// 20480
 		case 'r':
 			rc = arg_strtoul(optarg, &dss_nvme_mem_size, "\"-r\"");
 			break;
+		// 是 2
 		case 'H':
 			rc = arg_strtoul(optarg, &dss_nvme_hugepage_size,
 					 "\"-H\"");
@@ -1086,6 +1245,7 @@ parse(int argc, char **argv)
 		case 'b':
 			dss_nvme_bypass_health_check = true;
 			break;
+		// 是 storage tier = 2
 		case 'T':
 			rc = arg_strtoul(optarg, &dss_storage_tiers, "\"-T\"");
 			if (dss_storage_tiers < 1 || dss_storage_tiers > 4) {
@@ -1114,6 +1274,8 @@ main(int argc, char **argv)
 	int		rc;
 
 	/** parse command line arguments */
+	// 启动参数解析，保存到engine 的全局变量中
+	// 举例： /opt/daos/bin/daos_engine -t 20 -x 2 -g daos_server -d /var/run/daos_server -T 2 -n /mnt/daos/2/daos_nvme.conf -p 1 -I 1 -r 20480 -H 2 -s /mnt/daos/2
 	rc = parse(argc, argv);
 	if (rc)
 		exit(EXIT_FAILURE);
@@ -1159,6 +1321,7 @@ main(int argc, char **argv)
 		}
 
 		/* open specific file to dump ABT infos and ULTs stacks */
+		// dump 堆栈信息
 		if (sig == SIGUSR1 || sig == SIGUSR2) {
 			struct timeval tv;
 			struct tm *tm = NULL;
@@ -1171,6 +1334,7 @@ main(int argc, char **argv)
 					strerror(errno), errno);
 
 			 if (abt_infos == NULL) {
+				// dump 文件格式
 				/* filename format is
 				 * "/tmp/daos_dump_<PID>_YYYYMMDD_hh_mm.txt"
 				 */
@@ -1187,6 +1351,7 @@ main(int argc, char **argv)
 						 "/tmp/daos_dump_%d.txt",
 						 getpid());
 
+				// 以append 方式打开dump 文件
 				abt_infos = fopen(name, "a");
 				if (abt_infos == NULL) {
 					D_ERROR("failed to open file to dump ABT infos and ULTs stacks: %s (%d)\n",
@@ -1196,12 +1361,14 @@ main(int argc, char **argv)
 			}
 
 			/* print header msg with date */
+			// 写入头信息
 			fprintf(abt_infos,
 				"=== Dump of ABT infos and ULTs stacks in %s mode (",
 				sig == SIGUSR1 ? "unattended" : "attended");
 			if (rc == -1 || tm == NULL)
 				fprintf(abt_infos, "time unavailable");
 			else
+				// 写入当时时间
 				fprintf(abt_infos,
 					"%04d/%02d/%02d-%02d:%02d:%02d.%02ld",
 					tm->tm_year + 1900, tm->tm_mon + 1,
@@ -1211,10 +1378,13 @@ main(int argc, char **argv)
 			fprintf(abt_infos, ")\n");
 		}
 
-		// 导出dump 信息：  killall -SIGUSR1 /opt/daos/bin/daos_engine
+		// 导出dump 信息：  killall -SIGUSR1 /opt/daos/bin/daos_engine 会触发dump 生成
 		/* use this engine main thread's context to dump Argobots
 		 * internal infos and ULTs stacks without internal synchro
 		 */
+		// SIGUSR1 和 SIGUSR2 都是用户自定义信号，默认处理方式都是结束进程
+		// 1. 这里自定义为：如果收到信号1，使用主线程做dump，会锁 xd_mutex
+		// 2. 如果收到信号2 的话直接使用abt 的函数做dump，使用abt 内部的同步机制
 		if (sig == SIGUSR1) {
 			D_INFO("got SIGUSR1, dumping Argobots infos and ULTs stacks\n");
 			dss_dump_ABT_state(abt_infos);
@@ -1233,6 +1403,7 @@ main(int argc, char **argv)
 		}
 
 		/* SIGINT/SIGTERM cause server shutdown */
+		// 别的信号会直接shutdown
 		break;
 	}
 

@@ -36,7 +36,7 @@ struct vos_object {
 	// 关联daos lru cache 的，根据一个link 就可以获取到对应的vos_object，进而获取到里面的obj_df
 	struct daos_llink		obj_llink;
 	/** Cache of incarnation log */
-	// 缓存的ilog 信息
+	// todo: 缓存的ilog 信息，这个信息是存在在哪里的？(pmem ?)
 	struct vos_ilog_info		obj_ilog_info;
 	/** Key for searching, object ID within a container */
 	daos_unit_oid_t			obj_id;
