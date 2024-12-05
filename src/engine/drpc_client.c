@@ -418,7 +418,9 @@ int
 drpc_init(void)
 {
 	D_ASSERT(dss_drpc_path == NULL);
+	// 使用daos_server -d 参数传递来的socket 路径
 	D_ASPRINTF(dss_drpc_path, "%s/%s", dss_socket_dir, "daos_server.sock");
+	// 判断不为空即可，初始化已经在daos_server 完成了
 	if (dss_drpc_path == NULL)
 		return -DER_NOMEM;
 	return 0;

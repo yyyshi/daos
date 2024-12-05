@@ -36,6 +36,7 @@
 #define DAOS_DMA_CHUNK_CNT_MIN	32	/* Per-xstream min chunks, 256MB */
 
 /* Max in-flight blob IOs per io channel */
+// 每个io channel 允许的正在进行的最大blob io 数量 
 #define BIO_BS_MAX_CHANNEL_OPS	(4096)
 /* Schedule a NVMe poll when so many blob IOs queued for an io channel */
 #define BIO_BS_POLL_WATERMARK	(2048)
@@ -45,10 +46,13 @@
 /* Chunk size of DMA buffer in pages */
 unsigned int bio_chk_sz;
 /* Per-xstream maximum DMA buffer size (in chunk count) */
+// 每个xs 最大的dma buffer 大小
 unsigned int bio_chk_cnt_max;
 /* NUMA node affinity */
+// 当前engine 使用的numa id
 unsigned int bio_numa_node;
 /* Per-xstream initial DMA buffer size (in chunk count) */
+// 每个xs dma buffer 大小
 static unsigned int bio_chk_cnt_init;
 /* Diret RDMA over SCM */
 bool bio_scm_rdma;
@@ -70,6 +74,7 @@ struct bio_nvme_data {
 	/* The thread responsible for SPDK bdevs init/fini */
 	struct spdk_thread	*bd_init_thread;
 	/* Default SPDK blobstore options */
+	// spdk 的option 信息
 	struct spdk_bs_opts	 bd_bs_opts;
 	/* All bdevs can be used by DAOS server */
 	d_list_t		 bd_bdevs;
@@ -88,6 +93,7 @@ struct bio_nvme_data {
 	const char		*bd_rpc_srv_addr;
 };
 
+// 当前engine 的nvme 信息，不是tls 修饰的线程数据
 static struct bio_nvme_data nvme_glb;
 
 static int
@@ -114,6 +120,7 @@ bio_spdk_env_init(void)
 
 	// == true
 	if (bio_nvme_configured(SMD_DEV_TYPE_MAX)) {
+		// 传递allowed bdev pci 地址给spdk
 		rc = bio_add_allowed_alloc(nvme_glb.bd_nvme_conf, &opts, &roles);
 		if (rc != 0) {
 			D_ERROR("Failed to add allowed devices to SPDK env, "DF_RC"\n",
@@ -138,6 +145,7 @@ bio_spdk_env_init(void)
 		 * Read flag to indicate whether to enable the SPDK JSON-RPC server and the
 		 * socket file address from the JSON config used to initialize SPDK subsystems.
 		 */
+		// 读取文件判断spdk rpc 服务是否可用
 		rc = bio_read_rpc_srv_settings(nvme_glb.bd_nvme_conf, &enable_rpc_srv,
 					       &nvme_glb.bd_rpc_srv_addr);
 		if (rc != 0) {
@@ -154,7 +162,7 @@ bio_spdk_env_init(void)
 		nvme_glb.bd_enable_rpc_srv = enable_rpc_srv;
 	}
 
-	// 初始化spdk env
+	// 初始化spdk env，此时opts 里已经添加了所有nvme 的pcie 地址
 	rc = spdk_env_init(&opts);
 	if (rc != 0) {
 		rc = -DER_INVAL; /* spdk_env_init() returns -1 */
@@ -210,6 +218,7 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 {
 	char		*env;
 	int		 rc, fd;
+	// dma chunk 大小为 8M
 	unsigned int	 size_mb = DAOS_DMA_CHUNK_MB;
 
 	if (tgt_nr <= 0) {
@@ -223,6 +232,7 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 	}
 
 	bio_numa_node = 0;
+	// 初始化nvme bio data
 	nvme_glb.bd_xstream_cnt = 0;
 	nvme_glb.bd_init_thread = NULL;
 	nvme_glb.bd_nvme_conf = NULL;
@@ -274,6 +284,7 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 	}
 
 	if (nvme_conf && strlen(nvme_conf) > 0) {
+		// 打开nvme list 文件
 		fd = open(nvme_conf, O_RDONLY, 0600);
 		if (fd < 0)
 			D_WARN("Open %s failed, skip DAOS NVMe setup "DF_RC"\n",
@@ -284,18 +295,23 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 
 	D_ASSERT(hugepage_size > 0);
 	// bio chunk 的个数上限，每个chunk 大小为 size_mb
+	// 将spdk 申请的内存平均分给 targets
 	bio_chk_cnt_max = (mem_size / tgt_nr) / size_mb;
 	if (bio_chk_cnt_max < DAOS_DMA_CHUNK_CNT_MIN) {
+		// 每个target 最小 256M 内存用作dma buffer
 		D_ERROR("%uMB hugepages are not enough for %u targets (256MB per target)\n",
 			mem_size, tgt_nr);
 		return -DER_INVAL;
 	}
-	// 每个xs 的dma buffer个数和每个的大小
+	// 每个xs 的dma buffer chunk个数和每个chunk 的大小。每个chunk 大小为 8M
 	D_INFO("Set per-xstream DMA buffer upper bound to %u %uMB chunks\n",
 	       bio_chk_cnt_max, size_mb);
 
+	// 调用spdk 接口初始化blobstore option
 	spdk_bs_opts_init(&nvme_glb.bd_bs_opts, sizeof(nvme_glb.bd_bs_opts));
+	// 设置cluster size 为 32 M
 	nvme_glb.bd_bs_opts.cluster_sz = DAOS_BS_CLUSTER_SZ;
+	// 设置channel 允许最大io 数 4096
 	nvme_glb.bd_bs_opts.max_channel_ops = BIO_BS_MAX_CHANNEL_OPS;
 
 	env = getenv("VOS_BDEV_CLASS");
@@ -304,16 +320,19 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 		nvme_glb.bd_bdev_class = BDEV_CLASS_AIO;
 	}
 
+	// 2颗cpu 场景，numa 分别为 0 和 1
 	if (numa_node > 0) {
+		// 开始就初始化为 0 了，所以如果为0，不用转
 		bio_numa_node = (unsigned int)numa_node;
 	} else if (numa_node == -1) {
 		D_WARN("DMA buffer will be allocated from any NUMA node available\n");
 		bio_numa_node = SPDK_ENV_SOCKET_ID_ANY;
 	}
 
-	// nvme 的全局信息
+	// spdk 申请的内存大小
 	nvme_glb.bd_mem_size = mem_size;
 	if (nvme_conf) {
+		// dump nvme 配置文件
 		D_STRNDUP(nvme_glb.bd_nvme_conf, nvme_conf, strlen(nvme_conf));
 		if (nvme_glb.bd_nvme_conf == NULL) {
 			rc = -DER_NOMEM;
@@ -321,7 +340,7 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 		}
 	}
 
-	// todo: spdk 环境初始化
+	// 内部调用spdk 接口 完成 spdk 环境初始化
 	rc = bio_spdk_env_init();
 	if (rc) {
 		D_ERROR("Failed to init SPDK environment\n");
@@ -337,9 +356,11 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 	if (!bio_nvme_configured(SMD_DEV_TYPE_META))
 		nvme_glb.bd_bs_opts.cluster_sz = (1UL << 30);	/* 1GB */
 
+	// 元数据存储在ssd 上的模式叫 md on ssd
 	D_INFO("MD on SSD is %s\n",
 	       bio_nvme_configured(SMD_DEV_TYPE_META) ? "enabled" : "disabled");
 
+	// bio 初始化完成
 	bio_spdk_inited = true;
 	set_faulty_criteria();
 
@@ -538,6 +559,7 @@ load_blobstore(struct bio_xs_context *ctxt, char *bdev_name, uuid_t *bs_uuid,
 	       void (*async_cb)(void *arg, struct spdk_blob_store *bs, int rc),
 	       void *async_arg)
 {
+	// 新建一个bs dev
 	struct spdk_bs_dev	*bs_dev;
 	struct spdk_bs_opts	 bs_opts;
 	struct common_cp_arg	 cp_arg;
@@ -548,7 +570,7 @@ load_blobstore(struct bio_xs_context *ctxt, char *bdev_name, uuid_t *bs_uuid,
 	 * spdk_bs_unload(), or in the internal error handling code of
 	 * spdk_bs_init/load().
 	 */
-	// 在bs_dev 上关联一个新创建的spdk bs
+	// 新创建的spdk bs dev
 	rc = spdk_bdev_create_bs_dev_ext(bdev_name, bio_bdev_event_cb, NULL,
 					 &bs_dev);
 	if (rc != 0) {
@@ -580,6 +602,7 @@ load_blobstore(struct bio_xs_context *ctxt, char *bdev_name, uuid_t *bs_uuid,
 	}
 
 	common_prep_arg(&cp_arg);
+	// 创建bs
 	if (create)
 		spdk_bs_init(bs_dev, &bs_opts, common_bs_cb, &cp_arg);
 	else
@@ -802,7 +825,7 @@ int
 bdev_name2roles(const char *name)
 {
 	// name 是多个 Nvme_server03_1_1_0 的数组
-	// todo: 要分析下这个格式什么样子的，即这个文件是怎么生成的
+	// todo: 要分析下这个name 格式什么样子的，name 是怎么生成的
 	// e.g: https://www.runoob.com  '.'  结果是： .com
 	// 所以当前的结果是 dst = _0
 	const char	*dst = strrchr(name, '_');
@@ -823,6 +846,7 @@ bdev_name2roles(const char *name)
 		return -DER_INVAL;
 
 	// name的最后一位数组就是role
+	// 与这三种 role 的关系：(NVME_ROLE_DATA | NVME_ROLE_META | NVME_ROLE_WAL) 
 	D_INFO("bdev name:%s, bdev role:%u\n", name, value);
 	return value;
 }
@@ -987,6 +1011,7 @@ init_bio_bdevs(struct bio_xs_context *ctxt)
 		rc = -DER_NONEXIST;
 	}
 
+	// 遍历所有的bdev，创建bio bdev
 	for (bdev = spdk_bdev_first(); bdev != NULL;
 	     bdev = spdk_bdev_next(bdev)) {
 		if (nvme_glb.bd_bdev_class != get_bdev_type(bdev))
@@ -1178,6 +1203,7 @@ bio_nvme_configured(enum smd_dev_type type)
 		return false;
 
 	if (type >= SMD_DEV_TYPE_MAX)
+		// 直接返回 true
 		return true;
 
 	return is_role_match(nvme_glb.bd_nvme_roles, dev_type2role(type));
@@ -1366,6 +1392,7 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 	// 创建一个新的bio dev
 	struct bio_bdev		*d_bdev;
 	struct bio_blobstore	*bbs;
+	// 创建spdk blobstore
 	struct spdk_blob_store	*bs;
 	struct bio_xs_blobstore	*bxb;
 	unsigned int		 dev_state;
@@ -1406,6 +1433,7 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 
 	bxb = ctxt->bxc_xs_blobstores[st];
 	/* Hold bbs refcount for current xstream */
+	// 获取bs
 	bxb->bxb_blobstore = get_bio_blobstore(d_bdev->bb_blobstore, ctxt);
 	if (bxb->bxb_blobstore == NULL)
 		return -DER_NOMEM;
@@ -1439,7 +1467,7 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 			return 0;
 
 		/* Load blobstore with bstype specified for sanity check */
-		// 创建spdk blobstore
+		// 内部调用spdk api 创建spdk blobstore
 		bs = load_blobstore(ctxt, d_bdev->bb_name, &d_bdev->bb_uuid,
 				    false, false, NULL, NULL);
 		if (bs == NULL)
@@ -1610,11 +1638,15 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 	if (ctxt == NULL)
 		return -DER_NOMEM;
 
+	// 设置target id
 	ctxt->bxc_tgt_id = tgt_id;
+	// false
 	ctxt->bxc_self_polling = self_polling;
 
 	/* Skip NVMe context setup if the daos_nvme.conf isn't present */
+	// 没有daos_nvme.conf 的场景
 	if (!bio_nvme_configured(SMD_DEV_TYPE_MAX)) {
+		// false，不进入
 		ctxt->bxc_dma_buf = dma_buffer_create(bio_chk_cnt_init, tgt_id);
 		if (ctxt->bxc_dma_buf == NULL) {
 			D_FREE(ctxt);
@@ -1625,6 +1657,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		return 0;
 	}
 
+	// 操作全局nvme 数据需要上锁。pctxt 信息属于tls 数据，不需要上锁
 	ABT_mutex_lock(nvme_glb.bd_mutex);
 	nvme_glb.bd_xstream_cnt++;
 
@@ -1638,7 +1671,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 	 * for blobstore metadata io channel in init_bio_bdevs() call.
 	 */
 	snprintf(th_name, sizeof(th_name), "daos_spdk_%d", tgt_id);
-	// 这里创建了一个spdk 的thread
+	// 注册spdk thread，每个xs 有各自的，是tls 数据
 	ctxt->bxc_thread = spdk_thread_create((const char *)th_name, NULL);
 	if (ctxt->bxc_thread == NULL) {
 		D_ERROR("failed to alloc SPDK thread\n");
@@ -1651,7 +1684,9 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 	 * The first started xstream will scan all bdevs and create blobstores,
 	 * it's a prerequisite for all per-xstream blobstore initialization.
 	 */
-	// 第一个启动的xs 将创建blobstore
+	// 第一个启动的xs 将扫描bdev 并创建spdk bs
+	// nvme_glb.bd_init_thread 为全局数据，每个engine 共用一份，不是tls 数据，所以只有第一个 xs 时才为 NULL
+	// todo: 这个初始化是 sys xs 完成的吗？
 	if (nvme_glb.bd_init_thread == NULL) {
 		struct common_cp_arg cp_arg;
 
@@ -1659,7 +1694,9 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 			  nvme_glb.bd_xstream_cnt);
 
 		/* Initialize all registered subsystems: bdev, vmd, copy. */
+		// 由json conf 初始化sspdk 子系统
 		common_prep_arg(&cp_arg);
+		// 这里用的是全局的nvme conf 文件，每个engine 有自己单独的
 		spdk_subsystem_init_from_json_config(nvme_glb.bd_nvme_conf,
 						     SPDK_DEFAULT_RPC_ADDR,
 						     subsys_init_cb, &cp_arg,
@@ -1674,12 +1711,15 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		}
 
 		/* Continue poll until no more events */
+		// todo: 这里是为啥
 		while (spdk_thread_poll(ctxt->bxc_thread, 0, 0) > 0)
 			;
 		D_DEBUG(DB_MGMT, "SPDK bdev initialized, tgt_id:%d", tgt_id);
 
+		// 将spdk thread 设置到全局数据中，表示在众多（每个xs 有各自的spdk thread）的thread 中，当前是扫描bdev那个
 		nvme_glb.bd_init_thread = ctxt->bxc_thread;
-		// 这里会创建spdk bs
+	
+		// 内部会load_blobstore 最终创建spdk bs，ctxt 是每个xs 都有的tls 数据
 		rc = init_bio_bdevs(ctxt);
 		if (rc != 0) {
 			D_ERROR("failed to init bio_bdevs, "DF_RC"\n",
@@ -1708,7 +1748,8 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 
 	d_bdev = NULL;
 	/* Initialize per-xstream blobstore context */
-	// 初始化每个xs 的blobstore
+	// 初始化每个xs 的blobstore ctx
+	// 每种设备类型创建一个 blobstore
 	for (st = SMD_DEV_TYPE_DATA; st < SMD_DEV_TYPE_MAX; st++) {
 		/* No Data blobstore for sys xstream */
 		if (st == SMD_DEV_TYPE_DATA && tgt_id == BIO_SYS_TGT_ID)
@@ -1726,6 +1767,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		if (rc)
 			goto out;
 
+		// 保存所有的bs
 		bxb = ctxt->bxc_xs_blobstores[st];
 		D_ASSERT(bxb != NULL);
 		bbs = bxb->bxb_blobstore;
@@ -1734,6 +1776,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		D_ASSERT(d_bdev != NULL);
 	}
 
+	// 创建dma buffer
 	ctxt->bxc_dma_buf = dma_buffer_create(bio_chk_cnt_init, tgt_id);
 	if (ctxt->bxc_dma_buf == NULL) {
 		D_ERROR("failed to initialize dma buffer\n");
@@ -1950,6 +1993,12 @@ bio_nvme_poll(struct bio_xs_context *ctxt)
 		return 0;
 
 	D_ASSERT(ctxt != NULL && ctxt->bxc_thread != NULL);
+	// 调用spdk poll
+	// spdk 中，各个线程是通过消息传递来通信的，即通过ring（环形缓冲区）来传递
+	// spdk_thread_poll 包含：
+	// 1. 处理ring 传递的线程间通信消息
+	// 2. 调用非定时poller 绑定的cb
+	// 3. 调用定时poller 绑定的cb
 	rc = spdk_thread_poll(ctxt->bxc_thread, 0, 0);
 
 	/*

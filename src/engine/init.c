@@ -74,10 +74,13 @@ unsigned int		dss_instance_idx;
 /** HW topology */
 hwloc_topology_t	dss_topo;
 /** core depth of the topology */
+// 物理核心在topo 结构中的树的高度
 int			dss_core_depth;
 /** number of physical cores, w/o hyperthreading */
+// 物理核心数，没有超线程。w/o 是论文中常见的缩写：without
 int			dss_core_nr;
 /** start offset index of the first core for service XS */
+// xs 服务使用的第一个core 的索引
 unsigned int		dss_core_offset;
 /** NUMA node to bind to */
 int			dss_numa_node = -1;
@@ -160,7 +163,8 @@ register_dbtree_classes(void)
 {
 	int rc;
 
-	// 注册多种类型的tree
+	// 注册多种类型的tree 类型，及对应的系列树操作
+	// 不定长k - 不定长v 树
 	rc = dbtree_class_register(DBTREE_CLASS_KV, 0 /* feats */,
 				   &dbtree_kv_ops);
 	if (rc != 0) {
@@ -169,6 +173,7 @@ register_dbtree_classes(void)
 		return rc;
 	}
 
+	// int - 不定长v 树
 	rc = dbtree_class_register(DBTREE_CLASS_IV,
 				   BTR_FEAT_UINT_KEY | BTR_FEAT_DIRECT_KEY,
 				   &dbtree_iv_ops);
@@ -178,6 +183,7 @@ register_dbtree_classes(void)
 		return rc;
 	}
 
+	// int - 定长v 树
 	rc = dbtree_class_register(DBTREE_CLASS_IFV, BTR_FEAT_UINT_KEY | BTR_FEAT_DIRECT_KEY,
 				   &dbtree_ifv_ops);
 	if (rc != 0) {
@@ -185,6 +191,7 @@ register_dbtree_classes(void)
 		return rc;
 	}
 
+	// name - value 树
 	rc = dbtree_class_register(DBTREE_CLASS_NV, BTR_FEAT_DIRECT_KEY,
 				   &dbtree_nv_ops);
 	if (rc != 0) {
@@ -193,6 +200,7 @@ register_dbtree_classes(void)
 		return rc;
 	}
 
+	// uuid - value 树
 	rc = dbtree_class_register(DBTREE_CLASS_UV, 0 /* feats */,
 				   &dbtree_uv_ops);
 	if (rc != 0) {
@@ -201,6 +209,7 @@ register_dbtree_classes(void)
 		return rc;
 	}
 
+	// epoch - count 树
 	rc = dbtree_class_register(DBTREE_CLASS_EC,
 				   BTR_FEAT_UINT_KEY /* feats */,
 				   &dbtree_ec_ops);
@@ -264,6 +273,7 @@ modules_load(void)
 static unsigned int
 ncores_needed(unsigned int tgt_nr, unsigned int nr_helpers)
 {
+	// 每个target/每个helper 都会占用一个物理核心
 	return DAOS_TGT0_OFFSET + tgt_nr + nr_helpers;
 }
 
@@ -271,18 +281,23 @@ ncores_needed(unsigned int tgt_nr, unsigned int nr_helpers)
  * Check if the #targets and #nr_xs_helpers is valid to start server, the #nr_xs_helpers possibly
  * be reduced.
  */
+// ncores 为提供给当前engine 的物理核心个数，tgt_nr 为配置的target 个数
+// oversubscribe 为1 表示在资源不足时，允许强制启动，强制启动会导致daos 性能受损
 static int
 dss_tgt_nr_check(unsigned int ncores, unsigned int tgt_nr, bool oversubscribe)
 {
 	D_ASSERT(ncores >= 1);
 
 	/* at most 2 helper XS per target */
+	// 这里注释写错了，应该是 per engine
 	// dss_tgt_offload_xs_nr 为helper 个数，设置的是 2，tgt_nr 为 20
 	if (dss_tgt_offload_xs_nr > 2 * tgt_nr) {
+		// helper 个数如果超过2倍的target 个数，强制设置为 2倍
 		D_PRINT("#nr_xs_helpers(%d) cannot exceed 2 times #targets (2 x %d = %d).\n",
 			dss_tgt_offload_xs_nr, tgt_nr, 2 * tgt_nr);
 		dss_tgt_offload_xs_nr = 2 * tgt_nr;
 	} else if (dss_tgt_offload_xs_nr == 0) {
+		// 至少需要一个helper
 		D_WARN("Suggest to config at least 1 helper XS per DAOS engine\n");
 	}
 
@@ -294,6 +309,7 @@ dss_tgt_nr_check(unsigned int ncores, unsigned int tgt_nr, bool oversubscribe)
 		goto out;
 	}
 
+	// target 和helper 占用的物理核心数大于总核心数，非法
 	if (ncores_needed(tgt_nr, dss_tgt_offload_xs_nr) > ncores) {
 		D_ERROR("cannot start engine with %d targets %d xs_helpers on %d cores, may try "
 			"with DAOS_TARGET_OVERSUBSCRIBE=1 or reduce #targets/#nr_xs_helpers("
@@ -303,6 +319,7 @@ dss_tgt_nr_check(unsigned int ncores, unsigned int tgt_nr, bool oversubscribe)
 	}
 
 out:
+	// todo: 还有整倍数这个限制吗，当前设置的offload 是2，target nr 是20，所以为 true
 	if (dss_tgt_offload_xs_nr % tgt_nr != 0)
 		dss_helper_pool = true;
 
@@ -437,18 +454,23 @@ dss_topo_init()
 	hwloc_topology_init(&dss_topo);
 	hwloc_topology_load(dss_topo);
 
+	// 1. 获取type 为core 类型的depth，以后调用 hwloc_get_obj_by_depth 需要用到
+	// depth 含义：整个topo 可以认为是一棵树，depth 就是所在层的树的高度
 	dss_core_depth = hwloc_get_type_depth(dss_topo, HWLOC_OBJ_CORE);
+	// 2. 获取type 为core 类型总数量
 	dss_core_nr = hwloc_get_nbobjs_by_type(dss_topo, HWLOC_OBJ_CORE);
+	// 获取numa 所在topo 树高度
 	depth = hwloc_get_type_depth(dss_topo, HWLOC_OBJ_NUMANODE);
 	// 设置 numa 个数
 	numa_node_nr = hwloc_get_nbobjs_by_depth(dss_topo, depth);
+	// 这个参数为 1 表示物理核不够用需要强制启动daos，将会影响daos 性能
 	d_getenv_bool("DAOS_TARGET_OVERSUBSCRIBE", &tgt_oversub);
 	// target 个数
 	dss_tgt_nr = nr_threads;
 
 	/* if no NUMA node was specified, or NUMA data unavailable */
 	/* fall back to the legacy core allocation algorithm */
-	// 未指定numa 的场景
+	// 未指定numa 的场景，当前是指定了 numa 的
 	if (dss_numa_node == -1 || numa_node_nr <= 0) {
 		D_PRINT("Using legacy core allocation algorithm\n");
 		if (dss_core_offset >= dss_core_nr) {
@@ -461,13 +483,13 @@ dss_topo_init()
 		return dss_tgt_nr_check(dss_core_nr, dss_tgt_nr, tgt_oversub);
 	}
 
-	// 指定的numa 不合法
+	// 分配给engine 的numa 不合法
 	if (dss_numa_node > numa_node_nr) {
 		D_ERROR("Invalid NUMA node selected. Must be no larger than %d\n", numa_node_nr);
 		return -DER_INVAL;
 	}
 
-	// dss_numa_node 合法，获取numa obj
+	// 分配给engine 的 numa = dss_numa_node 合法，获取numa obj
 	numa_obj = hwloc_get_obj_by_depth(dss_topo, depth, dss_numa_node);
 	if (numa_obj == NULL) {
 		D_ERROR("NUMA node %d was not found in the topology\n", dss_numa_node);
@@ -476,34 +498,59 @@ dss_topo_init()
 
 	/* create an empty bitmap, then set each bit as we */
 	/* find a core that matches */
+	// 创建一个空的bitmap
 	core_allocation_bitmap = hwloc_bitmap_alloc();
 	if (core_allocation_bitmap == NULL) {
 		D_ERROR("Unable to allocate core allocation bitmap\n");
 		return -DER_INVAL;
 	}
 
+	/*
+	root@server01:/tmp# hwloc-info
+	depth 0:           1 Machine (type #0)
+	depth 1:          2 Package (type #1)
+	depth 2:         2 L3Cache (type #6)
+	depth 3:        52 L2Cache (type #5)
+		depth 4:       52 L1dCache (type #4)
+		depth 5:      52 L1iCache (type #9)
+		depth 6:     52 Core (type #2)
+		depth 7:    104 PU (type #3)
+	Special depth -3:  2 NUMANode (type #13)
+	Special depth -4:  21 Bridge (type #14)
+	Special depth -5:  16 PCIDev (type #15)
+	Special depth -6:  9 OSDev (type #16)
+	*/
 	dss_num_cores_numa_node = 0;
 	num_cores_visited = 0;
 
-	// 遍历core
+	// 遍历topo 树中 core  这一层的所有信息
+	// 当前机器型号下，dss_core_nr = 26 = 物理核心数
 	for (k = 0; k < dss_core_nr; k++) {
-		// 获取每个core
+		// 依次获取depth 层中每个core
 		corenode = hwloc_get_obj_by_depth(dss_topo, dss_core_depth, k);
 		if (corenode == NULL)
 			continue;
+		// 判断numa_obj 对应的numa 的cpuset 指向的所有物理核心中，是否包含 corenode->cpuset 这个核心
+		// Test whether bitmap sub_bitmap is part of bitmap super_bitmap.
+		// 参数1 是sub bitmap，参数2 是super bitmap。返回1 表示包含
 		if (hwloc_bitmap_isincluded(corenode->cpuset,
 					    numa_obj->cpuset) != 0) {
-			// 如果core 匹配，设置bit 标记位
+			// super 包含sub
+			// todo: 启动参数中没有设置起始core idx（dss_core_offset），默认为 0 吗
 			if (num_cores_visited++ >= dss_core_offset) {
+				// 如果当前操作的 k 个core，比分配的第一个core 的offset 还大，表示合法
+				// 将core_allocation_bitmap 中第 k个 bit 位设置为 1，1 表示该位对应的core 可用
 				hwloc_bitmap_set(core_allocation_bitmap, k);
+				// 将当前操作的第k 个corenode 转化为字符串，保存到 cpuset 变量中
 				hwloc_bitmap_asprintf(&cpuset,
 						      corenode->cpuset);
 			}
 			dss_num_cores_numa_node++;
 		}
 	}
-	// 打印cpu bitmap
+	// 转化为字符串格式
 	hwloc_bitmap_asprintf(&cpuset, core_allocation_bitmap);
+	// 上面转化，这里就free 了，目的是啥
 	free(cpuset);
 	// 第一个core 比numa 还大，非法
 	if (dss_core_offset >= dss_num_cores_numa_node) {
@@ -517,6 +564,7 @@ dss_topo_init()
 	// 逻辑核指的是通过超线程技术，在同一个物理核模拟出来的核心，daos 中绑定target 的都是逻辑核
 	// 检查target num 和物理cores 分配是否够用
 	// 当前是每个engine 2 x 26 核。target 为 20 个
+	// dss_num_cores_numa_node = 26，dss_tgt_nr = 20
 	return dss_tgt_nr_check(dss_num_cores_numa_node, dss_tgt_nr, tgt_oversub);
 }
 
@@ -573,6 +621,7 @@ abt_max_num_xstreams(void)
 {
 	char   *env;
 
+	// env 看不到以下环境变量
 	env = getenv("ABT_MAX_NUM_XSTREAMS");
 	if (env == NULL)
 		env = getenv("ABT_ENV_MAX_NUM_XSTREAMS");
@@ -593,6 +642,7 @@ set_abt_max_num_xstreams(int n)
 	if (value == NULL)
 		return -DER_NOMEM;
 	D_INFO("Setting %s to %s\n", name, value);
+	// 设置到环境变量
 	rc = setenv(name, value, 1 /* overwrite */);
 	D_FREE(value);
 	if (rc != 0)
@@ -603,7 +653,10 @@ set_abt_max_num_xstreams(int n)
 static int
 abt_init(int argc, char *argv[])
 {
+	// nrequested = 0
 	int	nrequested = abt_max_num_xstreams();
+	// 1+ （3 sys） + （20 个target） + （2 个helper）= 26（那个机器一共26个核心，如果多设置一个target 是不是就报错了）
+	// todo：main xs 不是应该包含在 20 个target 中了么
 	int	nrequired = 1 /* primary xstream */ + DSS_XS_NR_TOTAL;
 	int	rc;
 
@@ -614,11 +667,15 @@ abt_init(int argc, char *argv[])
 	 * because xstream_data.xd_mutex's internal queue has fewer slots than
 	 * some xstreams' rank numbers need.
 	 */
+	// 设置max num xs
 	rc = set_abt_max_num_xstreams(max(nrequested, nrequired));
 	if (rc != 0)
 		return daos_errno2der(errno);
 
 	/* Now, initialize Argobots. */
+	// abt 初始化
+	// 启动参数： /opt/daos/bin/daos_engine -t 20 -x 2 -g daos_server -d /var/run/daos_server -T 2 -n /mnt/daos/2/daos_nvme.conf -p 1 -I 1 -r 20480 -H 2 -s /mnt/daos/2
+	// todo: abt 能识别这些参数么
 	rc = ABT_init(argc, argv);
 	if (rc != ABT_SUCCESS) {
 		D_ERROR("failed to init ABT: %d\n", rc);
@@ -670,6 +727,7 @@ abt_init(int argc, char *argv[])
 		return dss_abterr2der(rc);
 	}
 #endif
+	// abt init 完成
 	dss_abt_init = true;
 
 	return 0;
@@ -804,7 +862,9 @@ server_init(int argc, char *argv[])
 		return rc;
 
 	/** initialize server topology data - this is needed to set up the number of targets */
-	// 初始化topo 信息，即在服务器上架完成后，numa 架构的信息已经确定，即哪个numa 绑定了哪些pmem 设备，nvme 设备以及ib 网卡，需要与conf 保持一致
+	// 初始化硬件topo 信息，即在服务器上架完成后，numa 架构的信息已经确定，即哪个numa 绑定了哪些pmem 设备，nvme 设备以及ib 网卡，需要与conf 保持一致
+	// 可以使用lstopo，hwloc-ls 命令查看
+	// 检查当前的硬件topo 信息以及daos_server 传递来的物理核心等参数，是否符合资源分配要求
 	rc = dss_topo_init();
 	if (rc != 0)
 		D_GOTO(exit_debug_init, rc);
@@ -822,34 +882,36 @@ server_init(int argc, char *argv[])
 
 	metrics = &dss_engine_metrics;
 	/** Report timestamp when engine was started */
-	// engine 启动时报告时间戳
+	// engine 启动时报告时间戳给metrics
 	d_tm_record_timestamp(metrics->started_time);
 
-	// 初始化drpc
+	// 判断daos_server -d参数传递来的用于drpc 通信的sockst 路径是否存在
 	rc = drpc_init();
 	if (rc != 0) {
 		D_ERROR("Failed to initialize dRPC: "DF_RC"\n", DP_RC(rc));
 		goto exit_metrics_init;
 	}
 
-	// 注册一些要用到的dbtree 的类型
+	// 注册一些要用到的dbtree 的类型，如kv 都是变长字节流的tree，int-边长字节流tree 等
 	rc = register_dbtree_classes();
 	if (rc != 0)
 		D_GOTO(exit_drpc_fini, rc);
 
 	// abt 库的初始化
+	// 启动参数： /opt/daos/bin/daos_engine -t 20 -x 2 -g daos_server -d /var/run/daos_server -T 2 -n /mnt/daos/2/daos_nvme.conf -p 1 -I 1 -r 20480 -H 2 -s /mnt/daos/2
 	rc = abt_init(argc, argv);
 	if (rc != 0)
 		goto exit_drpc_fini;
 
 	/* initialize the modular interface */
-	// daos server 模块初始化
+	// daos server 模块初始化：其实就判断了 registry_table 是否为空，真正向 table 中添加数据是在 dss_module_init_all 中
 	rc = dss_module_init();
 	if (rc)
 		goto exit_abt_init;
 	D_INFO("Module interface successfully initialized\n");
 
 	/* initialize the network layer */
+	// 获取ctx 总数
 	ctx_nr = dss_ctx_nr_get();
 	// crt 的初始化，client 和server 都要调用
 	rc = crt_init_opt(daos_sysname,
@@ -859,6 +921,7 @@ server_init(int argc, char *argv[])
 		D_GOTO(exit_mod_init, rc);
 	D_INFO("Network successfully initialized\n");
 
+	// dss_mod_facs 在 dss_module_init_all 里才会加载
 	if (dss_mod_facs & DSS_FAC_LOAD_CLI) {
 		// daos 客户端库
 		rc = daos_init();
@@ -885,8 +948,8 @@ server_init(int argc, char *argv[])
 	/* server-side uses D_HTYPE_PTR handle */
 	d_hhash_set_ptrtype(daos_ht.dht_hhash);
 
-	// todo: iv 到底是个什么玩意
-	// 构造iv topo 树
+	// 构造iv 类型 topo 树。k 为int，v 为可变长字节流
+	// todo: iv 服务是啥，根crt 相关
 	ds_iv_init();
 
 	/* load modules. Split load and init so first call to dlopen()
@@ -908,11 +971,17 @@ server_init(int argc, char *argv[])
 	 */
 	// hlc 时钟end
 	hlc_recovery_end(bound);
-	// todo: epoch
 	dss_set_start_epoch();
 
 	/* init nvme */
 	// bio nvme 初始化
+	// dss_nvme_conf 是daos_server 启动engine 传递进来的nvme list
+	// nvme list, 该engien 使用的numa idx，spdk 申请内存大小，大页个数，target 个数
+	// dss_nvme_bypass_health_check = false
+	/*
+	/opt/daos/bin/daos_engine -t 20 -x 2 -g daos_server -d /var/run/daos_server -T 2 -n /mnt/daos/2/daos_nvme.conf -p 1 -I 1 -r 20480 -H 2 -s /mnt/daos/2
+	/opt/daos/bin/daos_engine -t 20 -x 2 -g daos_server -d /var/run/daos_server -T 2 -n /mnt/daos/1/daos_nvme.conf -p 0 -I 0 -r 20480 -H 2 -s /mnt/daos/1
+	*/
 	rc = bio_nvme_init(dss_nvme_conf, dss_numa_node, dss_nvme_mem_size,
 			   dss_nvme_hugepage_size, dss_tgt_nr, dss_nvme_bypass_health_check);
 	if (rc)
@@ -965,6 +1034,7 @@ server_init(int argc, char *argv[])
 	d_tm_record_timestamp(metrics->ready_time);
 
 	/** Report rank */
+	// 上报rank id
 	d_tm_set_gauge(metrics->rank_id, dss_self_rank());
 
 	D_PRINT("DAOS I/O Engine (v%s) process %u started on rank %u "
@@ -1135,7 +1205,7 @@ parse(int argc, char **argv)
 	// 第一个core
 	// 所属group
 	// 所属模块
-	// nvme 列表
+	// nvme 列表文件：会在pmem 对应的目录下生成conf 文件
 	// numa 索引
 	// pmem size
 	// 大页
@@ -1195,7 +1265,7 @@ parse(int argc, char **argv)
 			rc = arg_strtoul(optarg, &dss_tgt_offload_xs_nr,
 					 "\"-x\"");
 			break;
-		// 第一个core
+		// 指定的第一个物理core
 		case 'f':
 			rc = arg_strtoul(optarg, &dss_core_offset, "\"-f\"");
 			break;
@@ -1227,7 +1297,7 @@ parse(int argc, char **argv)
 		case 'p':
 			dss_numa_node = atoi(optarg);
 			break;
-		// 20480
+		// spdk 申请的内存大小 = 20480
 		case 'r':
 			rc = arg_strtoul(optarg, &dss_nvme_mem_size, "\"-r\"");
 			break;
@@ -1301,7 +1371,7 @@ main(int argc, char **argv)
 	d_signal_register();
 
 	/** server initialization */
-	// engine 初始化
+	// engine 根据daos_server 传递来的参数初始化。后面这两个参数将会被直接透传给abt 库做初始化
 	rc = server_init(argc, argv);
 	if (rc)
 		exit(EXIT_FAILURE);

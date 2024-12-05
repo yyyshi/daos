@@ -85,7 +85,7 @@ dss_module_load(const char *modname)
 
 	/* load the dynamic library */
 	sprintf(name, "lib%s.so", modname);
-	// 加载动态库
+	// 加载动态库，每个动态库对应一个模块
 	handle = dlopen(name, RTLD_LAZY | RTLD_GLOBAL);
 	if (handle == NULL) {
 		D_ERROR("cannot load %s: %s\n", name, dlerror());
@@ -145,6 +145,7 @@ dss_module_init_one(struct loaded_mod *lmod, uint64_t *mod_facs)
 	int			i;
 	int			rc = 0;
 
+	// 获取服务模块
 	smod = lmod->lm_dss_mod;
 	/* initialize the module */
 	rc = smod->sm_init();
@@ -158,6 +159,7 @@ dss_module_init_one(struct loaded_mod *lmod, uint64_t *mod_facs)
 		dss_register_key(smod->sm_key);
 
 	/* register RPC handlers */
+	// 注册rpc 句柄：这个句柄关联多个rpc 接口实现
 	for (i = 0; i < smod->sm_proto_count; i++) {
 		rc = daos_rpc_register(smod->sm_proto_fmt[i], smod->sm_cli_count[i],
 				       smod->sm_handlers[i], smod->sm_mod_id);

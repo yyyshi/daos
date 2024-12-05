@@ -18,6 +18,7 @@
  * DSS_POOL_NVME_POLL	NVMe poll ULT
  * DSS_POOL_GENERIC	All other ULTS
  */
+// 分别用于网络poll，nvme poll和其他的协程的池
 enum {
 	DSS_POOL_NET_POLL	= 0,
 	DSS_POOL_NVME_POLL,
@@ -61,14 +62,18 @@ struct mem_stats {
 };
 
 /** Per-xstream configuration data */
+// 每个xs 的配置数据
 struct dss_xstream {
 	char			dx_name[DSS_XS_NAME_LEN];
 	ABT_future		dx_shutdown;
 	ABT_future		dx_stopping;
 	hwloc_cpuset_t		dx_cpuset;
 	ABT_xstream		dx_xstream;
+	// 一个调度器可以有多个池，池是存储任务的容器，管理任务的分发
 	ABT_pool		dx_pools[DSS_POOL_CNT];
+	// 每个xs 一个调度器
 	ABT_sched		dx_sched;
+	// 依赖的线程
 	ABT_thread		dx_progress;
 	struct sched_info	dx_sched_info;
 	tse_sched_t		dx_sched_dsc;
@@ -314,14 +319,18 @@ void ds_iv_init(void);
 void ds_iv_fini(void);
 
 /** Total number of XS */
+// xs 总数 3 + 20 + 2
 #define DSS_XS_NR_TOTAL						\
 	(dss_sys_xs_nr + dss_tgt_nr + dss_tgt_offload_xs_nr)
 /** Total number of cart contexts created */
+// ctx 总数 2 + 20 + 2
 #define DSS_CTX_NR_TOTAL					\
 	(DAOS_TGT0_OFFSET + dss_tgt_nr +			\
 	 (dss_tgt_offload_xs_nr > dss_tgt_nr ? dss_tgt_nr :	\
 	  dss_tgt_offload_xs_nr))
 /** main XS id of (vos) tgt_id */
+// 根据target id 返回main xs id = targetid + sys xs num
+// 即main xs 是从sys xs 后面开始排
 #define DSS_MAIN_XS_ID(tgt_id)					\
 	(dss_helper_pool ? ((tgt_id) + dss_sys_xs_nr) :		\
 			   ((tgt_id) * ((dss_tgt_offload_xs_nr /\
@@ -335,6 +344,7 @@ void ds_iv_fini(void);
  *
  * \return		VOS target ID (-1 for system XS).
  */
+// 根据xs id 获取vos target id
 static inline int
 dss_xs2tgt(int xs_id)
 {
@@ -342,10 +352,12 @@ dss_xs2tgt(int xs_id)
 		  "invalid xs_id %d, dss_tgt_nr %d, "
 		  "dss_tgt_offload_xs_nr %d.\n",
 		  xs_id, dss_tgt_nr, dss_tgt_offload_xs_nr);
+	// 如果认为helper 为pool
 	if (dss_helper_pool) {
 		if (xs_id < dss_sys_xs_nr ||
 		    xs_id >= dss_sys_xs_nr + dss_tgt_nr)
 			return -1;
+		// xs id 减去 系统xs 个数就是target id
 		return xs_id - dss_sys_xs_nr;
 	}
 
@@ -359,8 +371,7 @@ static inline bool
 dss_xstream_has_nvme(struct dss_xstream *dx)
 {
 
-	// main xs 直接返回true
-	// 调用位置搜：设置是否为main xs 的唯一的地方
+	// 如果是main xs，直接返回true
 	if (dx->dx_main_xs != 0)
 		return true;
 	// 不是main xs，但满足 meta 类型role 在配置文件中配置 && 当前是第一个xs。也返回true

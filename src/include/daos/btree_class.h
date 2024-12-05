@@ -68,6 +68,7 @@ int dbtree_ec_delete(daos_handle_t tree, uint64_t epoch);
  * Each key or value is a variable-length byte stream. Keys are ordered by
  * their hash values and must be non-empty.
  */
+// k 和v 都是可变字节流，按key 的hash 值排序
 #define DBTREE_CLASS_KV (DBTREE_DSM_BEGIN + 3)
 extern btr_ops_t dbtree_kv_ops;
 
@@ -77,6 +78,7 @@ extern btr_ops_t dbtree_kv_ops;
  * Each key is a uint64_t integer. Each value is a variable-length byte stream.
  * Keys are ordered numerically.
  */
+// key 为整型，v为可变字节流，按key 排序
 #define DBTREE_CLASS_IV (DBTREE_DSM_BEGIN + 4)
 extern btr_ops_t dbtree_iv_ops;
 
@@ -102,6 +104,7 @@ extern btr_ops_t dbtree_recx_ops;
  *
  *  Each key is uint64_t integer, values have fixed size for a given key.  Keys ordered numerically.
  */
+// key 是整型，v 为定长大小。按key 排序
 #define DBTREE_CLASS_IFV     (DBTREE_DSM_BEGIN + 8)
 extern btr_ops_t dbtree_ifv_ops;
 

@@ -691,6 +691,7 @@ int bio_mc_create(struct bio_xs_context *xs_ctxt, uuid_t pool_id, uint64_t meta_
 		D_ASSERT(!(flags & BIO_MC_FL_RDB));
 		// 创建data 的blob。一个池只创建最多三个blob 吗？data/meta/wal
 		// 每个bs 对应一个blob
+		// xs ctxt 里面保存了bs 信息
 		rc = bio_blob_create(pool_id, xs_ctxt, data_sz, SMD_DEV_TYPE_DATA, flags,
 				     &data_blobid);
 		if (rc)

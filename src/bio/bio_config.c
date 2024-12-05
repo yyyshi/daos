@@ -489,6 +489,7 @@ check_name_from_bdev_subsys(struct json_config_ctx *ctx)
 
 	D_ASSERT(ctx->config_it != NULL);
 
+	//  todo:  /mnt/daos/2/daos_nvme.conf 这个文件是什么时候创建的
 	rc = spdk_json_decode_object(ctx->config_it, config_entry_decoders,
 				     SPDK_COUNTOF(config_entry_decoders), &cfg);
 	if (rc < 0) {
@@ -511,9 +512,11 @@ check_name_from_bdev_subsys(struct json_config_ctx *ctx)
 	if (name == NULL)
 		D_GOTO(free_method, rc = -DER_NOMEM);
 
+	// 遍历json 文件中 conf.params 元素
 	key = spdk_json_object_first(cfg.params);
 	while (key != NULL) {
 		value = json_value(key);
+		// 找到所有的 bdev_nvme_attach_controller，即nvme 列表
 		if (spdk_json_strequal(key, "name")) {
 			// 获取name 的值，类似：Nvme_server03_0_1_0
 			value = json_value(key);
@@ -522,7 +525,7 @@ check_name_from_bdev_subsys(struct json_config_ctx *ctx)
 				D_GOTO(free_name, rc = -DER_INVAL);
 			}
 
-			// 追加到name
+			// 追加到name. 例如："Nvme_server03_0_1_0"
 			memcpy(name, value->start, value->len);
 			name[value->len] = '\0';
 
@@ -547,6 +550,7 @@ check_name_from_bdev_subsys(struct json_config_ctx *ctx)
 			},
 
 			*/
+			// 解析name 转化成 role
 			rc = bdev_name2roles(name);
 			if (rc < 0) {
 				D_ERROR("bdev_name contains invalid roles: %s\n", name);
@@ -555,6 +559,7 @@ check_name_from_bdev_subsys(struct json_config_ctx *ctx)
 			// 统计role 二进制信息，并返回
 			roles |= rc;
 		}
+		// 循环下一个param
 		key = spdk_json_next(key);
 	}
 
@@ -603,6 +608,7 @@ add_bdevs_to_opts(struct json_config_ctx *ctx, struct spdk_json_val *bdev_ss, bo
 		return rc;
 
 	while (ctx->config_it != NULL) {
+		// 将pci 地址添加到opts 中
 		rc = add_traddrs_from_bdev_subsys(ctx, vmd_enabled, opts);
 		if (rc != 0)
 			return rc;
@@ -687,7 +693,79 @@ bio_add_allowed_alloc(const char *nvme_conf, struct spdk_env_opts *opts, int *ro
 	if (ctx == NULL)
 		return -DER_NOMEM;
 
+	// 读取保存bdev pcie 地址的json 文件
 	rc = read_config(nvme_conf, ctx);
+	/*
+	root@server01:~# cat /mnt/daos/2/daos_nvme.conf
+	{
+	"daos_data": {
+		"config": []
+	},
+	"subsystems": [
+		{
+		"subsystem": "bdev",
+		"config": [
+			{
+			"params": {
+				"bdev_io_pool_size": 65536,
+				"bdev_io_cache_size": 256
+			},
+			"method": "bdev_set_options"
+			},
+			{
+			"params": {
+				"retry_count": 4,
+				"timeout_us": 0,
+				"nvme_adminq_poll_period_us": 100000,
+				"action_on_timeout": "none",
+				"nvme_ioq_poll_period_us": 0
+			},
+			"method": "bdev_nvme_set_options"
+			},
+			{
+			"params": {
+				"enable": false,
+				"period_us": 0
+			},
+			"method": "bdev_nvme_set_hotplug"
+			},
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server01_0_1_0",
+				"traddr": "0000:e3:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			},
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server01_1_1_0",
+				"traddr": "0000:e4:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			},
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server01_2_1_0",
+				"traddr": "0000:e5:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			},
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server01_3_1_0",
+				"traddr": "0000:e6:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			}
+		]
+		}
+	]
+	}root@server01:~#
+	*/
 	if (rc != 0)
 		D_GOTO(out, rc);
 
@@ -716,14 +794,17 @@ bio_add_allowed_alloc(const char *nvme_conf, struct spdk_env_opts *opts, int *ro
 			D_GOTO(out, rc = -DER_INVAL);
 		}
 
-		// 找到subsystem 的bdev
+		// 当前子系统如果是bdev
 		if (spdk_json_strequal(ctx->subsystem_name, "bdev"))
+			// todo: 如果有多个bdev 不就覆盖了？正常只会有一个子系统
 			bdev_ss = ctx->subsystems_it;
 
+		// vmd 技术：将nvme 插拔pcie 总线事件重定向至存储感知的驱动程序
 		if (spdk_json_strequal(ctx->subsystem_name, BIO_DEV_TYPE_VMD))
 			vmd_ss = ctx->subsystems_it;
 
 		/* Move on to next subsystem */
+		// 继续下一个循环，正常只循环一次
 		ctx->subsystems_it = spdk_json_next(ctx->subsystems_it);
 	};
 
@@ -740,8 +821,10 @@ bio_add_allowed_alloc(const char *nvme_conf, struct spdk_env_opts *opts, int *ro
 	rc = check_md_on_ssd_status(ctx, bdev_ss);
 	if (rc < 0)
 		goto out;
+	// role 作为返回值
 	*roles = rc;
 
+	// 将解析出来的pcie 地址，添加到 opts 中
 	rc = add_bdevs_to_opts(ctx, bdev_ss, vmd_enabled, opts);
 out:
 	free_json_config_ctx(ctx);

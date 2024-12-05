@@ -390,6 +390,7 @@ struct bio_xs_blobstore {
 // 每个xs 的nvme ctx
 struct bio_xs_context {
 	int			 bxc_tgt_id;
+	// todo: 这个thread 和abt 中的thread 有什么联系吗
 	struct spdk_thread	*bxc_thread;
 	// 对应三种类型的设备：meta，wal 和data
 	struct bio_xs_blobstore	*bxc_xs_blobstores[SMD_DEV_TYPE_MAX];

@@ -674,6 +674,7 @@ daos_crt_init_opt_get(bool server, int ctx_nr)
 	daos_crt_init_opt.cio_use_unexpected_size = 1;
 	daos_crt_init_opt.cio_max_unexpected_size = limit ? limit : DAOS_RPC_SIZE;
 
+	// 为 true
 	if (!server) {
 		/* to workaround a bug in mercury/ofi, that the basic EP cannot
 		 * communicate with SEP. Setting 2 for client to make it to use
@@ -681,6 +682,7 @@ daos_crt_init_opt_get(bool server, int ctx_nr)
 		 */
 		daos_crt_init_opt.cio_ctx_max_num = 2;
 	} else {
+		// 透传ctx 总数
 		daos_crt_init_opt.cio_ctx_max_num = ctx_nr;
 	}
 

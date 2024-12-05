@@ -1610,6 +1610,7 @@ sched_pop_net_poll(struct sched_data *data, ABT_pool pool)
 	 * not, there is always a server handler ULT in DSS_POOL_NET_POLL.
 	 * (see dss_srv_handler()).
 	 */
+	// 从pool 中取出unit
 	ret = ABT_pool_pop(pool, &unit);
 	if (ret != ABT_SUCCESS) {
 		D_ERROR("Failed to pop network poll ULT: %d\n", ret);
@@ -1984,6 +1985,7 @@ sched_watchdog_post(struct dss_xstream *dx)
 	free(strings);
 }
 
+// 开始调度任务
 static void
 sched_run(ABT_sched sched)
 {
@@ -2006,6 +2008,8 @@ sched_run(ABT_sched sched)
 		return;
 	}
 
+	// 依次调度三个poll 池
+	// todo: 在一个xs 上，以下3种类型可能同时存在么
 	while (1) {
 		/* Try to pick network poll ULT */
 		pool = pools[DSS_POOL_NET_POLL];
@@ -2037,6 +2041,7 @@ execute:
 		D_ASSERT(pool != ABT_POOL_NULL);
 		sched_watchdog_prep(dx, unit);
 
+		// 将work unit 和pool 关联，并以子线程身份直接运行这个unit
 		ABT_xstream_run_unit(unit, pool);
 
 		sched_watchdog_post(dx);
@@ -2089,6 +2094,7 @@ sched_create_pools(struct dss_xstream *dx)
 {
 	int	i, rc;
 
+	// 创建xs 调度器依赖的pools
 	for (i = 0; i < DSS_POOL_CNT; i++) {
 		/*
 		 * All pools should be created with ABT_POOL_ACCESS_MPSC to
@@ -2130,6 +2136,7 @@ dss_sched_init(struct dss_xstream *dx)
 	ABT_sched_def		sched_def = {
 		.type	= ABT_SCHED_TYPE_ULT,
 		.init	= sched_init,
+		// 开始任务调度，会依次poll 所有的池
 		.run	= sched_run,
 		.free	= sched_free,
 		.get_migr_pool = NULL
@@ -2141,16 +2148,19 @@ dss_sched_init(struct dss_xstream *dx)
 		return rc;
 
 	/* Create argobots pools */
+	// 1. 创建调度器需要的pool，pool 的作用是任务的分发
 	rc = sched_create_pools(dx);
 	if (rc != ABT_SUCCESS)
 		goto err_sched_info;
 
 	/* Create a scheduler config */
+	// 2. 生成调度器配置信息
 	rc = ABT_sched_config_create(&config, event_freq, 512, dx_ptr, dx,
 				     ABT_sched_config_var_end);
 	if (rc != ABT_SUCCESS)
 		goto err_pools;
 
+	// 3. 创建xs 依赖的调度器，指定创建好的多个pool
 	rc = ABT_sched_create(&sched_def, DSS_POOL_CNT, dx->dx_pools, config,
 			      &dx->dx_sched);
 	ABT_sched_config_free(&config);

@@ -465,6 +465,7 @@ func (srv *server) registerEvents() {
 	})
 }
 
+// daos_server 启动 daos_engine
 // 从下面大Start 过来的
 func (srv *server) start(ctx context.Context) error {
 	defer srv.logDuration(track("time server was listening"))

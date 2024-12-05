@@ -42,9 +42,9 @@
 
 	// 		     	               		 			  engine
 	//                              		/                                   \
-	//  		   				vos-target-xs                   		 		sys xs（drpc 监听，元数据操作）
+	//  		   				vos-target-xs                   		 		1. sys xs（drpc 监听，元数据操作）
 	//                     /                       \
-	//  main-xs（rpc io，rebuild scanner puller）   offload-xs（io 请求分发，ec，checksum）  
+	//  2. main-xs（rpc io，rebuild scanner puller）   3. offload-xs（io 请求分发，ec，checksum）  
 
 	// todo: 分别跟一下不同xs 对应的操作代码流程  
 	// 比如这里main-xs 涉及的rebuild 在sys-xs里也有涉及，是怎么任务划分的
@@ -54,12 +54,17 @@
 	// 与spdk 等架构对照，opencas等，主io线程和其余的线程的关系
 */
 /**
+ * todo: 这个线程模型是怎么工作的，也就是任务来了，是怎么分配给不同的xs 的
+ * todo：xs 和target 的关系又是怎么对应的
  * DAOS server threading model:
  * 1) a set of "target XS (xstream) set" per engine (dss_tgt_nr)
+ * -t 参数指定的 dss_tgt_nr
  * There is a "-t" option of daos_server to set the number.
  * For DAOS pool, one target XS set per VOS target to avoid extra lock when
  * accessing VOS file.
+ * 每个target 一个xs
  * With in each target XS set, there is one "main XS":
+ * 在所有的xs 集合中，有一个是 main xs，并且有一组offload xs（即helper）。
  * 1.1) The tasks for main XS:
  *	RPC server of IO request handler,
  *	ULT server for:
@@ -78,6 +83,7 @@
  *		dss_tgt_offload_xs_nr is 2, or on 1st offload XS).
  *
  * 2) one "system XS set" per engine (dss_sys_xs_nr)
+ * 另外每个engine 还有一个sys xs 集合（目前集合只有一个xs 0 作为sys xs），负责一些系统层面的任务
  * The system XS set (now only one - the XS 0) is for some system level tasks:
  *	RPC server for:
  *		drpc listener,
@@ -89,7 +95,6 @@
  *		rebuild status checker,
  *		rebalance request,
  *		IV, bcast, and SWIM message handling.
- *
  * Helper function:
  * daos_rpc_tag() to query the target tag (context ID) of specific RPC request.
  */
@@ -97,10 +102,13 @@
 /** Number of dRPC xstreams */
 #define DRPC_XS_NR	(1)
 /** Number of offload XS */
+// helper 个数，= 配置文件中helper 个数
 unsigned int	dss_tgt_offload_xs_nr;
 /** Number of target (XS set) per engine */
+// target xs 个数，= 配置文件中target 个数
 unsigned int	dss_tgt_nr;
 /** Number of system XS */
+// todo: （2 + 1）共三个 sys xs ？
 unsigned int	dss_sys_xs_nr = DAOS_TGT0_OFFSET + DRPC_XS_NR;
 /**
  * Flag of helper XS as a pool.
@@ -113,6 +121,8 @@ unsigned int	dss_sys_xs_nr = DAOS_TGT0_OFFSET + DRPC_XS_NR;
  *         create all VOS targets' IO service XS, and then all helper XS that
  *         are shared used by all VOS targets.
  */
+// flag 表示来标识是否将helper xs 作为一个pool
+// 1. false: 
 bool		dss_helper_pool;
 
 /** Bypass for the nvme health check */
@@ -136,8 +146,10 @@ struct dss_xstream_data {
 	int			  xd_ult_init_rc;
 	bool			  xd_ult_signal;
 	/** total number of XS including system XS, main XS and offload XS */
+	// sys xs main xs 和helper 的总数
 	int			  xd_xs_nr;
 	/** created XS pointer array */
+	// 保存所有的xs
 	struct dss_xstream	**xd_xs_ptrs;
 	/** serialize initialization of ULTs */
 	ABT_cond		  xd_ult_init;
@@ -146,6 +158,7 @@ struct dss_xstream_data {
 	ABT_mutex		  xd_mutex;
 };
 
+// 全局的xs 信息
 static struct dss_xstream_data	xstream_data;
 
 int
@@ -157,6 +170,8 @@ dss_xstream_set_affinity(struct dss_xstream *dxs)
 	 * Set cpu affinity
 	 * Try to use strict CPU binding, if supported.
 	 */
+	// 绑定cpuset
+	// todo: 和spdk 中绑核的区别和关联
 	rc = hwloc_set_cpubind(dss_topo, dxs->dx_cpuset,
 			       HWLOC_CPUBIND_THREAD | HWLOC_CPUBIND_STRICT);
 	if (rc) {
@@ -172,6 +187,7 @@ dss_xstream_set_affinity(struct dss_xstream *dxs)
 	 * Set memory affinity, but fail silently if it does not work since some
 	 * systems return ENOSYS.
 	 */
+	// 绑定内存
 	rc = hwloc_set_membind(dss_topo, dxs->dx_cpuset, HWLOC_MEMBIND_BIND,
 			       HWLOC_MEMBIND_THREAD);
 	if (rc)
@@ -197,6 +213,7 @@ dss_xstream_cnt(void)
 	return xstream_data.xd_xs_nr;
 }
 
+// 按照id 获取对应的xs
 struct dss_xstream *
 dss_get_xstream(int stream_id)
 {
@@ -384,6 +401,7 @@ wait_all_exited(struct dss_xstream *dx, struct dss_module_info *dmi)
  * poll), then it starts to poll the network requests in a loop until service
  * shutdown.
  */
+// 先设置cpu 亲和性，初始化每个xs 的tls，crt ctx，nvme ctx，创建一个loop ult （用于做gc 和nvme poll），之后poll 网络请求
 static void
 dss_srv_handler(void *arg)
 {
@@ -395,6 +413,7 @@ dss_srv_handler(void *arg)
 	bool				 signal_caller = true;
 
 	// xs 的server handler 线程先设置cpu 亲和性
+	// 亲和性说的是numa 架构下cpu 访问同一个numa 节点上的内存速度快于其他numa 节点
 	rc = dss_xstream_set_affinity(dx);
 	if (rc)
 		goto signal;
@@ -413,6 +432,7 @@ dss_srv_handler(void *arg)
 		goto signal;
 	}
 
+	// tls 信息
 	dmi = dss_get_module_info();
 	D_ASSERT(dmi != NULL);
 	dmi->dmi_xs_id	= dx->dx_xs_id;
@@ -425,6 +445,7 @@ dss_srv_handler(void *arg)
 
 	(void)pthread_setname_np(pthread_self(), dx->dx_name);
 
+	// 为true 表示需要创建crt ctx，3+20+2 xs 场景只有2为false
 	if (dx->dx_comm) {
 		/* create private transport context */
 		// 创建crt ctx，里面会有注册hg_ 相关
@@ -493,14 +514,15 @@ dss_srv_handler(void *arg)
 		goto crt_destroy;
 	}
 
-	// 不是所有的xs 都会去访问nvme
+	// 第一个xs 以及main xs时： dss_xstream_has_nvme 为true
+	// todo: 第一个xs 有什么特殊吗？
 	if (dss_xstream_has_nvme(dx)) {
 		ABT_thread_attr attr;
 
 		/* Initialize NVMe context for main XS which accesses NVME */
 		// 初始化main xs 的nvme ctx
-		// todo: 只有main xs 才访问nvme 吗
 		// bio_xsctxt_alloc 函数内部会创建blobstore
+		// dmi 是tls 信息，每个线程有各自的值，互相不冲突，即每个main xs 有各自的 dmi_nvme_ctxt 信息
 		rc = bio_xsctxt_alloc(&dmi->dmi_nvme_ctxt,
 				      dmi->dmi_tgt_id < 0 ? BIO_SYS_TGT_ID : dmi->dmi_tgt_id,
 				      false);
@@ -510,6 +532,7 @@ dss_srv_handler(void *arg)
 			D_GOTO(tse_fini, rc);
 		}
 
+		// 创建nvme poll ult 相关
 		rc = ABT_thread_attr_create(&attr);
 		if (rc != ABT_SUCCESS) {
 			D_ERROR("Create ABT thread attr failed. %d\n", rc);
@@ -523,7 +546,8 @@ dss_srv_handler(void *arg)
 			D_GOTO(nvme_fini, rc = dss_abterr2der(rc));
 		}
 
-		// 单独线程用于nvme 的故障检测
+		// spdk poll 和故障检测
+		// 创建一个线程，自动将work unit 添加到pool 中。当调用ABT_pool_pop 时从pool 中取出
 		rc = daos_abt_thread_create(dx->dx_sp, dss_free_stack_cb, dx->dx_pools[DSS_POOL_NVME_POLL],
 					    dss_nvme_poll_ult, NULL, attr, NULL);
 		ABT_thread_attr_free(&attr);
@@ -539,6 +563,7 @@ dss_srv_handler(void *arg)
 	ABT_mutex_lock(xstream_data.xd_mutex);
 	/* initialized everything for the ULT, notify the creator */
 	D_ASSERT(!xstream_data.xd_ult_signal);
+	// 通知主线程停止等待
 	xstream_data.xd_ult_signal = true;
 	xstream_data.xd_ult_init_rc = 0;
 	ABT_cond_signal(xstream_data.xd_ult_init);
@@ -561,6 +586,7 @@ dss_srv_handler(void *arg)
 	signal_caller = false;
 	/* main service progress loop */
 	for (;;) {
+		// 所有的main xs（第一个xs 也会） 将会loop crt_process，其他的xs 在这里空 loop
 		if (dx->dx_comm) {
 			rc = crt_progress(dmi->dmi_ctx, dx->dx_timeout);
 			if (rc != 0 && rc != -DER_TIMEDOUT) {
@@ -736,17 +762,18 @@ dss_mem_total_free_track(void *arg, daos_size_t bytes)
  * \retval	= 0 if starting succeeds.
  * \retval	negative errno if starting fails.
  */
-// todo: sys xs 和sys target
 static int
 dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 {
 	struct dss_xstream	*dx;
 	ABT_thread_attr		attr = ABT_THREAD_ATTR_NULL;
 	int			rc = 0;
+	// 当前xs 是否需要创建crt ctx
 	bool			comm; /* true to create cart ctx for RPC */
 	int			xs_offset = 0;
 
 	/** allocate & init xstream configuration data */
+	// cpuset 直接赋值给 dss_xstream 中成员
 	dx = dss_xstream_alloc(cpus);
 	if (dx == NULL)
 		return -DER_NOMEM;
@@ -756,7 +783,11 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 	 * The 2nd offload XS(if exists) does not need RPC communication
 	 * as it is only for EC/checksum/compress offloading.
 	 */
+	// sys xs，每个main xs 和第一个helper xs（为了io 分发） 都需要rpc 能力。
+	// 第二个helper xs 不需要rpc 能力，因为他只负责ec/checksum/compress 工作
+	// 当前为 true
 	if (dss_helper_pool) {
+		// 以3 sys，20 tgt，2 helper为例。只有xs_id == 2 时为false
 		comm =  (xs_id == 0) || /* DSS_XS_SYS */
 			(xs_id == 1) || /* DSS_XS_SWIM */
 			(xs_id >= dss_sys_xs_nr &&
@@ -781,12 +812,15 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 			(xs_offset == 1);	/* first offload XS */
 	}
 
+	// 透传tag，id 到 xs
 	dx->dx_tag      = tag;
 	dx->dx_xs_id	= xs_id;
 	dx->dx_ctx_id	= -1;
 	dx->dx_comm	= comm;
-	// 设置是否为main xs 的唯一的地方
+	// 当前为 true
 	if (dss_helper_pool) {
+		// 设置当前是否为 main xs（在sys xs 和helper xs 中间的都是main xs，和dss_tgt_nr 相等）
+		// todo: main xs 之外还有两种类型sys 和helper，不需要区分吗
 		dx->dx_main_xs	= (xs_id >= dss_sys_xs_nr) &&
 				  (xs_id < (dss_sys_xs_nr + dss_tgt_nr));
 	} else {
@@ -800,6 +834,7 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 	 */
 	// 根据xs id 获取target id
 	dx->dx_tgt_id = dss_xs2tgt(xs_id);
+	// 生成不同类型xs 的名字
 	if (xs_id < dss_sys_xs_nr) {
 		/** system xtreams are named daos_sys_$num */
 		// sys 类型的xs 的名字
@@ -816,16 +851,20 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 	}
 
 	/** create ABT scheduler in charge of this xstream */
-	// 调度服务初始化
+	// dx 参数填充完成，初始化xs 的调度器 dx_sched
 	rc = dss_sched_init(dx);
 	if (rc != 0) {
 		D_ERROR("create scheduler fails: "DF_RC"\n", DP_RC(rc));
 		D_GOTO(out_dx, rc);
 	}
 
+	// 当前xs 的内存使用
 	dss_mem_stats_init(&dx->dx_mem_stats, xs_id);
 
 	/** start XS, ABT rank 0 is reserved for the primary xstream */
+	// rank 0 预留给main xs（20 个target 对应的用作 io 的 xs，即除了 sys xs 和helper 之外的xs）
+	// 函数作用：用指定的 rank（xs_id + 1） 创建一个xs
+	// todo: 预留rank 0 给main 体现在哪里
 	rc = ABT_xstream_create_with_rank(dx->dx_sched, xs_id + 1,
 					  &dx->dx_xstream);
 	if (rc != ABT_SUCCESS) {
@@ -833,12 +872,14 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 		D_GOTO(out_sched, rc = dss_abterr2der(rc));
 	}
 
+	// 创建线程attr
 	rc = ABT_thread_attr_create(&attr);
 	if (rc != ABT_SUCCESS) {
 		D_ERROR("ABT_thread_attr_create fails %d\n", rc);
 		D_GOTO(out_xstream, rc = dss_abterr2der(rc));
 	}
 
+	// 设置thread 栈大小 = 64M。ulimit -s 默认为8192（8M）
 	rc = ABT_thread_attr_set_stacksize(attr, DSS_DEEP_STACK_SZ);
 	if (rc != ABT_SUCCESS) {
 		D_ERROR("ABT_thread_attr_set_stacksize fails %d\n", rc);
@@ -846,8 +887,11 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 	}
 
 	/** start progress ULT */
-	// 每一个xs 都会起一个ult 跑 dss_srv_handler。但是只有main xs 才会去访问nvme
+	// 所有的xs 都会起一个ult 跑 dss_srv_handler
+	// dss_srv_handler 里会去做绑核操作
 	// https://github.com/daos-stack/daos/blob/master/src/engine/README.md
+	// 内部调用ABT_thread_create 会创建一个新的线程，该线程的unit 将被放入pool 中，等待ABT_pool_pop 取出并执行
+	// 这个新的线程就是 dx_progress
 	rc = daos_abt_thread_create(dx->dx_sp, dss_free_stack_cb, dx->dx_pools[DSS_POOL_NET_POLL],
 				    dss_srv_handler, dx, attr,
 				    &dx->dx_progress);
@@ -856,17 +900,22 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 		D_GOTO(out_xstream, rc = dss_abterr2der(rc));
 	}
 
+	// 更新全局的xstream 信息
 	ABT_mutex_lock(xstream_data.xd_mutex);
 
+	// 等待上面 dss_srv_handler 执行完成
 	if (!xstream_data.xd_ult_signal)
 		ABT_cond_wait(xstream_data.xd_ult_init, xstream_data.xd_mutex);
+	// 重置single 为false
 	xstream_data.xd_ult_signal = false;
 	rc = xstream_data.xd_ult_init_rc;
 	if (rc != 0) {
 		ABT_mutex_unlock(xstream_data.xd_mutex);
 		goto out_xstream;
 	}
+	// 保存当前xs 的xstream
 	xstream_data.xd_xs_ptrs[xs_id] = dx;
+	// 更新完成
 	ABT_mutex_unlock(xstream_data.xd_mutex);
 	ABT_thread_attr_free(&attr);
 
@@ -977,6 +1026,8 @@ dss_xstream_is_busy(void)
 	return cur_msec < (cntr->rc_active_time + 5000);
 }
 
+// targs 分为8，249，253，255 几种
+// xs_id 从0 到24（3 sys xs + 20 target xs + 2 helper xs 场景）
 static int
 dss_start_xs_id(int tag, int xs_id)
 {
@@ -988,7 +1039,11 @@ dss_start_xs_id(int tag, int xs_id)
 
 	D_DEBUG(DB_TRACE, "start xs_id called for %d.  ", xs_id);
 	/* if we are NUMA aware, use the NUMA information */
+	// 如果绑定了numa，使用numa 的信息
 	if (numa_obj) {
+		// 获取分配给当前 numa 的cpuset 的第一个cpu idx
+		// hwloc_bitmap_clr 函数会影响下一次 first 的获取
+		// hwloc_bitmap_first 返回位图中设置为 1的最小的索引
 		idx = hwloc_bitmap_first(core_allocation_bitmap);
 		if (idx == -1) {
 			D_ERROR("No core available for XS: %d\n", xs_id);
@@ -1000,9 +1055,18 @@ dss_start_xs_id(int tag, int xs_id)
 		 * All system XS will reuse the first XS' core, but
 		 * the SWIM and DRPC XS will use separate core if enough cores
 		 */
+		// todo: 所有的sys xs 都会复用第一个xs 的core，但是swim 和drpc xs 会使用单独的core
+		// dss_core_nr > dss_tgt_nr 表示物理核心数比target 个数多，即有剩余的核心数
+		// （实际上只跳过了 xs_id == 1场景）
 		if (xs_id > 1 || (xs_id == 0 && dss_core_nr > dss_tgt_nr))
+			// 从已分配的 bitmap 中 remove 掉 idx
+			// 位图设置为 0
+			// 会影响到 hwloc_bitmap_first 获取的idx，设置为 0 ，下一次 hwloc_bitmap_first 会向后移动，否则原地踏步
+			// 当xs_id == 1 时，不设置为 0，所以下一次 hwloc_bitmap_first 还会获取到同一个 idx。所以 1 和 2用的是同一个cpuset
+			// 所以sys xs 其实配置了3 个，但是只用了两个 core
 			hwloc_bitmap_clr(core_allocation_bitmap, idx);
 
+		// 从topo 树的core 这层获取 idx 对应的node
 		obj = hwloc_get_obj_by_depth(dss_topo, dss_core_depth, idx);
 		if (obj == NULL) {
 			D_PRINT("Null core returned by hwloc\n");
@@ -1033,7 +1097,335 @@ dss_start_xs_id(int tag, int xs_id)
 			return -DER_INVAL;
 		}
 	}
+	// lstopo --cpuset 可以查看当前的cpuset 信息
+	/*
+	root@server01:~# lstopo --cpuset
+	Machine (504GB total) cpuset=0x000000ff,0xffffffff,0xffffffff,0xffffffff
+	Package L#0 cpuset=0x00003fff,0xfff00000,0x03ffffff
+		NUMANode L#0 (P#0 252GB) cpuset=0x00003fff,0xfff00000,0x03ffffff
+		L3 L#0 (39MB) cpuset=0x00003fff,0xfff00000,0x03ffffff
+		L2 L#0 (1280KB) cpuset=0x00100000,0x00000001
+			L1d L#0 (48KB) cpuset=0x00100000,0x00000001
+			L1i L#0 (32KB) cpuset=0x00100000,0x00000001
+				Core L#0 cpuset=0x00100000,0x00000001
+				PU L#0 (P#0) cpuset=0x00000001
+				PU L#1 (P#52) cpuset=0x00100000,0x0
+		L2 L#1 (1280KB) cpuset=0x00200000,0x00000002
+			L1d L#1 (48KB) cpuset=0x00200000,0x00000002
+			L1i L#1 (32KB) cpuset=0x00200000,0x00000002
+				Core L#1 cpuset=0x00200000,0x00000002
+				PU L#2 (P#1) cpuset=0x00000002
+				PU L#3 (P#53) cpuset=0x00200000,0x0
+		L2 L#2 (1280KB) cpuset=0x00400000,0x00000004
+			L1d L#2 (48KB) cpuset=0x00400000,0x00000004
+			L1i L#2 (32KB) cpuset=0x00400000,0x00000004
+				Core L#2 cpuset=0x00400000,0x00000004
+				PU L#4 (P#2) cpuset=0x00000004
+				PU L#5 (P#54) cpuset=0x00400000,0x0
+		L2 L#3 (1280KB) cpuset=0x00800000,0x00000008
+			L1d L#3 (48KB) cpuset=0x00800000,0x00000008
+			L1i L#3 (32KB) cpuset=0x00800000,0x00000008
+				Core L#3 cpuset=0x00800000,0x00000008
+				PU L#6 (P#3) cpuset=0x00000008
+				PU L#7 (P#55) cpuset=0x00800000,0x0
+		L2 L#4 (1280KB) cpuset=0x01000000,0x00000010
+			L1d L#4 (48KB) cpuset=0x01000000,0x00000010
+			L1i L#4 (32KB) cpuset=0x01000000,0x00000010
+				Core L#4 cpuset=0x01000000,0x00000010
+				PU L#8 (P#4) cpuset=0x00000010
+				PU L#9 (P#56) cpuset=0x01000000,0x0
+		L2 L#5 (1280KB) cpuset=0x02000000,0x00000020
+			L1d L#5 (48KB) cpuset=0x02000000,0x00000020
+			L1i L#5 (32KB) cpuset=0x02000000,0x00000020
+				Core L#5 cpuset=0x02000000,0x00000020
+				PU L#10 (P#5) cpuset=0x00000020
+				PU L#11 (P#57) cpuset=0x02000000,0x0
+		L2 L#6 (1280KB) cpuset=0x04000000,0x00000040
+			L1d L#6 (48KB) cpuset=0x04000000,0x00000040
+			L1i L#6 (32KB) cpuset=0x04000000,0x00000040
+				Core L#6 cpuset=0x04000000,0x00000040
+				PU L#12 (P#6) cpuset=0x00000040
+				PU L#13 (P#58) cpuset=0x04000000,0x0
+		L2 L#7 (1280KB) cpuset=0x08000000,0x00000080
+			L1d L#7 (48KB) cpuset=0x08000000,0x00000080
+			L1i L#7 (32KB) cpuset=0x08000000,0x00000080
+				Core L#7 cpuset=0x08000000,0x00000080
+				PU L#14 (P#7) cpuset=0x00000080
+				PU L#15 (P#59) cpuset=0x08000000,0x0
+		L2 L#8 (1280KB) cpuset=0x10000000,0x00000100
+			L1d L#8 (48KB) cpuset=0x10000000,0x00000100
+			L1i L#8 (32KB) cpuset=0x10000000,0x00000100
+				Core L#8 cpuset=0x10000000,0x00000100
+				PU L#16 (P#8) cpuset=0x00000100
+				PU L#17 (P#60) cpuset=0x10000000,0x0
+		L2 L#9 (1280KB) cpuset=0x20000000,0x00000200
+			L1d L#9 (48KB) cpuset=0x20000000,0x00000200
+			L1i L#9 (32KB) cpuset=0x20000000,0x00000200
+				Core L#9 cpuset=0x20000000,0x00000200
+				PU L#18 (P#9) cpuset=0x00000200
+				PU L#19 (P#61) cpuset=0x20000000,0x0
+		L2 L#10 (1280KB) cpuset=0x40000000,0x00000400
+			L1d L#10 (48KB) cpuset=0x40000000,0x00000400
+			L1i L#10 (32KB) cpuset=0x40000000,0x00000400
+				Core L#10 cpuset=0x40000000,0x00000400
+				PU L#20 (P#10) cpuset=0x00000400
+				PU L#21 (P#62) cpuset=0x40000000,0x0
+		L2 L#11 (1280KB) cpuset=0x80000000,0x00000800
+			L1d L#11 (48KB) cpuset=0x80000000,0x00000800
+			L1i L#11 (32KB) cpuset=0x80000000,0x00000800
+				Core L#11 cpuset=0x80000000,0x00000800
+				PU L#22 (P#11) cpuset=0x00000800
+				PU L#23 (P#63) cpuset=0x80000000,0x0
+		L2 L#12 (1280KB) cpuset=0x00000001,,0x00001000
+			L1d L#12 (48KB) cpuset=0x00000001,,0x00001000
+			L1i L#12 (32KB) cpuset=0x00000001,,0x00001000
+				Core L#12 cpuset=0x00000001,,0x00001000
+				PU L#24 (P#12) cpuset=0x00001000
+				PU L#25 (P#64) cpuset=0x00000001,,0x0
+		L2 L#13 (1280KB) cpuset=0x00000002,,0x00002000
+			L1d L#13 (48KB) cpuset=0x00000002,,0x00002000
+			L1i L#13 (32KB) cpuset=0x00000002,,0x00002000
+				Core L#13 cpuset=0x00000002,,0x00002000
+				PU L#26 (P#13) cpuset=0x00002000
+				PU L#27 (P#65) cpuset=0x00000002,,0x0
+		L2 L#14 (1280KB) cpuset=0x00000004,,0x00004000
+			L1d L#14 (48KB) cpuset=0x00000004,,0x00004000
+			L1i L#14 (32KB) cpuset=0x00000004,,0x00004000
+				Core L#14 cpuset=0x00000004,,0x00004000
+				PU L#28 (P#14) cpuset=0x00004000
+				PU L#29 (P#66) cpuset=0x00000004,,0x0
+		L2 L#15 (1280KB) cpuset=0x00000008,,0x00008000
+			L1d L#15 (48KB) cpuset=0x00000008,,0x00008000
+			L1i L#15 (32KB) cpuset=0x00000008,,0x00008000
+				Core L#15 cpuset=0x00000008,,0x00008000
+				PU L#30 (P#15) cpuset=0x00008000
+				PU L#31 (P#67) cpuset=0x00000008,,0x0
+		L2 L#16 (1280KB) cpuset=0x00000010,,0x00010000
+			L1d L#16 (48KB) cpuset=0x00000010,,0x00010000
+			L1i L#16 (32KB) cpuset=0x00000010,,0x00010000
+				Core L#16 cpuset=0x00000010,,0x00010000
+				PU L#32 (P#16) cpuset=0x00010000
+				PU L#33 (P#68) cpuset=0x00000010,,0x0
+		L2 L#17 (1280KB) cpuset=0x00000020,,0x00020000
+			L1d L#17 (48KB) cpuset=0x00000020,,0x00020000
+			L1i L#17 (32KB) cpuset=0x00000020,,0x00020000
+				Core L#17 cpuset=0x00000020,,0x00020000
+				PU L#34 (P#17) cpuset=0x00020000
+				PU L#35 (P#69) cpuset=0x00000020,,0x0
+		L2 L#18 (1280KB) cpuset=0x00000040,,0x00040000
+			L1d L#18 (48KB) cpuset=0x00000040,,0x00040000
+			L1i L#18 (32KB) cpuset=0x00000040,,0x00040000
+				Core L#18 cpuset=0x00000040,,0x00040000
+				PU L#36 (P#18) cpuset=0x00040000
+				PU L#37 (P#70) cpuset=0x00000040,,0x0
+		L2 L#19 (1280KB) cpuset=0x00000080,,0x00080000
+			L1d L#19 (48KB) cpuset=0x00000080,,0x00080000
+			L1i L#19 (32KB) cpuset=0x00000080,,0x00080000
+				Core L#19 cpuset=0x00000080,,0x00080000
+				PU L#38 (P#19) cpuset=0x00080000
+				PU L#39 (P#71) cpuset=0x00000080,,0x0
+		L2 L#20 (1280KB) cpuset=0x00000100,,0x00100000
+			L1d L#20 (48KB) cpuset=0x00000100,,0x00100000
+			L1i L#20 (32KB) cpuset=0x00000100,,0x00100000
+				Core L#20 cpuset=0x00000100,,0x00100000
+				PU L#40 (P#20) cpuset=0x00100000
+				PU L#41 (P#72) cpuset=0x00000100,,0x0
+		L2 L#21 (1280KB) cpuset=0x00000200,,0x00200000
+			L1d L#21 (48KB) cpuset=0x00000200,,0x00200000
+			L1i L#21 (32KB) cpuset=0x00000200,,0x00200000
+				Core L#21 cpuset=0x00000200,,0x00200000
+				PU L#42 (P#21) cpuset=0x00200000
+				PU L#43 (P#73) cpuset=0x00000200,,0x0
+		L2 L#22 (1280KB) cpuset=0x00000400,,0x00400000
+			L1d L#22 (48KB) cpuset=0x00000400,,0x00400000
+			L1i L#22 (32KB) cpuset=0x00000400,,0x00400000
+				Core L#22 cpuset=0x00000400,,0x00400000
+				PU L#44 (P#22) cpuset=0x00400000
+				PU L#45 (P#74) cpuset=0x00000400,,0x0
+		L2 L#23 (1280KB) cpuset=0x00000800,,0x00800000
+			L1d L#23 (48KB) cpuset=0x00000800,,0x00800000
+			L1i L#23 (32KB) cpuset=0x00000800,,0x00800000
+				Core L#23 cpuset=0x00000800,,0x00800000
+				PU L#46 (P#23) cpuset=0x00800000
+				PU L#47 (P#75) cpuset=0x00000800,,0x0
+		L2 L#24 (1280KB) cpuset=0x00001000,,0x01000000
+			L1d L#24 (48KB) cpuset=0x00001000,,0x01000000
+			L1i L#24 (32KB) cpuset=0x00001000,,0x01000000
+				Core L#24 cpuset=0x00001000,,0x01000000
+				PU L#48 (P#24) cpuset=0x01000000
+				PU L#49 (P#76) cpuset=0x00001000,,0x0
+		L2 L#25 (1280KB) cpuset=0x00002000,,0x02000000
+			L1d L#25 (48KB) cpuset=0x00002000,,0x02000000
+			L1i L#25 (32KB) cpuset=0x00002000,,0x02000000
+				Core L#25 cpuset=0x00002000,,0x02000000
+				PU L#50 (P#25) cpuset=0x02000000
+				PU L#51 (P#77) cpuset=0x00002000,,0x0
+		HostBridge
+		PCI 00:11.5 (SATA)
+		PCI 00:17.0 (SATA)
+		PCIBridge
+			PCIBridge
+			PCI 04:00.0 (VGA)
+		HostBridge
+		PCIBridge
+			PCI 17:00.0 (InfiniBand)
+			Net "ibs1"
+			OpenFabrics "mlx5_0"
+		HostBridge
+		PCIBridge
+			PCI 31:00.0 (RAID)
+			Block(Disk) "sda"
+		HostBridge
+		PCIBridge
+			PCI 65:00.0 (NVMExp)
+		PCIBridge
+			PCI 66:00.0 (NVMExp)
+		PCIBridge
+			PCI 67:00.0 (NVMExp)
+		PCIBridge
+			PCI 68:00.0 (NVMExp)
+		Block(NVDIMM) "pmem0"
+	*/
 
+	// 这个是和lstopo --cpuset 输出结果一样
+	/*
+	root@server01:~# cat /tmp/daos_engine.0.log | grep 'Using CPU set'
+	12/02-15:09:23.24 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00100000,0x00000001   (21,1)
+	12/02-15:09:24.62 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00200000,0x00000002   (22,2)
+	12/02-15:09:24.73 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00200000,0x00000002   (22,2) 和上边一样？
+	12/02-15:09:24.76 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00400000,0x00000004   (23,3)
+	12/02-15:09:26.21 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00800000,0x00000008   (24,4)
+	12/02-15:09:26.41 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x01000000,0x00000010
+	12/02-15:09:26.66 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x02000000,0x00000020
+	12/02-15:09:26.88 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x04000000,0x00000040
+	12/02-15:09:27.09 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x08000000,0x00000080
+	12/02-15:09:27.30 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x10000000,0x00000100
+	12/02-15:09:27.60 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x20000000,0x00000200
+	12/02-15:09:27.82 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x40000000,0x00000400
+	12/02-15:09:28.03 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x80000000,0x00000800
+	12/02-15:09:28.22 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000001,,0x00001000
+	12/02-15:09:28.42 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000002,,0x00002000
+	12/02-15:09:28.68 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000004,,0x00004000
+	12/02-15:09:28.88 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000008,,0x00008000
+	12/02-15:09:29.17 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000010,,0x00010000
+	12/02-15:09:29.38 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000020,,0x00020000
+	12/02-15:09:29.58 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000040,,0x00040000
+	12/02-15:09:29.78 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000080,,0x00080000
+	12/02-15:09:29.98 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000100,,0x00100000
+	12/02-15:09:30.17 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000200,,0x00200000
+	12/02-15:09:30.37 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000400,,0x00400000
+    12/02-15:09:30.47 server01 DAOS[2606652/-1/0] server DBUG src/engine/srv.c:921 dss_start_xs_id() Using CPU set 0x00000800,,0x00800000
+
+	没有用到这两个core：core L#25 Core L#24 cpuset=0x00001000,,0x01000000 和 Core L#25 cpuset=0x00002000,,0x02000000
+	// 一共26 个core，1和2用的一个core，所以总共用了 2+20+2= 24个core，剩余两个
+	*/
+	// 每个xs 的 cpuset 是一个物理核心，对应的两个逻辑核心，这里用的是逻辑核心
+	// 当前机器是2个物理cpu，每个cpu 26个物理核，每个物理核两个线程，共有104 个逻辑核心（线程）
+	/*
+	root@server01:~# numactl --hardware
+	available: 2 nodes (0-1)
+	node 0 cpus: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77
+	node 0 size: 257650 MB
+	node 0 free: 209762 MB
+	node 1 cpus: 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103
+	node 1 size: 257994 MB
+	node 1 free: 201980 MB
+	node distances:
+	node   0   1
+	0:  10  20
+	1:  20  10
+	*/
+
+	/*
+	root@server01:~# lscpu
+	Architecture:                       x86_64
+	CPU op-mode(s):                     32-bit, 64-bit
+	Byte Order:                         Little Endian
+	Address sizes:                      46 bits physical, 57 bits virtual
+	CPU(s):                             104
+	On-line CPU(s) list:                0-103
+	Thread(s) per core:                 2
+	Core(s) per socket:                 26
+	Socket(s):                          2
+	NUMA node(s):                       2
+	Vendor ID:                          GenuineIntel
+	CPU family:                         6
+	Model:                              106
+	Model name:                         Intel(R) Xeon(R) Gold 5320 CPU @ 2.20GHz
+	Stepping:                           6
+	CPU MHz:                            2200.000
+	CPU max MHz:                        2200.0000
+	CPU min MHz:                        800.0000
+	BogoMIPS:                           4400.00
+	Virtualization:                     VT-x
+	L1d cache:                          2.4 MiB
+	L1i cache:                          1.6 MiB
+	L2 cache:                           65 MiB
+	L3 cache:                           78 MiB
+	NUMA node0 CPU(s):                  0-25,52-77
+	NUMA node1 CPU(s):                  26-51,78-103
+	Vulnerability Gather data sampling: Mitigation; Microcode
+	Vulnerability Itlb multihit:        Not affected
+	Vulnerability L1tf:                 Not affected
+	Vulnerability Mds:                  Not affected
+	Vulnerability Meltdown:             Not affected
+	Vulnerability Mmio stale data:      Mitigation; Clear CPU buffers; SMT vulnerable
+	Vulnerability Retbleed:             Not affected
+	Vulnerability Spec store bypass:    Mitigation; Speculative Store Bypass disabled via prctl and seccomp
+	Vulnerability Spectre v1:           Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+	Vulnerability Spectre v2:           Mitigation; Enhanced IBRS, IBPB conditional, RSB filling, PBRSB-eIBRS SW sequence
+	Vulnerability Srbds:                Not affected
+	Vulnerability Tsx async abort:      Not affected
+	Flags:                              fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscal
+										l nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf pni pclmulq
+										dq dtes64 ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer a
+										es xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb cat_l3 invpcid_single ssbd mba ibrs ibpb stibp ibrs_enhance
+										d tpr_shadow vnmi flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq
+										rdseed adx smap avx512ifma clflushopt clwb intel_pt avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc
+										cqm_occup_llc cqm_mbm_total cqm_mbm_local wbnoinvd dtherm arat pln pts hwp hwp_act_window hwp_epp hwp_pkg_req avx512vbmi umip
+										pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg tme avx512_vpopcntdq rdpid md_clear pconfig flush_l1d ar
+										ch_capabilities
+	*/
+	// lstopo -p 和lstopo -l 可以分别输出物理核心和逻辑核心
+	/*
+	root@server01:~# lstopo -l
+	Machine (504GB total)
+	Package L#0
+		NUMANode L#0 (252GB)
+		L3 L#0 (39MB)
+		L2 L#0 (1280KB) + L1d L#0 (48KB) + L1i L#0 (32KB) + Core L#0
+			PU L#0
+			PU L#1
+		L2 L#1 (1280KB) + L1d L#1 (48KB) + L1i L#1 (32KB) + Core L#1
+			PU L#2
+			PU L#3
+
+	root@server01:~# lstopo -p
+	Machine (504GB total)
+	Package P#0
+		NUMANode P#0 (252GB)
+		L3 (39MB)
+		L2 (1280KB) + L1d (48KB) + L1i (32KB) + Core P#0
+			PU P#0
+			PU P#52
+		L2 (1280KB) + L1d (48KB) + L1i (32KB) + Core P#1
+			PU P#1
+			PU P#53
+		L2 (1280KB) + L1d (48KB) + L1i (32KB) + Core P#2
+			PU P#2
+			PU P#54
+	*/
+	/* 
+	1. 根据物理核心计算逻辑核心：
+	root@server01:~# hwloc-calc --po --physical core:0
+	0x00100000,0x00000001
+
+	2. 根据逻辑核心计算物理核心：
+	root@server01:~# hwloc-calc --po --physical pu:0
+	0x00000001
+	*/
+
+	// 以cpusset 指定的物理核心和targs ，xs id 启动xs 服务
 	rc = dss_start_one_xstream(obj->cpuset, tag, xs_id);
 	if (rc)
 		return rc;
@@ -1098,31 +1490,43 @@ dss_xstreams_init(void)
 	}
 
 	xstream_data.xd_xs_nr = DSS_XS_NR_TOTAL;
+	// 第一次是 253
 	tags                  = DAOS_SERVER_TAG - DAOS_TGT_TAG;
 	/* start system service XS */
 	// 启动sys xs 服务们
 	for (i = 0; i < dss_sys_xs_nr; i++) {
 		xs_id = i;
+		// 启动idx 从 [0 - dss_sys_xs_nr] 个sys xs（从0 到2共3个）
+		// 1. 启动sys xs
+		// 253
 		rc    = dss_start_xs_id(tags, xs_id);
 		if (rc)
 			D_GOTO(out, rc);
+		// 每次都是 249
 		tags &= ~DAOS_RDB_TAG;
 	}
 
 	/* start main IO service XS */
-	// 启动main xs
+	// 启动main xs，个数等于配置文件中 target 的个数
 	for (i = 0; i < dss_tgt_nr; i++) {
+		// id 从sys xs 后继续排列
 		xs_id = DSS_MAIN_XS_ID(i);
+		// 2. 启动main xs（从3到22共20个）
+		// 255
 		rc    = dss_start_xs_id(DAOS_SERVER_TAG, xs_id);
 		if (rc)
 			D_GOTO(out, rc);
 	}
 
 	/* start offload XS if any */
+	// 3. 启动helper 的xs（从23到24共2个）
 	if (dss_tgt_offload_xs_nr > 0) {
+		// dss_helper_pool 为 true
 		if (dss_helper_pool) {
 			for (i = 0; i < dss_tgt_offload_xs_nr; i++) {
+				// 从sys xs和main xs 往后排序号
 				xs_id = dss_sys_xs_nr + dss_tgt_nr + i;
+				// 8
 				rc    = dss_start_xs_id(DAOS_OFF_TAG, xs_id);
 				if (rc)
 					D_GOTO(out, rc);
@@ -1145,6 +1549,7 @@ dss_xstreams_init(void)
 		}
 	}
 
+	// 所有的xs 都启动完成
 	D_DEBUG(DB_TRACE, "%d execution streams successfully started "
 		"(first core %d)\n", dss_tgt_nr, dss_core_offset);
 out:
@@ -1274,6 +1679,7 @@ dss_parameters_set(unsigned int key_id, uint64_t value)
 }
 
 /** initializing steps */
+// xs 初始化步骤
 enum {
 	XD_INIT_NONE,
 	XD_INIT_MUTEX,
@@ -1376,6 +1782,7 @@ out:
 	return rc;
 }
 
+// 服务端初始化
 int
 dss_srv_init(void)
 {
@@ -1385,6 +1792,7 @@ dss_srv_init(void)
 	xstream_data.xd_init_step  = XD_INIT_NONE;
 	xstream_data.xd_ult_signal = false;
 
+	// 用于保存所有的xs 信息
 	D_ALLOC_ARRAY(xstream_data.xd_xs_ptrs, DSS_XS_NR_TOTAL);
 	if (xstream_data.xd_xs_ptrs == NULL) {
 		D_ERROR("Not enough DRAM to allocate XS array.\n");
@@ -1398,6 +1806,7 @@ dss_srv_init(void)
 		D_ERROR("Failed to create XS mutex: "DF_RC"\n", DP_RC(rc));
 		D_GOTO(failed, rc);
 	}
+	// xs 初始化状态机
 	xstream_data.xd_init_step = XD_INIT_MUTEX;
 
 	rc = ABT_cond_create(&xstream_data.xd_ult_init);
@@ -1450,6 +1859,41 @@ dss_srv_init(void)
 
 	/* start xstreams */
 	// 初始化启动所有的xs，包括vos target xs 和 sys xs。vos target xs 又分为main xs 和offload xs
+	// todo: 哪种类型的rpc 在哪个xs 下调度是怎么处理的
+	// 1. sys xs 负责
+	/*
+	*	RPC server for:
+	*		drpc listener,
+	*		RDB request and meta-data service,
+	*		management request for mgmt module,
+	*		pool request,
+	*		container request (including the OID allocate),
+	*		rebuild request such as REBUILD_OBJECTS_SCAN/REBUILD_OBJECTS,
+	*		rebuild status checker,
+	*		rebalance request,
+	*		IV, bcast, and SWIM message handling.
+	*/
+
+	// 2. main xs 负责
+	/*
+	*	RPC server of IO request handler,
+	*	ULT server for:
+	*		rebuild scanner/puller
+	*		rebalance,
+	*		aggregation,
+	*		data scrubbing,
+	*		pool service (tgt connect/disconnect etc),
+	*		container open/close.
+	*/
+
+	// 3. helper xs 负责
+	/* ULT server for:
+	*		IO request dispatch (TX coordinator, on 1st offload XS),
+	*		Acceleration of EC/checksum/compress (on 2nd offload XS if
+	*		dss_tgt_offload_xs_nr is 2, or on 1st offload XS).
+	*/
+	// 以上描述的3种xs 提供的不同服务是通过 'static struct crt_proto_rpc_format' 定义的各种接口来设置的
+	// 具体定义在每个模块内部的 xxx_rpc.c 或者rpc.c 文件中，比如obj_rpc.c 中的 OBJ_PROTO_CLI_RPC_LIST 
 	rc = dss_xstreams_init();
 	if (!dss_xstreams_empty()) /* cleanup if we started something */
 		xstream_data.xd_init_step = XD_INIT_XSTREAMS;
@@ -1459,6 +1903,7 @@ dss_srv_init(void)
 		D_GOTO(failed, rc);
 	}
 
+	// 操纵全局nvme 状态
 	rc = bio_nvme_ctl(BIO_CTL_NOTIFY_STARTED, &started);
 	D_ASSERT(rc == 0);
 

@@ -801,6 +801,7 @@ ds_iv_ns_destroy(void *ns)
 }
 
 /** Create namespace for server IV. */
+// todo: 给iv 服务创建ns，iv 是啥
 int
 ds_iv_ns_create(crt_context_t ctx, uuid_t pool_uuid,
 		crt_group_t *grp, unsigned int *ns_id,
@@ -893,6 +894,7 @@ ds_iv_ns_id_get(void *ns)
 void
 ds_iv_init()
 {
+	// 初始化两个list
 	D_INIT_LIST_HEAD(&ds_iv_ns_list);
 	D_INIT_LIST_HEAD(&ds_iv_class_list);
 	// todo: 再研究下这些tree
