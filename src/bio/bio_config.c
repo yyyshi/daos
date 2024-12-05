@@ -162,11 +162,13 @@ is_addr_in_allowlist(char *pci_addr, const struct spdk_pci_addr *allowlist,
 	}
 
 	for (i = 0; i < num_allowlist_devices; i++) {
+		// 0 表示相等，即在allowlist 中存在
 		if (spdk_pci_addr_compare(&tmp, &allowlist[i]) == 0) {
 			return 1;
 		}
 	}
 
+	// 不存在
 	return 0;
 }
 
@@ -267,28 +269,34 @@ out:
 static int
 opts_add_pci_addr(struct spdk_env_opts *opts, char *traddr)
 {
+	// 添加到opts 实际就是添加到allowlist 中
 	struct spdk_pci_addr	**list = &opts->pci_allowed;
 	struct spdk_pci_addr	 *tmp1 = *list;
 	struct spdk_pci_addr     *tmp2;
 	size_t			  count = opts->num_pci_addr;
 	int			  rc;
 
+	// 判断addr 是否在 allowlist 中，1 表示在list 中
 	rc = is_addr_in_allowlist(traddr, *list, count);
 	if (rc < 0)
 		return rc;
+	// 已经在allowlist 中了，不需要再添加
 	if (rc == 1)
 		return 0;
 
+	// 如果不在list 中，重新分配空间并追加addr 到末尾
 	D_REALLOC_ARRAY(tmp2, tmp1, count, count + 1);
 	if (tmp2 == NULL)
 		return -DER_NOMEM;
 
+	// 添加
 	*list = tmp2;
 	if (spdk_pci_addr_parse(*list + count, traddr) < 0) {
 		D_ERROR("Invalid address %s\n", traddr);
 		return -DER_INVAL;
 	}
 
+	// 计数 ++
 	opts->num_pci_addr++;
 	return 0;
 }
@@ -402,6 +410,7 @@ add_traddrs_from_bdev_subsys(struct json_config_ctx *ctx, bool vmd_enabled,
 
 	D_ASSERT(ctx->config_it != NULL);
 
+	// 解码conf 数组
 	rc = spdk_json_decode_object(ctx->config_it, config_entry_decoders,
 				     SPDK_COUNTOF(config_entry_decoders), &cfg);
 	if (rc < 0) {
@@ -409,6 +418,7 @@ add_traddrs_from_bdev_subsys(struct json_config_ctx *ctx, bool vmd_enabled,
 		return -DER_INVAL;
 	}
 
+	// 跳过非nvme attach controller
 	if (strcmp(cfg.method, NVME_CONF_ATTACH_CONTROLLER) != 0) {
 		D_DEBUG(DB_MGMT, "skip config entry %s\n", cfg.method);
 		goto free_method;
@@ -425,6 +435,7 @@ add_traddrs_from_bdev_subsys(struct json_config_ctx *ctx, bool vmd_enabled,
 
 	key = spdk_json_object_first(cfg.params);
 
+	// 获取nvme attach controller 中的pcie 地址
 	while (key != NULL) {
 		if (spdk_json_strequal(key, "traddr")) {
 			value = json_value(key);
@@ -432,6 +443,7 @@ add_traddrs_from_bdev_subsys(struct json_config_ctx *ctx, bool vmd_enabled,
 				D_ERROR("Invalid json value\n");
 				D_GOTO(free_traddr, rc = -DER_INVAL);
 			}
+			// 保存地址
 			memcpy(traddr, value->start, value->len);
 			traddr[value->len] = '\0';
 			D_DEBUG(DB_MGMT, "Adding transport address '%s' to SPDK allowed list",
@@ -456,12 +468,15 @@ add_traddrs_from_bdev_subsys(struct json_config_ctx *ctx, bool vmd_enabled,
 				}
 			}
 
+			// 将每个nvme 地址添加地址到 opts 的allowlist 中
 			rc = opts_add_pci_addr(opts, traddr);
 			if (rc != 0) {
 				D_ERROR("spdk env add pci: %d\n", rc);
 				goto free_traddr;
 			}
 		}
+
+		// 移动到下一个key
 		key = spdk_json_next(key);
 	}
 
@@ -579,6 +594,7 @@ decode_subsystem_configs(struct spdk_json_val *json_val, struct json_config_ctx 
 	D_ASSERT(ctx != NULL);
 
 	/* Capture subsystem name and config array */
+	// 获取子系统名字和conf 数组
 	rc = spdk_json_decode_object(json_val, subsystem_decoders, SPDK_COUNTOF(subsystem_decoders),
 				     ctx);
 	if (rc < 0) {
@@ -586,10 +602,12 @@ decode_subsystem_configs(struct spdk_json_val *json_val, struct json_config_ctx 
 		return -DER_INVAL;
 	}
 
+	// 找到子数组名字
 	D_DEBUG(DB_MGMT, "subsystem '%.*s': found\n", ctx->subsystem_name->len,
 		(char *)ctx->subsystem_name->start);
 
 	/* Get 'config' array first configuration entry */
+	// 获取conf 数组的第一条记录
 	ctx->config_it = spdk_json_array_first(ctx->config);
 
 	return 0;
@@ -603,16 +621,90 @@ add_bdevs_to_opts(struct json_config_ctx *ctx, struct spdk_json_val *bdev_ss, bo
 
 	D_ASSERT(opts != NULL);
 
+	// 解码json bdev 信息
+	/*
+	root@server01:/home/daos-v2.4.0/daos/src/bio# cat /mnt/daos/1/daos_nvme.conf
+	{
+	"daos_data": {
+		"config": []
+	},
+	"subsystems": [
+		{
+		"subsystem": "bdev",
+		"config": [
+			{
+			"params": {
+				"bdev_io_pool_size": 65536,
+				"bdev_io_cache_size": 256
+			},
+			"method": "bdev_set_options"
+			},
+			{
+			"params": {
+				"retry_count": 4,
+				"timeout_us": 0,
+				"nvme_adminq_poll_period_us": 100000,
+				"action_on_timeout": "none",
+				"nvme_ioq_poll_period_us": 0
+			},
+			"method": "bdev_nvme_set_options"
+			},
+			{
+			"params": {
+				"enable": false,
+				"period_us": 0
+			},
+			"method": "bdev_nvme_set_hotplug"
+			},
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server01_0_1_0",
+				"traddr": "0000:65:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			},
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server01_1_1_0",
+				"traddr": "0000:66:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			},
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server01_2_1_0",
+				"traddr": "0000:67:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			},
+			{
+			"params": {
+				"trtype": "PCIe",
+				"name": "Nvme_server01_3_1_0",
+				"traddr": "0000:68:00.0"
+			},
+			"method": "bdev_nvme_attach_controller"
+			}
+		]
+		}
+	]
+	}
+	*/
 	rc = decode_subsystem_configs(bdev_ss, ctx);
 	if (rc != 0)
 		return rc;
 
+	// 遍历conf 数组，数组就一个，所以就循环一次，构建opts
 	while (ctx->config_it != NULL) {
 		// 将pci 地址添加到opts 中
 		rc = add_traddrs_from_bdev_subsys(ctx, vmd_enabled, opts);
 		if (rc != 0)
 			return rc;
 		/* Move on to next subsystem config*/
+		// 移动到下一个conf 数组元素
 		ctx->config_it = spdk_json_next(ctx->config_it);
 	}
 
@@ -824,7 +916,7 @@ bio_add_allowed_alloc(const char *nvme_conf, struct spdk_env_opts *opts, int *ro
 	// role 作为返回值
 	*roles = rc;
 
-	// 将解析出来的pcie 地址，添加到 opts 中
+	// 将解析出来的pcie 地址，添加到 opts 的allowlist 中
 	rc = add_bdevs_to_opts(ctx, bdev_ss, vmd_enabled, opts);
 out:
 	free_json_config_ctx(ctx);

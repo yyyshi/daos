@@ -642,6 +642,7 @@ __bio_ioctxt_open(struct bio_io_context **pctxt, struct bio_xs_context *xs_ctxt,
 	if (rc) {
 		D_FREE(ctxt);
 	} else {
+		// todo: 添加ctx 到xs
 		d_list_add_tail(&ctxt->bic_link, &bxb->bxb_io_ctxts);
 		*pctxt = ctxt;
 	}

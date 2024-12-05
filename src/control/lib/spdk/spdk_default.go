@@ -100,6 +100,7 @@ func (ei *EnvImpl) InitSPDKEnv(log logging.Logger, opts *EnvOptions) error {
 
 	envCtx := C.dpdk_cli_override_opts
 
+	// 内部调用spdk_env_init 初始化spdk 运行环境
 	retPtr := C.daos_spdk_init(0, envCtx, C.ulong(opts.PCIAllowList.Len()),
 		cAllowList)
 	defer clean(retPtr)

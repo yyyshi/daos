@@ -919,6 +919,34 @@ dss_start_one_xstream(hwloc_cpuset_t cpus, int tag, int xs_id)
 	ABT_mutex_unlock(xstream_data.xd_mutex);
 	ABT_thread_attr_free(&attr);
 
+	/*
+	root@server01:/home/daos-v2.4.0/daos/src/bio# cat /tmp/daos_engine.0.log | grep 'created xstream name'
+	12/05-13:01:19.42 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_sys_0)xs_id(0)/tgt_id(-1)/ctx_id(0)/comm(1)/is_main_xs(0).
+	12/05-13:01:19.55 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_sys_1)xs_id(1)/tgt_id(-1)/ctx_id(1)/comm(1)/is_main_xs(0).
+	12/05-13:01:19.58 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_sys_2)xs_id(2)/tgt_id(-1)/ctx_id(-1)/comm(0)/is_main_xs(0).
+	12/05-13:01:21.01 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_0)xs_id(3)/tgt_id(0)/ctx_id(2)/comm(1)/is_main_xs(1).
+	12/05-13:01:21.22 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_1)xs_id(4)/tgt_id(1)/ctx_id(3)/comm(1)/is_main_xs(1).
+	12/05-13:01:21.45 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_2)xs_id(5)/tgt_id(2)/ctx_id(4)/comm(1)/is_main_xs(1).
+	12/05-13:01:21.72 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_3)xs_id(6)/tgt_id(3)/ctx_id(5)/comm(1)/is_main_xs(1).
+	12/05-13:01:21.94 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_4)xs_id(7)/tgt_id(4)/ctx_id(6)/comm(1)/is_main_xs(1).
+	12/05-13:01:22.17 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_5)xs_id(8)/tgt_id(5)/ctx_id(7)/comm(1)/is_main_xs(1).
+	12/05-13:01:22.46 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_6)xs_id(9)/tgt_id(6)/ctx_id(8)/comm(1)/is_main_xs(1).
+	12/05-13:01:22.68 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_7)xs_id(10)/tgt_id(7)/ctx_id(9)/comm(1)/is_main_xs(1).
+	12/05-13:01:22.90 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_8)xs_id(11)/tgt_id(8)/ctx_id(10)/comm(1)/is_main_xs(1).
+	12/05-13:01:23.13 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_9)xs_id(12)/tgt_id(9)/ctx_id(11)/comm(1)/is_main_xs(1).
+	12/05-13:01:23.40 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_10)xs_id(13)/tgt_id(10)/ctx_id(12)/comm(1)/is_main_xs(1).
+	12/05-13:01:23.62 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_11)xs_id(14)/tgt_id(11)/ctx_id(13)/comm(1)/is_main_xs(1).
+	12/05-13:01:23.84 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_12)xs_id(15)/tgt_id(12)/ctx_id(14)/comm(1)/is_main_xs(1).
+	12/05-13:01:24.15 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_13)xs_id(16)/tgt_id(13)/ctx_id(15)/comm(1)/is_main_xs(1).
+	12/05-13:01:24.38 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_14)xs_id(17)/tgt_id(14)/ctx_id(16)/comm(1)/is_main_xs(1).
+	12/05-13:01:24.61 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_15)xs_id(18)/tgt_id(15)/ctx_id(17)/comm(1)/is_main_xs(1).
+	12/05-13:01:24.83 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_16)xs_id(19)/tgt_id(16)/ctx_id(18)/comm(1)/is_main_xs(1).
+	12/05-13:01:25.05 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_17)xs_id(20)/tgt_id(17)/ctx_id(19)/comm(1)/is_main_xs(1).
+	12/05-13:01:25.27 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_18)xs_id(21)/tgt_id(18)/ctx_id(20)/comm(1)/is_main_xs(1).
+	12/05-13:01:25.55 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_io_19)xs_id(22)/tgt_id(19)/ctx_id(21)/comm(1)/is_main_xs(1).
+	12/05-13:01:25.68 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_off_23)xs_id(23)/tgt_id(-1)/ctx_id(22)/comm(1)/is_main_xs(0).
+	12/05-13:01:25.80 server01 DAOS[2885211/-1/0] server DBUG src/engine/srv.c:781 dss_start_one_xstream() created xstream name(daos_off_24)xs_id(24)/tgt_id(-1)/ctx_id(23)/comm(1)/is_main_xs(0).
+	*/
 	D_DEBUG(DB_TRACE, "created xstream name(%s)xs_id(%d)/tgt_id(%d)/"
 		"ctx_id(%d)/comm(%d)/is_main_xs(%d).\n",
 		dx->dx_name, dx->dx_xs_id, dx->dx_tgt_id, dx->dx_ctx_id,

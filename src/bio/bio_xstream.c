@@ -120,7 +120,7 @@ bio_spdk_env_init(void)
 
 	// == true
 	if (bio_nvme_configured(SMD_DEV_TYPE_MAX)) {
-		// 传递allowed bdev pci 地址给spdk
+		// 传递allowed bdev pci 地址给spdk，即将nvme addr 添加到opts 的allowlist 中
 		rc = bio_add_allowed_alloc(nvme_glb.bd_nvme_conf, &opts, &roles);
 		if (rc != 0) {
 			D_ERROR("Failed to add allowed devices to SPDK env, "DF_RC"\n",
@@ -162,13 +162,14 @@ bio_spdk_env_init(void)
 		nvme_glb.bd_enable_rpc_srv = enable_rpc_srv;
 	}
 
-	// 初始化spdk env，此时opts 里已经添加了所有nvme 的pcie 地址
+	// 初始化spdk env，此时opts allowlist里已经添加了所有nvme 的pcie 地址
 	rc = spdk_env_init(&opts);
 	if (rc != 0) {
 		rc = -DER_INVAL; /* spdk_env_init() returns -1 */
 		D_ERROR("Failed to initialize SPDK env, "DF_RC"\n", DP_RC(rc));
 		goto out;
 	}
+	// todo: spdk_env_init 成功后，就可以根据 spdk_bdev_first 和 spdk_bdev_next 遍历所有的spdk bdev?
 
 	spdk_unaffinitize_thread();
 
@@ -179,6 +180,7 @@ bio_spdk_env_init(void)
 		spdk_env_fini();
 	}
 out:
+	// 释放allowlist
 	D_FREE(opts.pci_allowed);
 	return rc;
 }
@@ -596,6 +598,7 @@ load_blobstore(struct bio_xs_context *ctxt, char *bdev_name, uuid_t *bs_uuid,
 		if (create)
 			spdk_bs_init(bs_dev, &bs_opts, async_cb, async_arg);
 		else
+			// 加载已有的bs
 			spdk_bs_load(bs_dev, &bs_opts, async_cb, async_arg);
 
 		return NULL;
@@ -882,6 +885,7 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 		return -DER_EXIST;
 	}
 
+	// 这里日志打印共 4次
 	D_ALLOC_PTR(d_bdev);
 	if (d_bdev == NULL) {
 		return -DER_NOMEM;
@@ -895,6 +899,7 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 	}
 
 	d_bdev->bb_roles = rc;
+	// 这里日志打印共 4次
 	D_STRNDUP(d_bdev->bb_name, bdev_name, strlen(bdev_name));
 	if (d_bdev->bb_name == NULL) {
 		D_GOTO(error, rc = -DER_NOMEM);
@@ -939,6 +944,7 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 	/* Get the 'bstype' (device ID) of blobstore */
 	bstype = spdk_bs_get_bstype(bs);
 	memcpy(bs_uuid, bstype.bstype, sizeof(bs_uuid));
+	// 重启是（之前部署好的环境）会打印，Loaded blobstore :0af6a64e。共4行
 	D_DEBUG(DB_MGMT, "%s :"DF_UUID"\n",
 		new_bs ? "Created new blobstore" : "Loaded blobstore",
 		DP_UUID(bs_uuid));
@@ -986,9 +992,21 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 		return 0;
 	}
 
+	/*
+	root@server01:/home/daos-v2.4.0/daos/src/bio# cat /tmp/daos_engine.0.log | grep 'create_bio_bdev'  |  grep 'alloc(' -v
+	12/05-13:01:20.94 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:897 create_bio_bdev() Loaded blobstore :0af6a64e
+	12/05-13:01:20.94 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:944 create_bio_bdev() Create DAOS bdev 0af6a64e, role:0
+	12/05-13:01:20.95 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:897 create_bio_bdev() Loaded blobstore :b31a53db
+	12/05-13:01:20.95 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:944 create_bio_bdev() Create DAOS bdev b31a53db, role:0
+	12/05-13:01:20.95 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:897 create_bio_bdev() Loaded blobstore :73b9e6d0
+	12/05-13:01:20.95 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:944 create_bio_bdev() Create DAOS bdev 73b9e6d0, role:0
+	12/05-13:01:20.95 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:897 create_bio_bdev() Loaded blobstore :8aab2bee
+	12/05-13:01:20.95 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:944 create_bio_bdev() Create DAOS bdev 8aab2bee, role:0
+	*/
 	D_DEBUG(DB_MGMT, "Create DAOS bdev "DF_UUID", role:%u\n",
 		DP_UUID(bs_uuid), d_bdev->bb_roles);
 
+	// 将创建好的bio bdev 添加到全局的nvme 数据中
 	d_list_add_tail(&d_bdev->bb_link, &nvme_glb.bd_bdevs);
 
 	return 0;
@@ -998,6 +1016,7 @@ error:
 	return rc;
 }
 
+// 只有target 0 会作为init_thread 执行此函数
 static int
 init_bio_bdevs(struct bio_xs_context *ctxt)
 {
@@ -1012,11 +1031,14 @@ init_bio_bdevs(struct bio_xs_context *ctxt)
 	}
 
 	// 遍历所有的bdev，创建bio bdev
+	// todo: 看看spdk 构建的部分，里面到底有哪些spdk bdev
 	for (bdev = spdk_bdev_first(); bdev != NULL;
 	     bdev = spdk_bdev_next(bdev)) {
+		// 默认 class 为 BDEV_CLASS_NVME
 		if (nvme_glb.bd_bdev_class != get_bdev_type(bdev))
 			continue;
 
+		// todo：目前从日志看此函数会循环4次，但是json 文件中只有一个bdev
 		rc = create_bio_bdev(ctxt, spdk_bdev_get_name(bdev), NULL);
 		if (rc)
 			return rc;
@@ -1258,6 +1280,7 @@ alloc_xs_blobstore(void)
 {
 	struct bio_xs_blobstore *bxb;
 
+	// 这行的日志打印了20 次，对应20 个target
 	D_ALLOC_PTR(bxb);
 	if (bxb == NULL)
 		return NULL;
@@ -1310,6 +1333,7 @@ assign_roles(struct bio_bdev *d_bdev, unsigned int tgt_id)
 			d_bdev->bb_tgt_cnt++;
 
 		// 分配完成后即完成了bdev 到target 的映射
+		// todo: 重启daos 的时候，这个日志并没有打印出来
 		D_DEBUG(DB_MGMT, "Successfully mapped dev "DF_UUID"/%d/%u to tgt %d role %u\n",
 			DP_UUID(d_bdev->bb_uuid), d_bdev->bb_tgt_cnt, d_bdev->bb_roles,
 			tgt_id, dev_type2role(st));
@@ -1415,6 +1439,7 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 	}
 
 	// 给target 分配bdev，返回被分配的设备
+	// todo: 从json 配置文件看，只有一个bdev，那么对应的就只有一个 bio bdev，那么所有的target 共用这一个bio bdev 么
 	d_bdev = assign_xs_bdev(ctxt, tgt_id, st, &dev_state);
 	if (d_bdev == NULL)
 		return -DER_NONEXIST;
@@ -1444,8 +1469,10 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 	 * bbs owner xstream is responsible to initialize monitoring context
 	 * and open SPDK blobstore.
 	 */
+	// bbs 的xs owner 负责初始化monitor ctx 和打开spdk bs
 	if (is_bbs_owner(ctxt, bbs)) {
 		/* Initialize BS state according to SMD state */
+		// 初始化bs 状态
 		if (dev_state == SMD_DEV_NORMAL) {
 			bbs->bb_state = BIO_BS_STATE_NORMAL;
 		} else if (dev_state == SMD_DEV_FAULTY) {
@@ -1456,6 +1483,7 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 		}
 
 		/* Initialize health monitor */
+		// 初始化monitor
 		rc = bio_init_health_monitoring(bbs, d_bdev->bb_name);
 		if (rc != 0) {
 			D_ERROR("BIO health monitor init failed. "DF_RC"\n",
@@ -1661,6 +1689,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 	ABT_mutex_lock(nvme_glb.bd_mutex);
 	nvme_glb.bd_xstream_cnt++;
 
+	// 这行日志会打印20 次，对应 20个tgt_id。target 0 时 init_thread 为NULL。之后target 0所在线程将会完成init 工作，被设置为 init_thread
 	D_INFO("Initialize NVMe context, tgt_id:%d, init_thread:%p\n",
 	       tgt_id, nvme_glb.bd_init_thread);
 
@@ -1686,8 +1715,8 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 	 */
 	// 第一个启动的xs 将扫描bdev 并创建spdk bs
 	// nvme_glb.bd_init_thread 为全局数据，每个engine 共用一份，不是tls 数据，所以只有第一个 xs 时才为 NULL
-	// todo: 这个初始化是 sys xs 完成的吗？
 	if (nvme_glb.bd_init_thread == NULL) {
+		// 只有target 0会进入
 		struct common_cp_arg cp_arg;
 
 		D_ASSERTF(nvme_glb.bd_xstream_cnt == 1, "%d",
@@ -1714,12 +1743,14 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		// todo: 这里是为啥
 		while (spdk_thread_poll(ctxt->bxc_thread, 0, 0) > 0)
 			;
+		// 这个日志会打印，tgt_id 为 0
+		// todo: 什么样才算初始化完成，此时可以通过 spdk_bdev_first 拿到spdk bdev 了吗？
 		D_DEBUG(DB_MGMT, "SPDK bdev initialized, tgt_id:%d", tgt_id);
 
 		// 将spdk thread 设置到全局数据中，表示在众多（每个xs 有各自的spdk thread）的thread 中，当前是扫描bdev那个
 		nvme_glb.bd_init_thread = ctxt->bxc_thread;
 	
-		// 内部会load_blobstore 最终创建spdk bs，ctxt 是每个xs 都有的tls 数据
+		// 内部会load_blobstore 最终创建spdk bs，只有target 0 会执行
 		rc = init_bio_bdevs(ctxt);
 		if (rc != 0) {
 			D_ERROR("failed to init bio_bdevs, "DF_RC"\n",
@@ -1763,6 +1794,12 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 
 		// 这里也会创建bs（最终会创建spdk bs），保存在ctxt 中
 		// todo: bs下面的blob 是在什么时候创建的，具体是如何管理的
+		/*
+		12/05-13:01:20.95 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:1385 init_xs_blobstore_ctxt() Loaded bs, tgt_id:0, xs:0x7fe18c521610 dev:Nvme_server01_0_1_0n1
+		12/05-13:01:21.18 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:1385 init_xs_blobstore_ctxt() Loaded bs, tgt_id:1, xs:0x7fe1787215f0 dev:Nvme_server01_1_1_0n1
+		12/05-13:01:21.39 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:1385 init_xs_blobstore_ctxt() Loaded bs, tgt_id:2, xs:0x7fe160721ad0 dev:Nvme_server01_2_1_0n1
+		12/05-13:01:21.66 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:1385 init_xs_blobstore_ctxt() Loaded bs, tgt_id:3, xs:0x7fe1487215f0 dev:Nvme_server01_3_1_0n1
+		*/
 		rc = init_xs_blobstore_ctxt(ctxt, tgt_id, st);
 		if (rc)
 			goto out;
@@ -1856,6 +1893,7 @@ out:
  * xstream, be careful on using mutex or any blocking functions, that could
  * block the NVMe poll and lead to deadlock at the end.
  */
+// 热插拔== 带电插拔
 static void
 scan_bio_bdevs(struct bio_xs_context *ctxt, uint64_t now)
 {

@@ -383,6 +383,7 @@ struct bio_xs_blobstore {
 	// bio 模块的blobstore
 	struct bio_blobstore	*bxb_blobstore;
 	/* All I/O contexts for this xstream blobstore */
+	// 当前xs bs 的所有io ctx
 	d_list_t		 bxb_io_ctxts;
 };
 

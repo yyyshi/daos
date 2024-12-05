@@ -253,6 +253,7 @@ wipe_ctrlrs(void)
 	return start;
 }
 
+// 用作 nvme 格式化
 struct ret_t *
 nvme_wipe_namespaces(void)
 {
