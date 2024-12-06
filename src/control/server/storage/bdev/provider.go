@@ -35,7 +35,13 @@ type (
 )
 
 // DefaultProvider returns an initialized *Provider suitable for use in production code.
+// 创建spdkbackend 的最外层函数：DefaultProvider
+// 这个函数在不同的 package 下有不同的实现。
+// 在 package scm，package bdev（当前文件），package metadata 三个包下都有各自的实现
+// firmware 为固件
+// todo: 所以是什么时候触发了 defaultBackend 后端的spdk 的scan 最终触发了 C.nvme_discover
 func DefaultProvider(log logging.Logger) *Provider {
+	// 创建默认的spdk 后端，再传递给 NewProvider
 	return NewProvider(log, defaultBackend(log))
 }
 

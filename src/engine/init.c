@@ -1344,6 +1344,13 @@ main(int argc, char **argv)
 	int		rc;
 
 	/** parse command line arguments */
+	// 启动中间状态会执行setup.sh 脚本reset 操作：
+	/*
+	root@server01:~# ps -ef | grep daos
+	root     2984613       1  3 15:14 ?        00:00:00 /opt/daos/bin/daos_server start -o /opt/daos/etc/daos_server.yml
+	root     2984648 2984613  0 15:14 ?        00:00:00 /opt/daos/bin/daos_server_helper
+	root     2984656 2984648  0 15:14 ?        00:00:00 bash /opt/daos/share/daos/control/setup_spdk.sh reset
+	*/
 	// 启动参数解析，保存到engine 的全局变量中
 	// 举例： /opt/daos/bin/daos_engine -t 20 -x 2 -g daos_server -d /var/run/daos_server -T 2 -n /mnt/daos/2/daos_nvme.conf -p 1 -I 1 -r 20480 -H 2 -s /mnt/daos/2
 	rc = parse(argc, argv);

@@ -31,8 +31,11 @@ const (
 
 // golang 层对spdk 的功能封装（包括对spdk setup.sh 脚本的封装和spdk c 语言部分功能的封装）
 type (
+	// 成员为两个interface
 	spdkWrapper struct {
+		// 凡是实现了Env 这个interface 定义的所有函数的struct 都可以作为此成员
 		spdk.Env
+		// 凡是实现了Nvme 这个interface 定义的所有函数的struct 都可以作为此成员
 		spdk.Nvme
 	}
 
@@ -110,12 +113,24 @@ func (w *spdkWrapper) init(log logging.Logger, spdkOpts *spdk.EnvOptions) (resto
 func newBackend(log logging.Logger, sr *spdkSetupScript) *spdkBackend {
 	return &spdkBackend{
 		log:     log,
+		// spdkWrapper 类由两个空interface 构成，Env 和Nvme 。
+		// 这里传入的是Env 和Nvme 两个抽象接口的实现类。EnvImpl 为Env 的实现类，实现了Env 要求的2个函数
+		// NvmeImpl 为Nvme 的实现类，实现了Nvme 要求的3个函数
+		// 所以，spdkWrapper 就可以理解为 Env 类型和Nvme 类型的混合type 的类，即同时拥有组合后的5 个函数可以调用
+		// 即 binding 可以调用的函数如下:
+		// binding.InitSPDKEnv = EnvImpl::InitSPDKEnv
+		// binding.FiniSPDKEnv = EnvImpl::FiniSPDKEnv
+		// binding.Discover = NvmeImpl::Discover
+		// binding.Format = NvmeImpl::Format
+		// binding.Update = NvmeImpl::Update
 		binding: &spdkWrapper{Env: &spdk.EnvImpl{}, Nvme: &spdk.NvmeImpl{}},
 		script:  sr,
 	}
 }
 
+// 创建spdk 后端
 func defaultBackend(log logging.Logger) *spdkBackend {
+	// todo: backend 内部会生成一个执行setup.sh 的runner
 	return newBackend(log, defaultScriptRunner(log))
 }
 
@@ -355,10 +370,11 @@ func (sb *spdkBackend) Scan(req storage.BdevScanRequest) (*storage.BdevScanRespo
 	}
 	defer restoreAfterInit()
 
-	// 发现的设备
+	// 发现nvme 设备
 	// func (n *NvmeImpl) Discover spdk 的c 语言封装类
 	// struct ret_t *
 	// nvme_discover(void)
+	// binding 为spdkWrapper 类，是抽象类 Env 和Nvme 的组合。这里的Discover，是Nvme 的实现类 NvmeImpl 的函数实现
 	foundDevs, err := sb.binding.Discover(sb.log)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to discover nvme")

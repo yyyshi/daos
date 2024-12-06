@@ -371,6 +371,7 @@ func prepBdevStorage(srv *server, iommuEnabled bool) error {
 
 // scanBdevStorage performs discovery and validates existence of configured NVMe SSDs.
 func scanBdevStorage(srv *server) (*storage.BdevScanResponse, error) {
+	// 执行dmg storage scan 时会打印
 	defer srv.logDuration(track("time to scan bdev storage"))
 
 	if srv.cfg.DisableHugepages {

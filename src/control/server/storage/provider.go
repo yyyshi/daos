@@ -46,6 +46,7 @@ type Provider struct {
 }
 
 // DefaultProvider returns a provider populated with default parameters.
+// 返回值为 provider，spdk 作为后端
 func DefaultProvider(log logging.Logger, idx int, engineStorage *Config) *Provider {
 	if engineStorage == nil {
 		engineStorage = new(Config)
@@ -213,6 +214,7 @@ func (p *Provider) PrepareScm(req ScmPrepareRequest) (*ScmPrepareResponse, error
 
 // ScanScm calls into storage SCM provider to discover PMem modules, namespaces and state.
 func (p *Provider) ScanScm(req ScmScanRequest) (*ScmScanResponse, error) {
+	// 执行dmg storage scan 时会打印
 	p.log.Debugf("calling scm storage provider scan: %+v", req)
 	return p.scm.Scan(req)
 }

@@ -116,6 +116,8 @@ func (c *ControlService) scanBdevs(ctx context.Context, req *ctlpb.ScanNvmeReq, 
 			bdevsInCfg = true
 		}
 	}
+
+	// 1. 如果配置文件中没有bdev，那么扫描所有
 	if !bdevsInCfg {
 		c.log.Debugf("no bdevs in cfg so scan all")
 		// return details of all bdevs if none are assigned to engines
@@ -124,6 +126,7 @@ func (c *ControlService) scanBdevs(ctx context.Context, req *ctlpb.ScanNvmeReq, 
 		return newScanNvmeResp(req, resp, err)
 	}
 
+	// 2. 如果配置文件中有bdev，扫描这些已经分配的bdev
 	c.log.Debugf("bdevs in cfg so scan only assigned")
 	resp, err := c.scanAssignedBdevs(ctx, nsps, req.GetHealth() || req.GetMeta())
 

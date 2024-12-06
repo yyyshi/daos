@@ -95,9 +95,11 @@ get_health_logs(struct spdk_nvme_ctrlr *ctrlr, struct health_entry *health)
 	return rc;
 }
 
+// 发现nvme 控制器和逻辑扇区，同时返回smart 日志
 struct ret_t *
 nvme_discover(void)
 {
+	// daos 通过daos_server_helper 来调用add 的一系列操作，来触发C.nvme_discover 进而触发spdk_nvme_probe
 	return _discover(&spdk_nvme_probe, true, &get_health_logs);
 }
 
@@ -253,7 +255,7 @@ wipe_ctrlrs(void)
 	return start;
 }
 
-// 用作 nvme 格式化
+// 用作擦除ns（逻辑扇区）
 struct ret_t *
 nvme_wipe_namespaces(void)
 {

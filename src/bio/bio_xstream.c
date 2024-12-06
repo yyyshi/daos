@@ -1726,6 +1726,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		// 由json conf 初始化sspdk 子系统
 		common_prep_arg(&cp_arg);
 		// 这里用的是全局的nvme conf 文件，每个engine 有自己单独的
+		// spdk 中子系统其实就是模块的意思，比如子系统名字为bdev，表示bdev 模块
 		spdk_subsystem_init_from_json_config(nvme_glb.bd_nvme_conf,
 						     SPDK_DEFAULT_RPC_ADDR,
 						     subsys_init_cb, &cp_arg,

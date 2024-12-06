@@ -18,6 +18,7 @@ import (
 
 const (
 	// DaosPrivHelperName is the name of the privileged helper.
+	// daos server helper 的app 名字
 	DaosPrivHelperName = "daos_server_helper"
 
 	// DaosPrivHelperLogFileEnvVar is the name of the environment variable which

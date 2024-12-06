@@ -424,6 +424,7 @@ func (cmd *scanNVMeCmd) Execute(_ []string) error {
 		return err
 	}
 
+	// 执行nvme scan 命令
 	svc := server.NewStorageControlService(cmd.Logger, config.DefaultServer().Engines)
 	if cmd.getVMDState() {
 		svc.WithVMDEnabled()

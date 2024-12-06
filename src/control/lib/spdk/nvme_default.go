@@ -50,6 +50,7 @@ func realRemove(name string) error {
 // ctrlr_t structs. These are converted and returned as Controller slices
 // containing any Namespace and DeviceHealth structs.
 // Afterwards remove lockfile for each discovered device.
+// 发现nvme 设备
 func (n *NvmeImpl) Discover(log logging.Logger) (storage.NvmeControllers, error) {
 	if n == nil {
 		return nil, errors.New("nil NvmeImpl")

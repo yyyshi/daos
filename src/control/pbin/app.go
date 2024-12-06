@@ -123,6 +123,7 @@ func (a *App) logError(err error) error {
 }
 
 // Run executes the helper application process.
+
 func (a *App) Run() error {
 	parentName, err := a.process.ParentProcessName()
 	if err != nil {
@@ -211,6 +212,7 @@ func (a *App) handleRequest(req *Request) *Response {
 		return NewResponseWithError(err)
 	}
 
+	// 调用add 到app 的hdl 们
 	resp := reqHandler.Handle(a.log, req)
 	if resp == nil {
 		err := a.logError(errors.Errorf("handler for method %q returned nil", req.Method))

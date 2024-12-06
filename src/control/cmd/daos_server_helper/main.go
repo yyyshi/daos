@@ -20,8 +20,11 @@ func main() {
 		app = app.WithLogFile(logPath)
 	}
 
+	// 将 BdevScan 等添加到daos_server_helper app 中
 	addMethodHandlers(app)
 
+	// todo：add 的hdl 啥时候执行
+	// app.go 中 func (a *App) Run() error {
 	err := app.Run()
 	if err != nil {
 		os.Exit(1)
@@ -43,6 +46,7 @@ func addMethodHandlers(app *pbin.App) {
 	app.AddHandler("ScmPrepare", &scmPrepHandler{})
 
 	app.AddHandler("BdevPrepare", &bdevPrepHandler{})
+	// func (h *bdevScanHandler) Handle，内部会执行spdk nvme discover
 	app.AddHandler("BdevScan", &bdevScanHandler{})
 	app.AddHandler("BdevFormat", &bdevFormatHandler{})
 	app.AddHandler("BdevWriteConfig", &bdevWriteConfigHandler{})

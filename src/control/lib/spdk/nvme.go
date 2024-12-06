@@ -24,6 +24,7 @@ type FormatResult struct {
 	Err          error
 }
 
+// 1. 定义了一个接口类，对应三个函数。只要实现这三个接口，就可以认为是Nvme 类
 // Nvme is the interface that provides SPDK NVMe functionality.
 type Nvme interface {
 	// Discover NVMe controllers and namespaces, and device health info
@@ -34,6 +35,8 @@ type Nvme interface {
 	Update(log logging.Logger, ctrlrPciAddr string, path string, slot int32) error
 }
 
+// 2. 定义一个NvmeImpl struct，并实现Nvme 的三个函数，所以可以认为这个struct 是Nvme 类型
+// spdkWrapper 包含Nvme 类成员，所以NvmeImpl 可以作为他的成员
 // NvmeImpl is an implementation of the Nvme interface.
 type NvmeImpl struct{}
 

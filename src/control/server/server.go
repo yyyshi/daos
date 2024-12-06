@@ -303,6 +303,7 @@ func (srv *server) createEngine(ctx context.Context, idx int, cfg *engine.Config
 
 	// 创建新engine，创建成功后执行闭包函数 joinFn
 	// server 启动engine 是通过runner 来进行，这里新建了一个runner
+	// 创建engine 前先调用 storage.DefaultProvider 返回spdk 作为后端的provider
 	engine := NewEngineInstance(srv.log, storage.DefaultProvider(srv.log, idx, &cfg.Storage), joinFn,
 		engine.NewRunner(srv.log, cfg)).WithHostFaultDomain(srv.harness.faultDomain)
 	// 如果idx 为0，创建control_raft 下的daos_system.db
