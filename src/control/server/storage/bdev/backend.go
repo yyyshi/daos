@@ -212,10 +212,11 @@ func logNUMAStats(log logging.Logger) {
 }
 
 // prepare receives function pointers for external interfaces.
+// 清理原来的大页和vmd等状态，执行setup.sh 脚本重新绑定pcie 设备
 func (sb *spdkBackend) prepare(req storage.BdevPrepareRequest, vmdDetect vmdDetectFn, hpClean hpCleanFn) (*storage.BdevPrepareResponse, error) {
 	resp := &storage.BdevPrepareResponse{}
 
-	// 是否是清除大页内存的req
+	// 1. 是否是清除大页内存的req 参数
 	if req.CleanHugepagesOnly {
 		// Remove hugepages that were created by a no-longer-active SPDK process. Note that
 		// when running prepare, it's unlikely that any SPDK processes are active as this
@@ -238,7 +239,7 @@ func (sb *spdkBackend) prepare(req storage.BdevPrepareRequest, vmdDetect vmdDete
 	resp.VMDPrepared = req.EnableVMD
 
 	// Before preparing, reset device bindings.
-	// 先解绑设备
+	// 2. 是否先解绑设备的req 参数
 	if req.EnableVMD {
 		// Unbind devices to speed up VMD re-binding as per
 		// https://github.com/spdk/spdk/commit/b0aba3fcd5aceceea530a702922153bc75664978.
@@ -249,12 +250,13 @@ func (sb *spdkBackend) prepare(req storage.BdevPrepareRequest, vmdDetect vmdDete
 			return resp, errors.Wrap(err, "un-binding devices")
 		}
 	} else {
+		// 执行setup.sh 脚本，重新绑定pcie 设备（解绑 + 再绑定）
 		if err := sb.script.Reset(&req); err != nil {
 			return resp, errors.Wrap(err, "resetting device bindings")
 		}
 	}
 
-	// 再prepare == 绑定设备到用户态
+	// 3. 再prepare == 绑定设备到用户态
 	return resp, errors.Wrap(sb.script.Prepare(&req), "binding devices to userspace drivers")
 }
 
@@ -292,6 +294,7 @@ func (sb *spdkBackend) Reset(req storage.BdevPrepareRequest) (*storage.BdevPrepa
 // owned by the target user.
 // Backend call executes the SPDK setup.sh script to rebind PCI devices as selected by
 // devs specified in bdev_list and bdev_exclude provided in the server config file.
+// prepare 会清理原来的状态，并执行setup.sh 脚本重新绑定pcie 设备
 func (sb *spdkBackend) Prepare(req storage.BdevPrepareRequest) (*storage.BdevPrepareResponse, error) {
 	sb.log.Debugf("spdk backend prepare (script call): %+v", req)
 	return sb.prepare(req, DetectVMD, cleanHugepages)
@@ -352,6 +355,7 @@ func groomDiscoveredBdevs(reqDevs *hardware.PCIAddressSet, discovered storage.Nv
 }
 
 // Scan discovers NVMe controllers accessible by SPDK.
+// scan 将发现nvme controller
 func (sb *spdkBackend) Scan(req storage.BdevScanRequest) (*storage.BdevScanResponse, error) {
 	sb.log.Debugf("spdk backend scan (bindings discover call): %+v", req)
 
@@ -359,18 +363,20 @@ func (sb *spdkBackend) Scan(req storage.BdevScanRequest) (*storage.BdevScanRespo
 	// NVMe devices as they may not exist yet e.g. for SPDK AIO-file the devices are created on
 	// format.
 	needDevs := req.DeviceList.PCIAddressSetPtr()
+	// 构建spdk opt
 	spdkOpts := &spdk.EnvOptions{
 		PCIAllowList: needDevs,
 		EnableVMD:    req.VMDEnabled,
 	}
 
+	// 1. 调用spdkWrapper 的init 函数
 	restoreAfterInit, err := sb.binding.init(sb.log, spdkOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init nvme")
 	}
 	defer restoreAfterInit()
 
-	// 发现nvme 设备
+	// 2. 发现nvme 设备
 	// func (n *NvmeImpl) Discover spdk 的c 语言封装类
 	// struct ret_t *
 	// nvme_discover(void)
@@ -390,6 +396,7 @@ func (sb *spdkBackend) Scan(req storage.BdevScanRequest) (*storage.BdevScanRespo
 			outDevs, needDevs)
 	}
 
+	// 返回req 响应
 	return &storage.BdevScanResponse{
 		Controllers: outDevs,
 		VMDEnabled:  req.VMDEnabled,

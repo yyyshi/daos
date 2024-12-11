@@ -41,6 +41,7 @@ func (scs *StorageControlService) ScmScan(req storage.ScmScanRequest) (*storage.
 }
 
 // NvmePrepare preps locally attached SSDs.
+// 执行 dmg storage scan 时，内部会先执行 prepare，将prepare 返回值传给 scan函数 
 func (scs *StorageControlService) NvmePrepare(req storage.BdevPrepareRequest) (*storage.BdevPrepareResponse, error) {
 	return scs.storage.PrepareBdevs(req)
 }

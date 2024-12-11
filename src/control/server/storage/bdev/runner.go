@@ -132,6 +132,7 @@ func (s *spdkSetupScript) Prepare(req *storage.BdevPrepareRequest) error {
 //
 // Apply block list to cater for situation where some devices should be excluded from unbind, e.g.
 // for use from the OS.
+// 移除所有的驱动绑定
 func (s *spdkSetupScript) Unbind(req *storage.BdevPrepareRequest) error {
 	s.env = map[string]string{
 		"PATH":            os.Getenv("PATH"),
@@ -148,6 +149,7 @@ func (s *spdkSetupScript) Unbind(req *storage.BdevPrepareRequest) error {
 // is not set, otherwise PCI devices can be specified by passing in a allow list of PCI addresses.
 //
 // NOTE: will make the controller reappear in /dev.
+// setup.sh reset 将重置大页内存，重新绑定pci 设备
 func (s *spdkSetupScript) Reset(req *storage.BdevPrepareRequest) error {
 	s.env = map[string]string{
 		"PATH":          os.Getenv("PATH"),

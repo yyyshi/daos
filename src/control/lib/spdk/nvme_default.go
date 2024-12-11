@@ -71,12 +71,13 @@ func (n *NvmeImpl) Discover(log logging.Logger) (storage.NvmeControllers, error)
 //
 // Attempt wipe of each controller namespace's LBA-0.
 // Afterwards remove lockfile for each formatted device.
-// 通过spdk 来格式化nvme 设备
+// 通过dmg storage format命令来格式化nvme 设备
 func (n *NvmeImpl) Format(log logging.Logger) ([]*FormatResult, error) {
 	if n == nil {
 		return nil, errors.New("nil NvmeImpl")
 	}
 
+	// 擦除ns
 	results, err := collectFormatResults(C.nvme_wipe_namespaces(),
 		"NVMe Format(): C.nvme_wipe_namespaces()")
 

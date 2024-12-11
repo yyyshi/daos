@@ -89,6 +89,7 @@ struct bio_nvme_data {
 	bool			 bd_started;
 	bool			 bd_bypass_health_collect;
 	/* Setting to enable SPDK JSON-RPC server */
+	// 开启spdk-rpc server
 	bool			 bd_enable_rpc_srv;
 	const char		*bd_rpc_srv_addr;
 };
@@ -105,6 +106,7 @@ bio_spdk_env_init(void)
 	int			roles = 0;
 
 	/* Only print error and more severe to stderr. */
+	// 设置spdk 的日志级别
 	spdk_log_set_print_level(SPDK_LOG_ERROR);
 
 	spdk_env_opts_init(&opts);
@@ -153,6 +155,7 @@ bio_spdk_env_init(void)
 				DP_RC(rc));
 			goto out;
 		}
+		// release 版本禁止开启rpc
 #ifdef DAOS_BUILD_RELEASE
 		if (enable_rpc_srv) {
 			D_ERROR("SPDK JSON-RPC server may not be enabled for release builds.\n");
@@ -239,6 +242,7 @@ bio_nvme_init(const char *nvme_conf, int numa_node, unsigned int mem_size,
 	nvme_glb.bd_init_thread = NULL;
 	nvme_glb.bd_nvme_conf = NULL;
 	nvme_glb.bd_bypass_health_collect = bypass_health_collect;
+	// 默认不开启rpc
 	nvme_glb.bd_enable_rpc_srv = false;
 	nvme_glb.bd_rpc_srv_addr = NULL;
 	D_INIT_LIST_HEAD(&nvme_glb.bd_bdevs);
@@ -1662,6 +1666,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 	int			 rc = 0;
 	enum smd_dev_type	 st;
 
+	// 为每个xs 的ctx 申请内存，准备构建ctx
 	D_ALLOC_PTR(ctxt);
 	if (ctxt == NULL)
 		return -DER_NOMEM;
@@ -1759,7 +1764,9 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 			goto out;
 		}
 
+		// bio bdev 初始化完成后，重启spdk rpc server。rpc 默认是禁用的
 		/* After bio_bdevs are initialized, restart SPDK JSON-RPC server if required. */
+		// 默认是false
 		if (nvme_glb.bd_enable_rpc_srv) {
 			if ((!nvme_glb.bd_rpc_srv_addr) || (strlen(nvme_glb.bd_rpc_srv_addr) == 0))
 				nvme_glb.bd_rpc_srv_addr = SPDK_DEFAULT_RPC_ADDR;

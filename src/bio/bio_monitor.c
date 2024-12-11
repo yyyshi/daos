@@ -313,6 +313,7 @@ get_spdk_identify_ctrlr_completion(struct spdk_bdev_io *bdev_io, bool success,
 	 * Submit an NVMe Admin command to get device error log page
 	 * to the bdev.
 	 */
+	// 提交一个admin cmd 来获取bdev 的err log
 	rc = spdk_bdev_nvme_admin_passthru(dev_health->bdh_desc,
 					   dev_health->bdh_io_channel,
 					   &cmd,
@@ -591,6 +592,7 @@ get_spdk_intel_smart_log_completion(struct spdk_bdev_io *bdev_io, bool success,
 	 * Submit an NVMe Admin command to get controller data
 	 * to the bdev.
 	 */
+	// 提交一个admin cmd 来获取bdev 的controller 信息
 	rc = spdk_bdev_nvme_admin_passthru(dev_health->bdh_desc,
 					   dev_health->bdh_io_channel,
 					   &cmd,
@@ -661,6 +663,7 @@ get_spdk_health_info_completion(struct spdk_bdev_io *bdev_io, bool success,
 	 * Submit an NVMe Admin command to get NVMe vendor unique smart
 	 * attributes.
 	 */
+	// 提交一个admin cmd 来获取nvme 的smart 信息
 	rc = spdk_bdev_nvme_admin_passthru(dev_health->bdh_desc,
 					   dev_health->bdh_io_channel,
 					   &cmd,
@@ -784,6 +787,7 @@ collect_raw_health_data(void *cb_arg)
 	 * Submit an NVMe Admin command to get device health log page
 	 * to the bdev.
 	 */
+	// 提交一个admin cmd 来获取设备的健康信息
 	rc = spdk_bdev_nvme_admin_passthru(dev_health->bdh_desc,
 					   dev_health->bdh_io_channel,
 					   &cmd,

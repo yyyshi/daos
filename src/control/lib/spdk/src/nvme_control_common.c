@@ -37,6 +37,7 @@ register_ns(struct ctrlr_entry *centry, struct spdk_nvme_ns *ns)
 	 *  detailed information on the controller.  Refer to the NVMe
 	 *  specification for more details on IDENTIFY for NVMe controllers.
 	 */
+	// spdk_nvme_ctrlr 是spdk 中对nvme controller 的逻辑抽象
 	cdata = spdk_nvme_ctrlr_get_data(centry->ctrlr);
 
 	if (!spdk_nvme_ns_is_active(ns)) {
@@ -71,10 +72,13 @@ attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 		exit(1);
 	}
 
+	// 解析trid->traddr，保存信息到 entry->pci_addr
 	if (spdk_pci_addr_parse(&entry->pci_addr, trid->traddr) != 0) {
 		perror("pci_addr_parse");
 		exit(1);
 	}
+
+	// 设置为probe 发现的controller 的对象
 	entry->ctrlr = ctrlr;
 	entry->health = NULL;
 	entry->nss = NULL;
@@ -89,11 +93,15 @@ attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	 *
 	 * Note that in NVMe, namespace IDs start at 1, not 0.
 	 */
+	// 每个controller 有一个或者多个ns
 	num_ns = spdk_nvme_ctrlr_get_num_ns(ctrlr);
 	for (nsid = 1; nsid <= num_ns; nsid++) {
 		ns = spdk_nvme_ctrlr_get_ns(ctrlr, nsid);
 		if (ns == NULL)
 			continue;
+		// 注册controller，当 spdk_nvme_ctrlr 对象创建成功，表示设备已经被初始化注册到spdk 的nvme 子系统
+		// spdk 使用 spdk_nvme_ctrlr 和 spdk_nvme_ns 管理nvme 控制器和名字空间，供后续访问
+		// 至此，还没到bdev 层
 		register_ns(entry, ns);
 	}
 }
@@ -192,6 +200,9 @@ _discover(prober probe, bool detach, health_getter get_health)
 	 *  called for each controller after the SPDK NVMe driver has completed
 	 *  initializing the controller we chose to attach.
 	 */
+	// 开始spdk nvme 枚举功能。
+	// 当发现nvme controller 时，probe_cb 将会被调用
+	// 当spdk nvme driver 完成和nvme 绑定后调用 attach_cb 
 	rc = probe(NULL, NULL, probe_cb, attach_cb, NULL);
 	if (rc != 0)
 		goto fail;
@@ -203,6 +214,7 @@ _discover(prober probe, bool detach, health_getter get_health)
 	 * Collect NVMe SSD health stats for each probed controller.
 	 * TODO: move to attach_cb?
 	 */
+	// 为发现的每个controller，收集nvme ssd 健康状态
 	ctrlr_entry = g_controllers;
 
 	while (ctrlr_entry) {

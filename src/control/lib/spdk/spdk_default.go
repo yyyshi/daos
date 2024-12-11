@@ -70,6 +70,7 @@ func rc2err(label string, rc C.int) error {
 // SPDK relies on an abstraction around the local environment
 // named env that handles memory allocation and PCI device operations.
 // The library must be initialized first.
+// 初始化spdk 运行环境
 func (ei *EnvImpl) InitSPDKEnv(log logging.Logger, opts *EnvOptions) error {
 	if ei == nil {
 		return errors.New("nil EnvImpl")

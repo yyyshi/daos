@@ -133,6 +133,7 @@ wipe_ctrlr(struct ctrlr_entry *centry)
 	res = init_wipe_res();
 
 	/** convert pci addr to string */
+	// 1. 地址转化为字符串
 	rc = spdk_pci_addr_fmt(res->ctrlr_pci_addr, sizeof(res->ctrlr_pci_addr),
 			       &centry->pci_addr);
 	if (rc != 0) {
@@ -141,6 +142,7 @@ wipe_ctrlr(struct ctrlr_entry *centry)
 	}
 
 	/** allocate NVMe queue pair for the controller */
+	// 2. 为controller 申请nvme qpair
 	qpair = spdk_nvme_ctrlr_alloc_io_qpair(centry->ctrlr, NULL, 0);
 	if (qpair == NULL) {
 		snprintf(res->info, sizeof(res->info), "spdk_nvme_ctrlr_alloc_io_qpair()\n");
@@ -149,6 +151,7 @@ wipe_ctrlr(struct ctrlr_entry *centry)
 	}
 
 	/** allocate a 4K page, with 4K alignment */
+	// 3. 申请4k 页，4k 对齐
 	buf =  spdk_dma_zmalloc(4096, 4096, NULL);
 	if (buf == NULL) {
 		snprintf(res->info, sizeof(res->info), "spdk_dma_zmalloc()\n");
@@ -160,6 +163,7 @@ wipe_ctrlr(struct ctrlr_entry *centry)
 	nentry = centry->nss;
 
 	/** iterate over the namespaces and wipe them out individually */
+	// 4. 遍历ns 并擦除
 	while (nentry != NULL) {
 		uint32_t sector_size;
 
@@ -180,6 +184,7 @@ wipe_ctrlr(struct ctrlr_entry *centry)
 		}
 
 		/** retrieve namespace ID and sector size */
+		// 4-1. 获取ns id 和扇区大小
 		res->ns_id = spdk_nvme_ns_get_id(nentry->ns);
 		sector_size = spdk_nvme_ns_get_sector_size(nentry->ns);
 
@@ -187,6 +192,7 @@ wipe_ctrlr(struct ctrlr_entry *centry)
 		data.ns_entry = nentry;
 
 		/** zero out the first 4K block */
+		// 4-2. 清零第一个4k blk
 		rc = spdk_nvme_ns_cmd_write(nentry->ns, qpair,
 					    buf, 0 /** LBA start */,
 					    4096 / sector_size /** #LBAS */,
@@ -198,6 +204,7 @@ wipe_ctrlr(struct ctrlr_entry *centry)
 		}
 
 		/** wait for command completion */
+		// 4-3. 等待命令执行完成
 		while (data.result == LBA0_WRITE_PENDING) {
 			rc = spdk_nvme_qpair_process_completions(qpair, 0);
 			if (rc < 0) {
@@ -255,7 +262,7 @@ wipe_ctrlrs(void)
 	return start;
 }
 
-// 用作擦除ns（逻辑扇区）
+// dmg storage format 命令中擦除ns（逻辑扇区）
 struct ret_t *
 nvme_wipe_namespaces(void)
 {
@@ -271,6 +278,7 @@ nvme_wipe_namespaces(void)
 	 * called for each controller after the SPDK NVMe driver has completed
 	 * initializing the controller we chose to attach.
 	 */
+	// todo: 还是使用自定义的cb 函数吗，怎么触发的spdk_bdev_register
 	rc = spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL);
 	if (rc < 0) {
 		snprintf(ret->info, sizeof(ret->info), "spdk_nvme_probe()\n");
@@ -284,6 +292,7 @@ nvme_wipe_namespaces(void)
 		goto out;
 	}
 
+	// 擦除控制器上的ns
 	ret->wipe_results = wipe_ctrlrs();
 	if (ret->wipe_results == NULL) {
 		snprintf(ret->info, sizeof(ret->info), "no namespaces on controller\n");

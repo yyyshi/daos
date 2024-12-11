@@ -45,8 +45,10 @@ func addMethodHandlers(app *pbin.App) {
 	app.AddHandler("ScmScan", &scmScanHandler{})
 	app.AddHandler("ScmPrepare", &scmPrepHandler{})
 
+	// 1. 设置大页和pci 设备绑定那些
 	app.AddHandler("BdevPrepare", &bdevPrepHandler{})
-	// func (h *bdevScanHandler) Handle，内部会执行spdk nvme discover
+	// func (h *bdevScanHandler) Handle
+	// 2. 内部会执行spdk nvme discover
 	app.AddHandler("BdevScan", &bdevScanHandler{})
 	app.AddHandler("BdevFormat", &bdevFormatHandler{})
 	app.AddHandler("BdevWriteConfig", &bdevWriteConfigHandler{})

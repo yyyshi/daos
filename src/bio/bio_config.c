@@ -429,6 +429,7 @@ add_traddrs_from_bdev_subsys(struct json_config_ctx *ctx, bool vmd_enabled,
 		D_GOTO(free_method, rc = -DER_INVAL);
 	}
 
+	// nvmf transport 地址最大长度
 	D_ALLOC(traddr, SPDK_NVMF_TRADDR_MAX_LEN + 1);
 	if (traddr == NULL)
 		D_GOTO(free_method, rc = -DER_NOMEM);

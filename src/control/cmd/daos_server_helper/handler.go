@@ -295,6 +295,7 @@ type bdevFormatHandler struct {
 	bdevHandler
 }
 
+// bdev 格式化
 func (h *bdevFormatHandler) Handle(log logging.Logger, req *pbin.Request) *pbin.Response {
 	if req == nil {
 		return getNilRequestResp()
@@ -307,6 +308,7 @@ func (h *bdevFormatHandler) Handle(log logging.Logger, req *pbin.Request) *pbin.
 
 	h.setupProvider(log)
 
+	// 格式化
 	fRes, err := h.bdevProvider.Format(fReq)
 	if err != nil {
 		return pbin.NewResponseWithError(err)

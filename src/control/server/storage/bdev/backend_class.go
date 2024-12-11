@@ -159,6 +159,7 @@ func writeJsonConfig(log logging.Logger, req *storage.BdevWriteConfigRequest) er
 		return err
 	}
 
+	// 将内容写到/mnt/daos/1/daos_nvme.json 文件中
 	if err := writeConfigFile(log, bytes.NewBuffer(buf), req); err != nil {
 		return err
 	}

@@ -431,5 +431,6 @@ func (cmd *scanNVMeCmd) Execute(_ []string) error {
 	}
 
 	cmd.Debugf("executing scan nvme command: %+v", cmd)
+	// scan 之前先执行 prepare
 	return cmd.scanNVMe(svc.NvmeScan, svc.NvmePrepare)
 }

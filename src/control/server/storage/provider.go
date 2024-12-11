@@ -436,6 +436,7 @@ func (p *Provider) UpdateScmFirmware(req ScmFirmwareUpdateRequest) (*ScmFirmware
 }
 
 // PrepareBdevs attempts to configure NVMe devices to be usable by DAOS.
+// prepare 尝试配置daos 需要使用的nvme dev
 func (p *Provider) PrepareBdevs(req BdevPrepareRequest) (*BdevPrepareResponse, error) {
 	resp, err := p.bdev.Prepare(req)
 
@@ -736,6 +737,7 @@ func (p *Provider) ScanBdevs(req BdevScanRequest) (*BdevScanResponse, error) {
 	defer p.RUnlock()
 
 	req.VMDEnabled = p.vmdEnabled
+	// func (p *Provider) Scan(
 	return p.bdev.Scan(req)
 }
 
