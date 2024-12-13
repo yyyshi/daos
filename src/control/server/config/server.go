@@ -399,6 +399,7 @@ func (cfg *Server) SetPath(inPath string) error {
 	return err
 }
 
+// active 配置文件：/var/run/daos_server/.daos_server.active.yml
 // SaveActiveConfig saves read-only active config, tries config dir then /tmp/.
 func (cfg *Server) SaveActiveConfig(log logging.Logger) {
 	activeConfig := filepath.Join(cfg.SocketDir, ConfigOut)
@@ -650,10 +651,12 @@ func (cfg *Server) Validate(log logging.Logger) (err error) {
 	}
 
 	// Set DisableVMD reference if unset in config file.
+	// 如果配置中没有默认为 vmd 开启
 	if cfg.DisableVMD == nil {
 		cfg.WithDisableVMD(false)
 	}
 
+	// 日志中：vfio=true hotplug=false vmd=true requested in config
 	log.Debugf("vfio=%v hotplug=%v vmd=%v requested in config", !cfg.DisableVFIO,
 		cfg.EnableHotplug, !(*cfg.DisableVMD))
 

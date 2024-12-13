@@ -689,6 +689,7 @@ type BdevForwarder struct {
 	NVMeFirmwareForwarder
 }
 
+// admin 转发器
 func NewBdevForwarder(log logging.Logger) *BdevForwarder {
 	return &BdevForwarder{
 		BdevAdminForwarder:    *NewBdevAdminForwarder(log),
@@ -701,7 +702,9 @@ type BdevAdminForwarder struct {
 	reqMutex sync.Mutex
 }
 
+// admin转发器
 func NewBdevAdminForwarder(log logging.Logger) *BdevAdminForwarder {
+	// "daos_server_helper"
 	pf := pbin.NewForwarder(log, pbin.DaosPrivHelperName)
 
 	return &BdevAdminForwarder{
@@ -720,6 +723,7 @@ func (f *BdevAdminForwarder) Scan(req BdevScanRequest) (*BdevScanResponse, error
 	req.Forwarded = true
 
 	res := new(BdevScanResponse)
+	// 发送bdevscan 命令给daos_admin(daos_server_helper)
 	if err := f.SendReq("BdevScan", req, res); err != nil {
 		return nil, err
 	}

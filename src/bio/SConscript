@@ -23,6 +23,8 @@ def scons():
     denv.AppendUnique(OBJPREFIX='b_')
 
     # SPDK related libs
+    # libbio.so 依赖spdk 的库
+    # 所在目录:/opt/daos/prereq/release/spdk/lib# ll *.so
     libs = ['spdk_log', 'spdk_env_dpdk', 'spdk_thread', 'spdk_bdev', 'rte_mempool']
     libs += ['rte_mempool_ring', 'rte_bus_pci', 'rte_pci', 'rte_ring']
     libs += ['rte_mbuf', 'rte_eal', 'rte_kvargs', 'spdk_bdev_aio']

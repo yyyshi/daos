@@ -25,6 +25,7 @@ import (
 // StorageControlService encapsulates the storage part of the control service
 type StorageControlService struct {
 	log             logging.Logger
+	// provider 包含多种类型的抽象类
 	storage         *storage.Provider
 	instanceStorage map[uint32]*storage.Config
 	getMemInfo      common.GetMemInfoFn
@@ -58,6 +59,7 @@ func (scs *StorageControlService) WithVMDEnabled() *StorageControlService {
 }
 
 // NewStorageControlService returns an initialized *StorageControlService
+// 构建最外层的service
 func NewStorageControlService(log logging.Logger, ecs []*engine.Config) *StorageControlService {
 	topCfg := &storage.Config{
 		Tiers: nil,
@@ -70,9 +72,11 @@ func NewStorageControlService(log logging.Logger, ecs []*engine.Config) *Storage
 		instanceStorage[uint32(i)] = &c.Storage
 	}
 
+	// 构建scs
 	return &StorageControlService{
 		log:             log,
 		instanceStorage: instanceStorage,
+		// 使用默认的provider
 		storage:         storage.DefaultProvider(log, 0, topCfg),
 		getMemInfo:      common.GetMemInfo,
 	}

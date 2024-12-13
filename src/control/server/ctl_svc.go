@@ -16,6 +16,7 @@ import (
 
 // ControlService implements the control plane control service, satisfying
 // ctlpb.CtlSvcServer, and is the data container for the service.
+// 控制层服务
 type ControlService struct {
 	ctlpb.UnimplementedCtlSvcServer
 	StorageControlService

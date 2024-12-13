@@ -31,6 +31,7 @@ def build_vos(env, standalone):
     denv.Install('$PREFIX/lib64/daos_srv', vos)
 
 
+# libvos_size.so 依赖libbio.so
 def build_vos_internal(env):
     """build vos internal"""
     denv = env.Clone()

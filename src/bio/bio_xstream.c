@@ -100,6 +100,7 @@ static struct bio_nvme_data nvme_glb;
 static int
 bio_spdk_env_init(void)
 {
+	// 构建spdk opt
 	struct spdk_env_opts	opts;
 	bool			enable_rpc_srv = false;
 	int			rc;
@@ -123,6 +124,7 @@ bio_spdk_env_init(void)
 	// == true
 	if (bio_nvme_configured(SMD_DEV_TYPE_MAX)) {
 		// 传递allowed bdev pci 地址给spdk，即将nvme addr 添加到opts 的allowlist 中
+		// nvme 类型的bdev，创建命令是conf 中的 attach controller
 		rc = bio_add_allowed_alloc(nvme_glb.bd_nvme_conf, &opts, &roles);
 		if (rc != 0) {
 			D_ERROR("Failed to add allowed devices to SPDK env, "DF_RC"\n",
@@ -483,6 +485,7 @@ struct common_cp_arg {
 static void
 common_prep_arg(struct common_cp_arg *arg)
 {
+	// 设置一个 inflight
 	arg->cca_inflights = 1;
 	arg->cca_rc = 0;
 	arg->cca_bs = NULL;
@@ -491,6 +494,7 @@ common_prep_arg(struct common_cp_arg *arg)
 static void
 common_init_cb(void *arg, int rc)
 {
+	// rpc 执行成功或者超时后，inflight 自减
 	struct common_cp_arg *cp_arg = arg;
 
 	D_ASSERT(cp_arg->cca_inflights == 1);
@@ -1732,13 +1736,17 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		common_prep_arg(&cp_arg);
 		// 这里用的是全局的nvme conf 文件，每个engine 有自己单独的
 		// spdk 中子系统其实就是模块的意思，比如子系统名字为bdev，表示bdev 模块
+		// 这里面会调用 spdk_rpc_initialize，会启动rpc 服务监听
 		spdk_subsystem_init_from_json_config(nvme_glb.bd_nvme_conf,
 						     SPDK_DEFAULT_RPC_ADDR,
 						     subsys_init_cb, &cp_arg,
 						     true);
+		// init from json 会注册 rpc_subsystem_poll，rpc_client_connect_poller，用于接收rpc 请求
+		// 这里是为了等待rpc req 被处理完，或者req 超时
 		rc = xs_poll_completion(ctxt, &cp_arg.cca_inflights, 0);
 		D_ASSERT(rc == 0);
 
+		// 初始化失败了
 		if (cp_arg.cca_rc != 0) {
 			rc = cp_arg.cca_rc;
 			D_ERROR("failed to init bdevs, rc:%d\n", rc);
@@ -1746,14 +1754,21 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		}
 
 		/* Continue poll until no more events */
-		// todo: 这里是为啥
+		// 这个时间点:
+		// 1. 不会有其他xs，所有没人给这个 init_thread 通过 spdk_thread_send_msg 发meg
+		// 2. 所以只能是处理已经注册过的poller：rpc_subsystem_poll，rpc_client_connect_poller
+		// 1-1: spdk_subsystem_init_from_json_config --> spdk_rpc_initialize --> rpc_subsystem_poll --> spdk_rpc_accept  ---> spdk_jsonrpc_server_poll: 检查监听的socket，处理连接
+		// 2-2: spdk_subsystem_init_from_json_config --> rpc_client_connect_poller --> spdk_jsonrpc_client_poll  --> jsonrpc_client_poll / jsonrpc_client_poll_connecting
+		//  return 1 if work was done. 0 if no work was done.
+		// 返回0表示轮询成功，但是没有处理任何事件；返回>0 表示轮询成功，且处理了n 个事件；返回 <0 表示轮询失败
+		// 这里是loop 直到所有的事件都被处理完
 		while (spdk_thread_poll(ctxt->bxc_thread, 0, 0) > 0)
 			;
 		// 这个日志会打印，tgt_id 为 0
-		// todo: 什么样才算初始化完成，此时可以通过 spdk_bdev_first 拿到spdk bdev 了吗？
+		// 初始化完成，此时可以通过 spdk_bdev_first 拿到spdk bdev 了
 		D_DEBUG(DB_MGMT, "SPDK bdev initialized, tgt_id:%d", tgt_id);
 
-		// 将spdk thread 设置到全局数据中，表示在众多（每个xs 有各自的spdk thread）的thread 中，当前是扫描bdev那个
+		// 将spdk thread 设置到全局数据中，表示在众多（每个xs 有各自的spdk thread）的thread 中，当前是初始化的那个
 		nvme_glb.bd_init_thread = ctxt->bxc_thread;
 	
 		// 内部会load_blobstore 最终创建spdk bs，只有target 0 会执行
@@ -1764,7 +1779,10 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 			goto out;
 		}
 
-		// bio bdev 初始化完成后，重启spdk rpc server。rpc 默认是禁用的
+		// 上面 spdk_subsystem_init_from_json_config 中会通过调用 spdk_rpc_initialize 自动开启rpc 监听
+		// 用于处理json 文件中配置的method，其中 nvme_attach_controller 会1. 创建nvme ctrlr 2. 添加ns 到nvme ctrlr 3. 注册spdk nvme bdev
+		// 在 init_bio_bdevs 函数执行之前，spdk nvme bdev 注册已经完成（通过nvme_attach_controller 对应的mapping 函数，走的rpc 流程）
+		// 当 bio bdev 初始化完成后，重启spdk rpc server，这里是false，所以不用重启
 		/* After bio_bdevs are initialized, restart SPDK JSON-RPC server if required. */
 		// 默认是false
 		if (nvme_glb.bd_enable_rpc_srv) {

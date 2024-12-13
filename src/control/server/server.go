@@ -69,8 +69,10 @@ func processConfig(log logging.Logger, cfg *config.Server, fis *hardware.FabricI
 		}
 	}
 
+	// 保存active 配置文件：/var/run/daos_server/.daos_server.active.yml
 	cfg.SaveActiveConfig(log)
 
+	// 设置daos server helper 的env
 	if err := setDaosHelperEnvs(cfg, osSetenv); err != nil {
 		return err
 	}
@@ -195,11 +197,14 @@ func (srv *server) createServices(ctx context.Context) (err error) {
 	if err != nil {
 		return
 	}
+	// todo: mb
 	srv.membership = system.NewMembership(srv.log, srv.sysdb)
 
 	// Create rpcClient for inter-server communication.
+	// todo: 哪个rpc
 	cliCfg := control.DefaultConfig()
 	cliCfg.TransportConfig = srv.cfg.TransportConfig
+	// 客户端作用
 	rpcClient := control.NewClient(
 		control.WithClientComponent(build.ComponentServer),
 		control.WithConfig(cliCfg),
@@ -208,12 +213,14 @@ func (srv *server) createServices(ctx context.Context) (err error) {
 	// Create event distribution primitives.
 	srv.pubSub = events.NewPubSub(ctx, srv.log)
 	srv.OnShutdown(srv.pubSub.Close)
+	// todo: 事件转发
 	srv.evtForwarder = control.NewEventForwarder(rpcClient, srv.cfg.AccessPoints)
 	srv.evtLogger = control.NewEventLogger(srv.log)
 
-	// nvme 的控制器服务，prepare 和scan 请求都会通过这个控制器服务来完成
+	// 1. 控制层服务，prepare 和scan 请求都会通过这个控制器服务来完成
 	srv.ctlSvc = NewControlService(srv.log, srv.harness, srv.cfg, srv.pubSub,
 		hwprov.DefaultFabricScanner(srv.log))
+	// 2. 管理层服务
 	srv.mgmtSvc = newMgmtSvc(srv.harness, srv.membership, srv.sysdb, rpcClient, srv.pubSub)
 
 	if err := srv.mgmtSvc.systemProps.UpdateCompPropVal(daos.SystemPropertyDaosSystem, func() string {
@@ -336,6 +343,7 @@ func (srv *server) addEngines(ctx context.Context) error {
 
 	// Retrieve NVMe device details (before engines are started) so static details can be
 	// recovered by the engine storage provider(s) during scan even if devices are in use.
+	// 获取nvme 设备的详细信息
 	nvmeScanResp, err := scanBdevStorage(srv)
 	if err != nil {
 		return err
@@ -594,6 +602,7 @@ func Start(log logging.Logger, cfg *config.Server) error {
 		return errors.Wrapf(err, "retrieve system memory info")
 	}
 
+	// 处理配置文件
 	if err = processConfig(log, cfg, fis, mi, lookupIF, genFiAffFn(fis)); err != nil {
 		return err
 	}
@@ -604,6 +613,8 @@ func Start(log logging.Logger, cfg *config.Server) error {
 	if err != nil {
 		return err
 	}
+
+	// 日志：fault domain: /server01。配置文件中没配置，默认是host 级别
 	log.Debugf("fault domain: %s", faultDomain.String())
 
 	// 根据容错域和配置信息新建server

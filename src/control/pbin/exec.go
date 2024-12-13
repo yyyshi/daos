@@ -122,6 +122,8 @@ func ReadMessage(conn io.Reader) ([]byte, error) {
 
 // ExecReq executes the supplied Request by starting a child process
 // to service the request. Returns a Response if successful.
+// 开启一个子协程执行转发命令
+// binPath 为 "daos_server_helper"
 func ExecReq(parent context.Context, log logging.Logger, binPath string, req *Request) (res *Response, err error) {
 	if req == nil {
 		return nil, errors.New("nil request")
@@ -130,6 +132,7 @@ func ExecReq(parent context.Context, log logging.Logger, binPath string, req *Re
 	ctx, killChild := context.WithCancel(parent)
 	defer killChild()
 
+	// 传入bin，调用go api
 	child := exec.CommandContext(ctx, binPath)
 	child.Stderr = &cmdLogger{
 		logFn:  log.Error,
@@ -160,12 +163,14 @@ func ExecReq(parent context.Context, log logging.Logger, binPath string, req *Re
 	defer func() {
 		// If there was an error, kill the child so that it can't
 		// hang around waiting for input.
+		// 出错时，主动kill child
 		if err != nil {
 			killChild()
 			return
 		}
 
 		// Otherwise, the child should exit normally.
+		// 成功时，child 会自动退出
 		err = child.Wait()
 	}()
 

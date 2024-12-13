@@ -66,6 +66,7 @@ func (br *batchRequest) sendResponse(parent context.Context, msg proto.Message, 
 
 // mgmtSvc implements (the Go portion of) Management Service, satisfying
 // mgmtpb.MgmtSvcServer.
+// go 语言部分的管理服务
 type mgmtSvc struct {
 	mgmtpb.UnimplementedMgmtSvcServer
 	log               logging.Logger

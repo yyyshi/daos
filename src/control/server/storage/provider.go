@@ -51,6 +51,9 @@ func DefaultProvider(log logging.Logger, idx int, engineStorage *Config) *Provid
 	if engineStorage == nil {
 		engineStorage = new(Config)
 	}
+
+	// 参数6 为转发器
+	// func NewProvider(log logging.Logger, idx int, engineStorage *Config, sys SystemProvider, scm ScmProvider, bdev BdevProvider, meta MetadataProvider)
 	return NewProvider(log, idx, engineStorage, system.DefaultProvider(),
 		NewScmForwarder(log), NewBdevForwarder(log), NewMetadataForwarder(log))
 }
@@ -732,12 +735,15 @@ func (p *Provider) ScanBdevTiers(direct bool) (results []BdevTierScanResult, err
 
 // ScanBdevs calls into bdev storage provider to scan SSDs, always bypassing cache.
 // Function should not be called when engines have been started and SSDs have been claimed by SPDK.
+// 类似c++多态，不同的provider 执行不同的scan 函数
 func (p *Provider) ScanBdevs(req BdevScanRequest) (*BdevScanResponse, error) {
 	p.RLock()
 	defer p.RUnlock()
 
+	// vmd 默认是enable
 	req.VMDEnabled = p.vmdEnabled
-	// func (p *Provider) Scan(
+	// func (p *Provider) Scan(  --> func (sb *spdkBackend) Scan(req storage.BdevScanRequest) (
+	// 开始scan，具体bdev 是不是NewBdevForwarder，就要看provider 的类型了，类似多态的效果
 	return p.bdev.Scan(req)
 }
 
@@ -803,6 +809,7 @@ func NewProvider(log logging.Logger, idx int, engineStorage *Config, sys SystemP
 		engineStorage: engineStorage,
 		Sys:           sys,
 		scm:           scm,
+		// NewBdevForwarder 转发器
 		bdev:          bdev,
 		metadata:      meta,
 	}

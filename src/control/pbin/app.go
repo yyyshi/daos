@@ -86,6 +86,7 @@ func (a *App) configureLogging(logPath string) {
 
 // WithAllowedCallers adds a list of process names allowed to call this
 // application.
+// 添加一个列表，允许调用当前app
 func (a *App) WithAllowedCallers(callers ...string) *App {
 	a.allowedCallers = callers
 	return a
@@ -123,7 +124,7 @@ func (a *App) logError(err error) error {
 }
 
 // Run executes the helper application process.
-
+// 执行helper app
 func (a *App) Run() error {
 	parentName, err := a.process.ParentProcessName()
 	if err != nil {
@@ -153,6 +154,7 @@ func (a *App) Run() error {
 		return a.logError(err)
 	}
 
+	// 处理请求
 	resp := a.handleRequest(req)
 
 	err = a.writeResponse(resp, conn)
@@ -206,6 +208,7 @@ func (a *App) readRequest(rdr io.Reader) (*Request, error) {
 }
 
 func (a *App) handleRequest(req *Request) *Response {
+	// 按照名字获取hdl
 	reqHandler, ok := a.handlers[req.Method]
 	if !ok {
 		err := a.logError(errors.Errorf("unhandled method %q", req.Method))

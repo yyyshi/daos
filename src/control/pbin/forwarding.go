@@ -20,6 +20,7 @@ import (
 
 type (
 	// Forwarder provides a common implementation of a request forwarder.
+	// 提供通用的请求转发功能
 	Forwarder struct {
 		Disabled bool
 
@@ -57,6 +58,7 @@ func NewForwarder(log logging.Logger, pbinName string) *Forwarder {
 }
 
 // GetBinaryName returns the name of the binary requests will be forwarded to.
+// 获取请求要转发到的二进制程序名字，这里是转给daos_server_helper
 func (f *Forwarder) GetBinaryName() string {
 	return f.pbinName
 }
@@ -74,6 +76,7 @@ func (f *Forwarder) CanForward() bool {
 // SendReq is responsible for marshaling the forwarded request into a message
 // that is sent to the privileged binary, then unmarshaling the response for
 // the caller.
+// 负责转发给又特权的 daos_server_helper
 func (f *Forwarder) SendReq(method string, fwdReq interface{}, fwdRes interface{}) error {
 	if fwdReq == nil {
 		return errors.New("nil request")
@@ -82,6 +85,7 @@ func (f *Forwarder) SendReq(method string, fwdReq interface{}, fwdRes interface{
 		return errors.New("nil response")
 	}
 
+	// 找daos_server_helper
 	pbinPath, err := common.FindBinary(f.pbinName)
 	if err != nil {
 		return err
@@ -92,12 +96,15 @@ func (f *Forwarder) SendReq(method string, fwdReq interface{}, fwdRes interface{
 		return errors.Wrap(err, "failed to marshal forwarded request as payload")
 	}
 
+	// 构建req
 	req := &Request{
 		Method:  method,
 		Payload: payload,
 	}
 
 	ctx := context.TODO()
+	// 抓发执行cmd
+	// pbinPath 为daos_server_helper
 	res, err := ExecReq(ctx, f.log, pbinPath, req)
 	if err != nil {
 		if fault.IsFault(err) {

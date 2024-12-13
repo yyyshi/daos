@@ -356,6 +356,13 @@ func groomDiscoveredBdevs(reqDevs *hardware.PCIAddressSet, discovered storage.Nv
 
 // Scan discovers NVMe controllers accessible by SPDK.
 // scan 将发现nvme controller
+// 这行日志在daos_admin.log 中打印
+// todo: 这里vmd enable 为啥变成false 了
+/*
+root@server01:~# cat /tmp/daos_admin.log | grep 'spdk backend scan'
+DEBUG 10:54:22.167713 backend.go:330: spdk backend scan (bindings discover call): {ForwardableRequest:{Forwarded:true} DeviceList:0000:65:00.0,0000:66:00.0,0000:67:00.0,0000:68:00.0,0000:e3:00.0,0000:e4:00.0,0000:e5:00.0,0000:e6:00.0 VMDEnabled:false BypassCache:false}
+DEBUG 09:21:10.103772 backend.go:330: spdk backend scan (bindings discover call): {ForwardableRequest:{Forwarded:true} DeviceList:0000:65:00.0,0000:66:00.0,0000:67:00.0,0000:68:00.0,0000:e3:00.0,0000:e4:00.0,0000:e5:00.0,0000:e6:00.0 VMDEnabled:false BypassCache:false}
+*/
 func (sb *spdkBackend) Scan(req storage.BdevScanRequest) (*storage.BdevScanResponse, error) {
 	sb.log.Debugf("spdk backend scan (bindings discover call): %+v", req)
 

@@ -370,8 +370,10 @@ func prepBdevStorage(srv *server, iommuEnabled bool) error {
 }
 
 // scanBdevStorage performs discovery and validates existence of configured NVMe SSDs.
+// scan 操作用于发现和检查conf 中指定的nvme 是否存在
 func scanBdevStorage(srv *server) (*storage.BdevScanResponse, error) {
-	// 执行dmg storage scan 时会打印
+	// 1. 执行dmg storage scan 时会打印
+	// 2. server 启动时候自动会去scan，也会打印，from func addEngines
 	defer srv.logDuration(track("time to scan bdev storage"))
 
 	if srv.cfg.DisableHugepages {
@@ -379,6 +381,7 @@ func scanBdevStorage(srv *server) (*storage.BdevScanResponse, error) {
 		return &storage.BdevScanResponse{}, nil
 	}
 
+	// 执行scan
 	nvmeScanResp, err := srv.ctlSvc.NvmeScan(storage.BdevScanRequest{
 		DeviceList: getBdevCfgsFromSrvCfg(srv.cfg).Bdevs(),
 	})

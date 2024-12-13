@@ -839,6 +839,34 @@ metrics_region_size(int num_tgts)
 	return (est_std_metrics + est_tgt_metrics * num_tgts) * D_TM_METRIC_SIZE;
 }
 
+// daos 的libbio.so 依赖的部分spdk 模块
+// 1. spdk_bdev
+// 2. spdk_bdev_nvme
+// 3. spdk_nvme
+// 4. spdk_vmd
+// 5. spdk_event_bdev
+/*
+daos 等bdev 创建命令是daos_xxx_create，而nvme 类型创建命令是：bdev_nvme_attach_controller
+p = subparsers.add_parser('bdev_nvme_attach_controller', aliases=['construct_nvme_bdev']
+root@server02:/opt/daos/prereq/release/spdk/lib# ldd libspdk_bdev.so
+        linux-vdso.so.1 (0x00007ffeb66ab000)
+        libspdk_log.so.4.1 => /opt/daos/prereq/release/spdk/lib/libspdk_log.so.4.1 (0x00007fb6bcfb9000)
+        libspdk_util.so.4.1 => /opt/daos/prereq/release/spdk/lib/libspdk_util.so.4.1 (0x00007fb6bcfa6000)
+        libspdk_thread.so.6.1 => /opt/daos/prereq/release/spdk/lib/libspdk_thread.so.6.1 (0x00007fb6bcf97000)
+        libspdk_json.so.3.3 => /opt/daos/prereq/release/spdk/lib/libspdk_json.so.3.3 (0x00007fb6bcf8b000)
+        libspdk_jsonrpc.so.3.0 => /opt/daos/prereq/release/spdk/lib/libspdk_jsonrpc.so.3.0 (0x00007fb6bcf81000)
+        libspdk_rpc.so.3.0 => /opt/daos/prereq/release/spdk/lib/libspdk_rpc.so.3.0 (0x00007fb6bcf78000)
+        libspdk_notify.so.3.0 => /opt/daos/prereq/release/spdk/lib/libspdk_notify.so.3.0 (0x00007fb6bcf32000)
+        libspdk_trace.so.5.1 => /opt/daos/prereq/release/spdk/lib/libspdk_trace.so.5.1 (0x00007fb6bcf29000)
+        libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fb6bcd22000)
+        libuuid.so.1 => /lib/x86_64-linux-gnu/libuuid.so.1 (0x00007fb6bcd19000)
+        libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fb6bcbca000)
+        /lib64/ld-linux-x86-64.so.2 (0x00007fb6bcfe1000)
+        libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fb6bcba3000)
+        librt.so.1 => /lib/x86_64-linux-gnu/librt.so.1 (0x00007fb6bcb99000)
+        libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007fb6bcb76000)
+
+*/
 static int
 server_init(int argc, char *argv[])
 {

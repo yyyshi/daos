@@ -230,7 +230,6 @@ type bdevHandler struct {
 	bdevProvider *bdev.Provider
 }
 
-// todo: provider 怎么理解
 func (h *bdevHandler) setupProvider(log logging.Logger) {
 	if h.bdevProvider == nil {
 		// 调用了bdev 包下的 DefaultProvider。对应的后端是 spdkbackend
@@ -257,6 +256,7 @@ func (h *bdevScanHandler) Handle(log logging.Logger, req *pbin.Request) *pbin.Re
 	// bdev scan 外层函数，内部通过 bdev 包下的 setupProvider 最终使用spdkbackend
 	h.setupProvider(log)
 
+	// helper app 收到请求，构建provider 调用scan
 	sRes, err := h.bdevProvider.Scan(sReq)
 	if err != nil {
 		return pbin.NewResponseWithError(err)

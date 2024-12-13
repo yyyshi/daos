@@ -13,6 +13,7 @@ import (
 )
 
 func main() {
+	// daos_server 可以调用daos_server_helper
 	app := pbin.NewApp().
 		WithAllowedCallers("daos_server")
 
