@@ -886,6 +886,8 @@ insert:
 	// 复制客户端传递来的epoch
 	id.id_epoch = id_in->id_epoch;
 	// 将id 添加到 ilog 中（注册 record）
+	// 配合Fig_066.png，这里就是将ilog（也就是png 中的 record）添加到active entry 的成员中
+	// active entry 添加到tree 是在dtx_attach 中完成的
 	rc = ilog_log_add(lctx, &id);
 	if (rc != 0)
 		return rc;
@@ -1342,9 +1344,12 @@ ilog_fetch(struct umem_instance *umm, struct ilog_df *root_df,
 
 	root = (struct ilog_root *)root_df;
 
+	// todo: 这里的cache 是什么含义
 	if (ilog_fetch_cached(umm, root, cbs, intent, has_cond, entries)) {
+		// 不存在的话就直接返回 notexist
 		if (priv->ip_rc == -DER_NONEXIST)
 			return priv->ip_rc;
+		// 其他错误
 		if (priv->ip_rc < 0) {
 			D_ASSERT(priv->ip_rc != -DER_INPROGRESS);
 			/* Don't cache error return codes */

@@ -316,6 +316,7 @@ struct bio_bdev {
 	struct spdk_bdev_desc	*bb_desc;
 	struct bio_blobstore	*bb_blobstore;
 	/* count of target(VOS xstream) per device */
+	// 当前设备上分配的target 个数
 	int			 bb_tgt_cnt;
 	/*
 	 * If a VMD LED identify event takes place with a prescribed duration, the end time will be
@@ -378,6 +379,7 @@ struct bio_xs_blobstore {
 	/* In-flight blob read/write */
 	unsigned int		 bxb_blob_rw;
 	/* spdk io channel */
+	// 当前bio bs 的chan
 	struct spdk_io_channel	*bxb_io_channel;
 	/* per bio blobstore */
 	// bio 模块的blobstore

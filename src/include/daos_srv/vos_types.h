@@ -67,12 +67,16 @@ enum dtx_entry_flags {
 	DTE_PARTIAL_COMMITTED	= (1 << 5),
 };
 
+// dtx 记录，参考Fig_066.png 中punch akey 和update extent 流程
 struct dtx_entry {
 	/** The identifier of the DTX. */
+	// dtx 的唯一标识
 	struct dtx_id			 dte_xid;
 	/** The pool map version when the DTX happened. */
+	// 事务发生时的pool map 版本
 	uint32_t			 dte_ver;
 	/** The reference count. */
+	// 引用计数
 	uint32_t			 dte_refs;
 	/** The DAOS targets participating in the DTX. */
 	// 此次事务参与的targets

@@ -42,7 +42,7 @@ struct dtx_handle {
 			/** Match dtx_entry::dte_refs. */
 			uint32_t		 dth_refs;
 			/** The DTX participants information. */
-			// 事务参与者的信息
+			// 事务参与者的信息，即target 信息
 			struct dtx_memberships	*dth_mbs;
 		};
 	};

@@ -191,8 +191,10 @@ struct vos_dtx_act_ent_df {
 	/** DTX flags, see enum dtx_mbs_flags. */
 	uint16_t			dae_mbs_flags;
 	/** The inlined dtx records. */
+	// record 数组
 	umem_off_t			dae_rec_inline[DTX_INLINE_REC_CNT];
 	/** The DTX records count, including inline case. */
+	// 保存的dtx record 个数，包含base
 	uint32_t			dae_rec_cnt;
 	/** For 64-bits alignment. */
 	uint32_t			dae_ver;

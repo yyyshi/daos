@@ -514,8 +514,8 @@ dss_srv_handler(void *arg)
 		goto crt_destroy;
 	}
 
-	// 第一个xs 以及main xs时： dss_xstream_has_nvme 为true
-	// todo: 第一个xs 有什么特殊吗？
+	// 只有main xs 会进到 if
+	// sys xs 和helper xs 不会进入
 	if (dss_xstream_has_nvme(dx)) {
 		ABT_thread_attr attr;
 
@@ -523,6 +523,8 @@ dss_srv_handler(void *arg)
 		// 初始化main xs 的nvme ctx
 		// bio_xsctxt_alloc 函数内部会创建blobstore
 		// dmi 是tls 信息，每个线程有各自的值，互相不冲突，即每个main xs 有各自的 dmi_nvme_ctxt 信息
+		// 这里的dmi_tgt_id 范围为 0 - 19，所以不会出现 BIO_SYS_TGT_ID
+		// 20 个target 中的第一个对应的thread 为 init_thread
 		rc = bio_xsctxt_alloc(&dmi->dmi_nvme_ctxt,
 				      dmi->dmi_tgt_id < 0 ? BIO_SYS_TGT_ID : dmi->dmi_tgt_id,
 				      false);

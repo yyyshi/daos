@@ -2699,7 +2699,7 @@ abort:
 	if (err == 0)
 		vos_ts_set_wupdate(ioc->ic_ts_set, ioc->ic_epr.epr_hi);
 
-	// vos dtx 结束
+	// vos dtx 结束，内部会设置dtx 为prepared 状态
 	err = vos_tx_end(ioc->ic_cont, dth, &ioc->ic_rsrvd_scm,
 			 &ioc->ic_blk_exts, tx_started, ioc->ic_biod, err);
 	if (err == 0)

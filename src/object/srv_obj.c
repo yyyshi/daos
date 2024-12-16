@@ -3878,6 +3878,7 @@ comp:
 }
 
 /* Handle the punch requests on the leader */
+// punch dkey 服务端
 void
 ds_obj_punch_handler(crt_rpc_t *rpc)
 {

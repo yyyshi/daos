@@ -783,6 +783,7 @@ dtx_epoch_bound(struct dtx_epoch *epoch)
  */
 #define DTX_SUB_MOD_MAX	(((uint16_t)-1) - 2)
 
+// 初始化dth 的多个列表，包含committed，active 列表等
 static void
 dtx_shares_init(struct dtx_handle *dth)
 {
@@ -869,6 +870,7 @@ dtx_handle_init(struct dtx_id *dti, daos_handle_t coh, struct dtx_epoch *epoch,
 	}
 	dth->dth_modification_cnt = sub_modification_cnt;
 
+	// 初始化dth 的多个列表
 	dtx_shares_init(dth);
 
 	dth->dth_xid = *dti;
@@ -1161,6 +1163,7 @@ dtx_leader_begin(daos_handle_t coh, struct dtx_id *dti,
 	dth = &dlh->dlh_handle;
 	// 根据epoch 设置dth 的epoch
 	// 将cos list 直接填充到dth 里
+	// 将初始化dth 的多个列表
 	rc = dtx_handle_init(dti, coh, epoch, sub_modification_cnt, pm_ver,
 			     leader_oid, dti_cos, dti_cos_cnt, mbs, true,
 			     (flags & DTX_SOLO) ? true : false,
@@ -1525,7 +1528,8 @@ dtx_begin(daos_handle_t coh, struct dtx_id *dti,
 		return -DER_NOMEM;
 
 	// 初始化句柄
-	// dth 的epoch 根据上游传递来的epoch 设置 
+	// dth 的epoch 根据上游传递来的epoch 设置
+	// 这里面将初始化dth 的多个列表，如committed，active 列表
 	rc = dtx_handle_init(dti, coh, epoch, sub_modification_cnt,
 			     pm_ver, leader_oid, dti_cos, dti_cos_cnt, mbs,
 			     false, false, false,

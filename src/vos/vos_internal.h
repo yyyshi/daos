@@ -327,6 +327,7 @@ struct vos_container {
 	// 1. 有两个hdl，分别表示两棵树的hdl
 	/* The handle for active DTX table */
 	// active 的dtx b+ 树
+	// 这个是 Fig_066.png 中的active tree
 	daos_handle_t		vc_dtx_active_hdl;
 	/* The handle for committed DTX table */
 	// committed 的dtx b+ 树
@@ -379,16 +380,21 @@ struct vos_container {
 	unsigned int		vc_open_count;
 };
 
+// 表示vos active 记录的数据结构
 struct vos_dtx_act_ent {
+	// 起始地址
 	struct vos_dtx_act_ent_df	 dae_base;
 	umem_off_t			 dae_df_off;
 	struct vos_dtx_blob_df		*dae_dbd;
 	/* More DTX records if out of the inlined buffer. */
+	// entry 下的records
+	// 配合Fig_066.png 食用
 	umem_off_t			*dae_records;
 	/* The capacity of dae_records, NOT including the inlined buffer. */
 	int				 dae_rec_cap;
 
 	/* The count of objects that are modified by this DTX. */
+	// 当前dtx 修改的obj 个数
 	int				 dae_oid_cnt;
 
 	/* The single object OID if it is different from 'dae_base::dae_oid'. */
@@ -736,6 +742,7 @@ vos_dtx_ent_state(uint32_t entry, struct vos_container *cont, daos_epoch_t epoch
  *
  * \return		0 on success and negative on failure.
  */
+// 将record 注册到dtx entry 中
 int
 vos_dtx_register_record(struct umem_instance *umm, umem_off_t record,
 			uint32_t type, uint32_t *tx_id);
@@ -766,9 +773,11 @@ vos_dtx_deregister_record(struct umem_instance *umm, daos_handle_t coh,
  *
  * \return		0 on success and negative on failure.
  */
+// dtx 准备。本地将dtx 设置为 prepared 状态
 int
 vos_dtx_prepared(struct dtx_handle *dth, struct vos_dtx_cmt_ent **dce_p);
 
+// dtx 提交
 int
 vos_dtx_commit_internal(struct vos_container *cont, struct dtx_id dtis[],
 			int count, daos_epoch_t epoch, bool rm_cos[],

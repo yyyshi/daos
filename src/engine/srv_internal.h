@@ -371,11 +371,13 @@ static inline bool
 dss_xstream_has_nvme(struct dss_xstream *dx)
 {
 
-	// 如果是main xs，直接返回true
+	// 1. 如果是main xs，直接返回true（sys xs 和helper xs 之间的都是main xs，对应20 个target）
 	if (dx->dx_main_xs != 0)
 		return true;
 	// 不是main xs，但满足 meta 类型role 在配置文件中配置 && 当前是第一个xs。也返回true
 	// 一共有三种类型的role（data/meta/wal）
+	// 2. 当前是没有配置meta 的，meta 场景参考daos_server_mdonssd.yml 配置文件
+	// 综上，只有main xs 才会返回true
 	if (bio_nvme_configured(SMD_DEV_TYPE_META) && dx->dx_xs_id == 0)
 		return true;
 

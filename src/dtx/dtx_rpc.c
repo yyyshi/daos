@@ -1075,6 +1075,8 @@ next:
 	// 处理 head 列表。根据head 表通过rpc 获取三个list 的信息
 	if (len > 0) {
 		// 构造dtx refresh rpc，请求cmt，abt，act 三个list
+		// 发送rpc 请求返回三个list
+		// 服务端接口为 dtx_srv.c::dtx_handler(crt_rpc_t *rpc)
 		rc = dtx_rpc_prep(cont, &head, NULL, len, DTX_REFRESH, 0,
 				  cmt_list, abt_list, act_list, &dca);
 		// 等待上边rpc 处理结果

@@ -272,7 +272,6 @@ vos_ilog_fetch_internal(struct umem_instance *umm, daos_handle_t coh, uint32_t i
 
 	vos_ilog_desc_cbs_init(&cbs, coh);
 	// 查询ilog。info 为入参 + 出参
-	// todo: ilog 的单位是什么粒度的，pool 吗，cont 吗，obj 吗
 	rc = ilog_fetch(umm, ilog, &cbs, intent, has_cond, &info->ii_entries);
 	// 如果不存在就去创建一个，初始化并返回
 	if (rc == -DER_NONEXIST)
@@ -282,7 +281,7 @@ vos_ilog_fetch_internal(struct umem_instance *umm, daos_handle_t coh, uint32_t i
 		return rc;
 	}
 
-	// todo: 这里有问题，如果fetch 成功，不应该再执行init 了吧
+	// 如果fetch ilog entry 成功，继续init 其他字段
 init:
 	info->ii_uncommitted = 0;
 	info->ii_create = 0;

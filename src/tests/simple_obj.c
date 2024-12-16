@@ -347,6 +347,10 @@ example_daos_key_array()
 		/** punch/remove 1 akey */
 		sprintf(dkey_str, "dkey_%d", 2);
 		d_iov_set(&dkey, dkey_str, strlen(dkey_str));
+		// punch hole通常用于稀疏文件场景，使用punch hole 清理不再使用的区域，释放物理磁盘空间
+		// 逻辑视图：[数据][空洞][数据][空洞]
+		// 物理视图：[数据]      [数据]
+		// 核心原理就是跳过零值区域，未分配的部分不实际存储
 		rc = daos_obj_punch_dkeys(oh, DAOS_TX_NONE, 0, 1, &dkey, NULL);
 		ASSERT(rc == 0, "object punch failed with %d", rc);
 	}

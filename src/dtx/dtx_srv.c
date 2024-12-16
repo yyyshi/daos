@@ -333,6 +333,7 @@ out:
 	/* For DTX_COMMIT, it is the count of real committed DTX entries. */
 	// 对于提交请求，这个值为实际已提交的记录个数
 	dout->do_misc = committed;
+	// 回复dtx 的refresh rpc
 	rc = crt_reply_send(rpc);
 	if (rc != 0)
 		D_ERROR("send reply failed for DTX rpc %u: rc = "DF_RC"\n", opc,

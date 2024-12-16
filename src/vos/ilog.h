@@ -52,6 +52,7 @@ enum ilog_status {
 };
 
 /** Near term hack to hook things up with existing DTX */
+// ilog 的一些cb 函数
 struct ilog_desc_cbs {
 	/** Retrieve the status of a log entry (See enum ilog_status). On error
 	 *  return error code < 0.
@@ -186,8 +187,10 @@ struct ilog_info {
  */
 struct ilog_entries {
 	/** Array of log entries */
+	// log 数组
 	struct ilog_id		*ie_ids;
 	/** Parsed information about each ilog entry */
+	// 解析后的ilog entry
 	struct ilog_info	*ie_info;
 	/** Number of entries in the log */
 	int64_t			 ie_num_entries;

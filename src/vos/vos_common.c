@@ -271,6 +271,7 @@ vos_tx_end(struct vos_container *cont, struct dtx_handle *dth_in,
 	dth->dth_local_tx_started = 0;
 
 	if (dtx_is_valid_handle(dth_in) && err == 0)
+		// 设置dtx 为prepared 状态
 		err = vos_dtx_prepared(dth, &dce);
 
 	if (err == 0)

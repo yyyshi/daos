@@ -970,9 +970,11 @@ vos_dtx_extend_act_table(struct vos_container *cont)
 	return 0;
 }
 
+// 创建一个dtx active entry，并添加到active tree 中
 static int
 vos_dtx_alloc(struct vos_dtx_blob_df *dbd, struct dtx_handle *dth)
 {
+	// 创建一个新的 dtx active entry
 	struct vos_dtx_act_ent		*dae = NULL;
 	struct vos_container		*cont;
 	uint32_t			 idx;
@@ -991,6 +993,7 @@ vos_dtx_alloc(struct vos_dtx_blob_df *dbd, struct dtx_handle *dth)
 		return rc;
 	}
 
+	// 填充entry
 	D_INIT_LIST_HEAD(&dae->dae_link);
 	DAE_LID(dae) = idx + DTX_LID_RESERVED;
 	if (dth->dth_solo)
@@ -1047,6 +1050,8 @@ vos_dtx_alloc(struct vos_dtx_blob_df *dbd, struct dtx_handle *dth)
 }
 
 // todo: record 是个什么东西，append 是添加到了哪里
+// 向active entry 中添加record
+// 配合Fig_066.png 食用
 static int
 vos_dtx_append(struct dtx_handle *dth, umem_off_t record, uint32_t type)
 {
@@ -1454,9 +1459,8 @@ vos_dtx_validation(struct dtx_handle *dth)
 }
 
 /* The caller has started local transaction. */
-// todo: 本地事务和分布式事务的区别的实现原理，和关联
-// todo: 本地事务由pmdk 提供？分布式事务由2pc 实现？
 // 此函数目的是将ilog 的root 添加到dth 上
+// 注册过程就是将ilog 的root 添加到active entry 的record 成员中
 int
 vos_dtx_register_record(struct umem_instance *umm, umem_off_t record,
 			uint32_t type, uint32_t *tx_id)
@@ -2239,7 +2243,7 @@ vos_dtx_commit(daos_handle_t coh, struct dtx_id dtis[], int count, bool rm_cos[]
 	// 通过单个本地事务提交多个dtx
 	rc = umem_tx_begin(vos_cont2umm(cont), NULL);
 	if (rc == 0) {
-		// todo: 这函数做了啥
+		// 提交dtx，从active tree 中删除，添加到committed tree 中
 		committed = vos_dtx_commit_internal(cont, dtis, count, 0, rm_cos, daes, dces);
 		if (committed >= 0) {
 			// 开始提交
@@ -3020,6 +3024,7 @@ vos_dtx_cleanup(struct dtx_handle *dth, bool unpin)
 }
 
 // 会将dtx 添加到active 列表对应的tree 中
+// 配合graph 中 Fig_066.png 食用
 int
 vos_dtx_attach(struct dtx_handle *dth, bool persistent, bool exist)
 {
@@ -3084,6 +3089,7 @@ vos_dtx_attach(struct dtx_handle *dth, bool persistent, bool exist)
 
 	if (dth->dth_ent == NULL) {
 		// 会添加dtx 到active 列表对应的tree 中
+		// 配合 Fig_066.png 食用
 		rc = vos_dtx_alloc(dbd, dth);
 	} else if (persistent) {
 		D_ASSERT(dbd != NULL);
@@ -3100,6 +3106,7 @@ vos_dtx_attach(struct dtx_handle *dth, bool persistent, bool exist)
 
 out:
 	if (rc == 0) {
+		// false
 		if (persistent) {
 			dth->dth_active = 1;
 			rc = vos_dtx_prepared(dth, &dce);

@@ -588,6 +588,7 @@ load_blobstore(struct bio_xs_context *ctxt, char *bdev_name, uuid_t *bs_uuid,
 		return NULL;
 	}
 
+	// cluster sz，max chann 等那些option
 	bs_opts = nvme_glb.bd_bs_opts;
 	/*
 	 * A little hack here, we store a UUID in the 16 bytes 'bstype' and
@@ -893,7 +894,7 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 		return -DER_EXIST;
 	}
 
-	// 这里日志打印共 4次
+	// 这里日志打印共 4次（对应 4 个json 文件中的 nvme_attach_controller）
 	D_ALLOC_PTR(d_bdev);
 	if (d_bdev == NULL) {
 		return -DER_NOMEM;
@@ -921,6 +922,7 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 	 * Hold the SPDK bdev by an open descriptor, otherwise, the bdev
 	 * could be deconstructed by SPDK on device hot remove.
 	 */
+	// 打开spdk bdev，返回对应的desc
 	rc = spdk_bdev_open_ext(d_bdev->bb_name, false, bio_bdev_event_cb,
 				d_bdev, &d_bdev->bb_desc);
 	if (rc != 0) {
@@ -931,12 +933,14 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 
 	D_ASSERT(d_bdev->bb_desc != NULL);
 	/* Try to load blobstore without specifying 'bstype' first */
+	// 先以不指定 bstype 的方式加载bs
 	bs = load_blobstore(ctxt, d_bdev->bb_name, NULL, false, false,
 			    NULL, NULL);
 	if (bs == NULL) {
 		D_DEBUG(DB_MGMT, "Creating bs for %s\n", d_bdev->bb_name);
 
 		/* Create blobstore if it wasn't created before */
+		// 如果加载失败，那么创建一个新的，这里指定一个新生成的uuid
 		uuid_generate(bs_uuid);
 		bs = load_blobstore(ctxt, d_bdev->bb_name, &bs_uuid, true,
 				    false, NULL, NULL);
@@ -951,12 +955,14 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 
 	/* Get the 'bstype' (device ID) of blobstore */
 	bstype = spdk_bs_get_bstype(bs);
+	// 统一转化为 uuid
 	memcpy(bs_uuid, bstype.bstype, sizeof(bs_uuid));
-	// 重启是（之前部署好的环境）会打印，Loaded blobstore :0af6a64e。共4行
+	// 重启时（之前部署好的环境）会打印，Loaded blobstore :0af6a64e。共4行
 	D_DEBUG(DB_MGMT, "%s :"DF_UUID"\n",
 		new_bs ? "Created new blobstore" : "Loaded blobstore",
 		DP_UUID(bs_uuid));
 
+	// 卸载掉bs
 	rc = unload_blobstore(ctxt, bs);
 	if (rc != 0) {
 		D_ERROR("Unable to unload blobstore\n");
@@ -964,16 +970,19 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 	}
 
 	/* Verify if the blobstore was created by DAOS */
+	// 确认这个bs 是daos 创建的，不是的话报错
 	if (uuid_is_null(bs_uuid)) {
 		D_ERROR("The bdev has old blobstore not created by DAOS!\n");
 		rc = -DER_INVAL;
 		goto error;
 	}
 
+	// todo: bdev 和bs 的关系
 	uuid_copy(d_bdev->bb_uuid, bs_uuid);
 	/* Verify if any duplicated device ID */
 	old_dev = lookup_dev_by_id(bs_uuid);
 	if (old_dev != NULL) {
+		// 这个设备已经存在了，报错
 		/* If it's in server xstreams start phase, report error */
 		if (!is_server_started()) {
 			D_ERROR("Dup device "DF_UUID" detected!\n",
@@ -982,13 +991,16 @@ create_bio_bdev(struct bio_xs_context *ctxt, const char *bdev_name,
 			goto error;
 		}
 		/* Old device is plugged back */
+		// 旧的设备重新插回
 		D_INFO("Device "DF_UUID" is plugged back\n", DP_UUID(bs_uuid));
 
+		// 重新插回的设备，但是没有toredown，需要销毁掉
 		if (old_dev->bb_desc != NULL) {
 			D_INFO("Device "DF_UUID"(%s) isn't torndown\n",
 			       DP_UUID(old_dev->bb_uuid), old_dev->bb_name);
 			destroy_bio_bdev(d_bdev);
 		} else {
+			// 重新插回的设备，已经被销毁掉，那么替换旧设备
 			D_ASSERT(old_dev->bb_removed);
 			replace_bio_bdev(old_dev, d_bdev);
 			d_list_add(&d_bdev->bb_link, &nvme_glb.bd_bdevs);
@@ -1038,15 +1050,14 @@ init_bio_bdevs(struct bio_xs_context *ctxt)
 		rc = -DER_NONEXIST;
 	}
 
-	// 遍历所有的bdev，创建bio bdev
-	// todo: 看看spdk 构建的部分，里面到底有哪些spdk bdev
+	// 遍历所有的bdev（通过 nvme_attach_controller 触发的注册），创建bio bdev
 	for (bdev = spdk_bdev_first(); bdev != NULL;
 	     bdev = spdk_bdev_next(bdev)) {
 		// 默认 class 为 BDEV_CLASS_NVME
 		if (nvme_glb.bd_bdev_class != get_bdev_type(bdev))
 			continue;
 
-		// todo：目前从日志看此函数会循环4次，但是json 文件中只有一个bdev
+		// 目前从日志看此函数会循环4次（对应4 个nvme_attach_controller method）
 		rc = create_bio_bdev(ctxt, spdk_bdev_get_name(bdev), NULL);
 		if (rc)
 			return rc;
@@ -1305,7 +1316,7 @@ assign_roles(struct bio_bdev *d_bdev, unsigned int tgt_id)
 	bool			assigned = false;
 	int			rc;
 
-	// 遍历设备类型
+	// 遍历设备类型，找到匹配的类型
 	for (st = SMD_DEV_TYPE_DATA; st < SMD_DEV_TYPE_MAX; st++) {
 		if (!is_role_match(d_bdev->bb_roles, dev_type2role(st)))
 			continue;
@@ -1335,8 +1346,6 @@ assign_roles(struct bio_bdev *d_bdev, unsigned int tgt_id)
 		 * sys tgt id.
 		 *
 		 */
-		// todo: vos target 和系统target 的区分和功能？
-		// todo: 系统target 指的是vos-rdb 吗？
 		if (tgt_id != BIO_SYS_TGT_ID)
 			d_bdev->bb_tgt_cnt++;
 
@@ -1380,7 +1389,7 @@ assign_xs_bdev(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_type st,
 			return NULL;
 		}
 
-		// 没有设备
+		// 这个target 上还没有设备，那么分配d_bdev 给tgt_id 所在target
 		rc = assign_roles(d_bdev, tgt_id);
 		if (rc) {
 			D_ERROR("Failed to assign roles. "DF_RC"\n", DP_RC(rc));
@@ -1421,7 +1430,6 @@ assign_xs_bdev(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_type st,
 static int
 init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_type st)
 {
-	// 创建一个新的bio dev
 	struct bio_bdev		*d_bdev;
 	struct bio_blobstore	*bbs;
 	// 创建spdk blobstore
@@ -1459,6 +1467,7 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 	 */
 	// 如果没有bio blobstore 关联到分配的设备，关联一个并且设置当前xs 为该blobstore 的owner
 	if (d_bdev->bb_blobstore == NULL) {
+		// 新建bio bs
 		d_bdev->bb_blobstore = alloc_bio_blobstore(ctxt, d_bdev);
 		if (d_bdev->bb_blobstore == NULL)
 			return -DER_NOMEM;
@@ -1466,11 +1475,13 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 
 	bxb = ctxt->bxc_xs_blobstores[st];
 	/* Hold bbs refcount for current xstream */
-	// 获取bs
+	// 获取bs 引用计数
 	bxb->bxb_blobstore = get_bio_blobstore(d_bdev->bb_blobstore, ctxt);
 	if (bxb->bxb_blobstore == NULL)
 		return -DER_NOMEM;
 
+	// 一层一层的往内部构建
+	// ctx --> bio xs bs --> bio bs --> bs
 	bbs = bxb->bxb_blobstore;
 
 	/*
@@ -1519,6 +1530,7 @@ init_xs_blobstore_ctxt(struct bio_xs_context *ctxt, int tgt_id, enum smd_dev_typ
 		return 0;
 
 	/* Open IO channel for current xstream */
+	// 打开xs chann
 	bs = bbs->bb_bs;
 	D_ASSERT(bs != NULL);
 	D_ASSERT(bxb->bxb_io_channel == NULL);
@@ -1698,7 +1710,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 	ABT_mutex_lock(nvme_glb.bd_mutex);
 	nvme_glb.bd_xstream_cnt++;
 
-	// 这行日志会打印20 次，对应 20个tgt_id。target 0 时 init_thread 为NULL。之后target 0所在线程将会完成init 工作，被设置为 init_thread
+	// 这行日志会打印20 次，对应 20个tgt_id[0-19]。target 0 时 init_thread 为NULL。之后target 0所在线程将会完成init 工作，被设置为 init_thread
 	D_INFO("Initialize NVMe context, tgt_id:%d, init_thread:%p\n",
 	       tgt_id, nvme_glb.bd_init_thread);
 
@@ -1826,6 +1838,7 @@ bio_xsctxt_alloc(struct bio_xs_context **pctxt, int tgt_id, bool self_polling)
 		12/05-13:01:21.39 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:1385 init_xs_blobstore_ctxt() Loaded bs, tgt_id:2, xs:0x7fe160721ad0 dev:Nvme_server01_2_1_0n1
 		12/05-13:01:21.66 server01 DAOS[2885211/-1/0] bio  DBUG src/bio/bio_xstream.c:1385 init_xs_blobstore_ctxt() Loaded bs, tgt_id:3, xs:0x7fe1487215f0 dev:Nvme_server01_3_1_0n1
 		*/
+		// todo: target id 是怎么设置的？
 		rc = init_xs_blobstore_ctxt(ctxt, tgt_id, st);
 		if (rc)
 			goto out;
